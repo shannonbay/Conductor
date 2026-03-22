@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "conductor": {
+      "command": "node",
+      "args": ["C:/Users/layen/GitHub/Conductor/dist/index.js"]
+    }
+  }
+}
