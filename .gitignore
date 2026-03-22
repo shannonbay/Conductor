@@ -4,3 +4,7 @@ dist/
 *.db-wal
 *.db-shm
 .env
+.next/
+*.tsbuildinfo
+.claude/settings.local.json
+next-env.d.ts

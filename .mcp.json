@@ -2,7 +2,7 @@
   "mcpServers": {
     "conductor": {
       "command": "node",
-      "args": ["C:/Users/layen/GitHub/Conductor/dist/index.js"]
+      "args": ["C:/Users/layen/GitHub/Conductor/mcp/dist/index.js"]
     }
   }
 }

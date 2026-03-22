@@ -1,0 +1,67 @@
+'use client'
+
+import type { Event } from '@/lib/db'
+
+interface Props {
+  events: Event[]
+}
+
+const eventLabels: Record<string, string> = {
+  task_created: 'created task',
+  task_updated: 'updated task',
+  status_changed: 'changed status',
+  task_locked: 'locked task',
+  task_unlocked: 'unlocked task',
+  agent_started: 'started agent',
+  agent_completed: 'agent completed',
+  agent_failed: 'agent failed',
+  agent_paused: 'paused agent',
+  agent_resumed: 'resumed agent',
+  agent_cancelled: 'cancelled agent',
+  project_created: 'created project',
+  project_updated: 'updated project',
+  project_archived: 'archived project',
+  project_restored: 'restored project',
+  task_deleted: 'deleted task',
+}
+
+function formatTime(iso: string): string {
+  const d = new Date(iso)
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+}
+
+function ActorPill({ actor }: { actor: 'human' | 'agent' }) {
+  return (
+    <span className={`text-xs rounded px-1.5 py-0.5 font-medium ${actor === 'agent' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
+      {actor === 'agent' ? '🤖 Agent' : '👤 You'}
+    </span>
+  )
+}
+
+export function ActivityFeed({ events }: Props) {
+  if (events.length === 0) {
+    return <p className="text-xs text-gray-400 text-center py-4">No activity yet</p>
+  }
+
+  return (
+    <div className="space-y-2">
+      {events.map((event) => {
+        const payload = event.payload as Record<string, unknown>
+        const label = eventLabels[event.event_type] ?? event.event_type
+        const detail = event.event_type === 'status_changed'
+          ? `${payload['from']} → ${payload['to']}${payload['reason'] ? `: ${payload['reason']}` : ''}`
+          : event.task_id
+
+        return (
+          <div key={event.id} className="flex items-start gap-2 text-xs">
+            <span className="text-gray-400 flex-shrink-0 tabular-nums">{formatTime(event.created_at)}</span>
+            <ActorPill actor={event.actor} />
+            <span className="text-gray-600">
+              {label} <span className="font-mono text-gray-400">{detail}</span>
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}

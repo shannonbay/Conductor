@@ -218,3 +218,7 @@ export function countAllTasks(projectId: string): number {
   const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE project_id = ?').get(projectId) as { count: number }
   return row.count
 }
+
+export function clearAllData(): void {
+  db.exec('DELETE FROM tasks; DELETE FROM projects;')
+}

@@ -1,26 +1,9 @@
 {
-  "name": "conductor",
+  "name": "conductor-monorepo",
   "version": "1.0.0",
-  "description": "Task Tree MCP Server — persistent hierarchical task management for LLM agents",
-  "type": "module",
-  "main": "dist/index.js",
-  "scripts": {
-    "build": "tsc",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.0",
-    "better-sqlite3": "^9.4.3",
-    "nanoid": "^5.0.7",
-    "zod": "^3.22.4",
-    "zod-to-json-schema": "^3.22.4"
-  },
-  "devDependencies": {
-    "@types/better-sqlite3": "^7.6.8",
-    "@types/node": "^20.11.5",
-    "tsx": "^4.7.0",
-    "typescript": "^5.3.3"
-  }
+  "private": true,
+  "workspaces": [
+    "mcp",
+    "web"
+  ]
 }

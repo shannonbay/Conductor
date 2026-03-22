@@ -1,0 +1,102 @@
+import { describe, it, expect } from 'vitest'
+import { GET, POST } from '@/app/api/projects/route.js'
+import { GET as GETById, PATCH as PATCHById } from '@/app/api/projects/[id]/route.js'
+import { POST as POSTArchive } from '@/app/api/projects/[id]/archive/route.js'
+import { POST as POSTRestore } from '@/app/api/projects/[id]/restore/route.js'
+import { NextRequest } from 'next/server'
+
+function makeRequest(method: string, url: string, body?: unknown): NextRequest {
+  return new NextRequest(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  })
+}
+
+async function jsonResponse(res: Response) {
+  return { status: res.status, body: await res.json() }
+}
+
+describe('GET /api/projects', () => {
+  it('returns empty list when no projects', async () => {
+    const req = makeRequest('GET', 'http://localhost/api/projects')
+    const res = await GET(req)
+    const { status, body } = await jsonResponse(res)
+    expect(status).toBe(200)
+    expect(body).toEqual([])
+  })
+})
+
+describe('POST /api/projects', () => {
+  it('creates a project and returns it with tree_stats', async () => {
+    const req = makeRequest('POST', 'http://localhost/api/projects', { name: 'My Project' })
+    const res = await POST(req)
+    const { status, body } = await jsonResponse(res)
+    expect(status).toBe(201)
+    expect(body.name).toBe('My Project')
+    expect(body.status).toBe('active')
+    expect(body.tree_stats.total_tasks).toBe(0)
+    expect(body.id).toMatch(/^proj_/)
+  })
+
+  it('returns 400 when name is missing', async () => {
+    const req = makeRequest('POST', 'http://localhost/api/projects', {})
+    const res = await POST(req)
+    expect(res.status).toBe(400)
+  })
+})
+
+describe('GET /api/projects/:id', () => {
+  it('returns project with stats', async () => {
+    const createReq = makeRequest('POST', 'http://localhost/api/projects', { name: 'Test' })
+    const createRes = await POST(createReq)
+    const { body: project } = await jsonResponse(createRes)
+
+    const getReq = makeRequest('GET', `http://localhost/api/projects/${project.id}`)
+    const getRes = await GETById(getReq, { params: Promise.resolve({ id: project.id }) })
+    const { status, body } = await jsonResponse(getRes)
+    expect(status).toBe(200)
+    expect(body.id).toBe(project.id)
+    expect(body.tree_stats).toBeDefined()
+  })
+
+  it('returns 404 for unknown project', async () => {
+    const req = makeRequest('GET', 'http://localhost/api/projects/proj_unknown')
+    const res = await GETById(req, { params: Promise.resolve({ id: 'proj_unknown' }) })
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('PATCH /api/projects/:id', () => {
+  it('updates project name', async () => {
+    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Old Name' })))
+    const patchReq = makeRequest('PATCH', `http://localhost/api/projects/${project.id}`, { name: 'New Name' })
+    const res = await PATCHById(patchReq, { params: Promise.resolve({ id: project.id }) })
+    const { status, body } = await jsonResponse(res)
+    expect(status).toBe(200)
+    expect(body.name).toBe('New Name')
+  })
+})
+
+describe('POST /api/projects/:id/archive', () => {
+  it('archives a project', async () => {
+    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Archive Me' })))
+    const archiveReq = makeRequest('POST', `http://localhost/api/projects/${project.id}/archive`)
+    const res = await POSTArchive(archiveReq, { params: Promise.resolve({ id: project.id }) })
+    const { status, body } = await jsonResponse(res)
+    expect(status).toBe(200)
+    expect(body.status).toBe('archived')
+  })
+})
+
+describe('POST /api/projects/:id/restore', () => {
+  it('restores an archived project', async () => {
+    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Restore Me' })))
+    await POSTArchive(makeRequest('POST', `http://localhost/api/projects/${project.id}/archive`), { params: Promise.resolve({ id: project.id }) })
+    const restoreReq = makeRequest('POST', `http://localhost/api/projects/${project.id}/restore`)
+    const res = await POSTRestore(restoreReq, { params: Promise.resolve({ id: project.id }) })
+    const { status, body } = await jsonResponse(res)
+    expect(status).toBe(200)
+    expect(body.status).toBe('active')
+  })
+})
