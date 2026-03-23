@@ -305,6 +305,12 @@ export function deleteTaskTree(projectId: string, taskId: string): void {
   db.prepare("DELETE FROM tasks WHERE project_id = ? AND (id = ? OR id LIKE ?)").run(projectId, taskId, `${taskId}.%`)
 }
 
+export function deleteProject(id: string): void {
+  const db = getDb()
+  db.prepare('DELETE FROM tasks WHERE project_id = ?').run(id)
+  db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+}
+
 /**
  * Acquires write locks on a task and all its descendants for the given session.
  */

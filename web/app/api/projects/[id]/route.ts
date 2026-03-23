@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { getProject, updateProject, getTreeStats, touchProject } from '@/lib/db'
+import { getProject, updateProject, getTreeStats, touchProject, deleteProject } from '@/lib/db'
 import { recordEvent } from '@/lib/event-log'
 import { ok, err, notFound, serverError } from '@/lib/api-utils'
 
@@ -15,6 +15,18 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     const project = getProject(id)
     if (!project) return notFound('Project')
     return ok({ ...project, tree_stats: getTreeStats(id) })
+  } catch (e) {
+    return serverError(e)
+  }
+}
+
+export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params
+    const project = getProject(id)
+    if (!project) return notFound('Project')
+    deleteProject(id)
+    return ok({ ok: true })
   } catch (e) {
     return serverError(e)
   }

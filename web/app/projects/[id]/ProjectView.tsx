@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useStore } from '@/lib/store'
 import { useProjectWebSocket } from '@/lib/use-project-ws'
 import { TreePanel } from '@/components/TreePanel'
@@ -18,7 +19,28 @@ interface Props {
 }
 
 export function ProjectView({ project, tree, stats, events, agentSession }: Props) {
+  const router = useRouter()
+  const [acting, setActing] = useState(false)
   const { setProject, setTree, setAgentSession, agentSession: liveSession } = useStore()
+
+  async function handleArchive() {
+    setActing(true)
+    await fetch(`/api/projects/${project.id}/archive`, { method: 'POST' })
+    router.push('/')
+  }
+
+  async function handleUnarchive() {
+    setActing(true)
+    await fetch(`/api/projects/${project.id}/restore`, { method: 'POST' })
+    router.push('/')
+  }
+
+  async function handleDelete() {
+    if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return
+    setActing(true)
+    await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
+    router.push('/')
+  }
 
   // Initialise store from server-rendered data
   useEffect(() => {
@@ -45,6 +67,12 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
         <Link href="/" className="text-sm text-gray-500 hover:text-gray-900">← Projects</Link>
         <h1 className="font-semibold text-gray-900 flex-1 min-w-0 truncate">{project.name}</h1>
         <span className="text-xs text-gray-400">{stats.completed}/{stats.total_tasks} tasks complete</span>
+        {project.status === 'active' ? (
+          <button onClick={handleArchive} disabled={acting} className="text-xs px-2 py-1 rounded border text-gray-600 hover:bg-gray-50 disabled:opacity-50">Archive</button>
+        ) : (
+          <button onClick={handleUnarchive} disabled={acting} className="text-xs px-2 py-1 rounded border text-gray-600 hover:bg-gray-50 disabled:opacity-50">Unarchive</button>
+        )}
+        <button onClick={handleDelete} disabled={acting} className="text-xs px-2 py-1 rounded border text-red-600 hover:bg-red-50 disabled:opacity-50">Delete</button>
         {currentSession && (
           <span className={`text-xs px-2 py-0.5 rounded ${currentSession.status === 'running' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
             🤖 Agent {currentSession.status}

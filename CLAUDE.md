@@ -51,6 +51,8 @@ npm run test:watch  # Watch mode
 
 Tests live in `mcp/src/tests/`. `vitest.config.ts` sets `CONDUCTOR_DB=:memory:`. Each test gets a clean slate via `beforeEach` in `src/tests/setup.ts`. Call tool handlers directly as async functions — no MCP transport needed.
 
+To run a single test file: `npm test -- src/tests/tools/create_project.test.ts`
+
 ### Web App (`cd web`)
 
 ```bash
@@ -62,6 +64,8 @@ node server.ts      # Start custom HTTP + WebSocket server
 ```
 
 Tests live in `web/__tests__/`. `vitest.config.ts` sets `CONDUCTOR_DB=:memory:`. Each test gets a clean slate via `beforeEach` in `__tests__/setup.ts` which calls `clearAllData()` and `resetDb()`.
+
+To run a single test file: `npm test -- __tests__/api/projects.test.ts`
 
 ### Root
 
@@ -82,7 +86,7 @@ npm install         # Install all workspace dependencies
 
 **Database layer** (`web/lib/db.ts`): Superset of `mcp/src/db.ts`. Adds `getFullTree()`, `lockSubtree()`, `unlockSubtree()`, `deleteTaskTree()`, session CRUD, and event log. Runs migrations on startup via `web/lib/migrate.ts`.
 
-**Migrations** (`web/lib/migrate.ts`): Creates base `projects`/`tasks` tables (idempotent), adds UI-layer columns (`locked_by`, `requires_approval`, `created_by`, `assigned_to`, `notes`), creates `agent_sessions` and `events` tables.
+**Migrations** (`web/lib/migrate.ts`): Creates base `projects`/`tasks` tables (idempotent), adds UI-layer columns (`locked_by`, `requires_approval`, `created_by`, `assigned_to`, `notes`), creates `agent_sessions` and `events` tables. Adding a column uses try/catch around `ALTER TABLE` (SQLite lacks `IF NOT EXISTS` for ALTER). New columns added to the base CREATE TABLE must also get an ALTER TABLE block for existing databases, plus an UPDATE to backfill any NOT NULL semantics.
 
 **Real-time updates**: `web/lib/ws-broadcaster.ts` pushes events to connected browsers. Custom server (`web/server.ts`) routes WebSocket upgrades for `/api/projects/:id/ws`.
 
@@ -103,6 +107,10 @@ npm install         # Install all workspace dependencies
 **Every mutating MCP tool returns a context view** (result of `buildContext`). Clients never need a follow-up read after a write.
 
 **`set_status` to `active` is blocked** if `depends_on` lists any sibling not yet `completed`.
+
+**`working_dir` is required on every project** and is never null. MCP's `create_project` defaults it to `process.cwd()` (the directory Claude Code was launched from). Web UI requires the user to select one. Agents receive it in their system prompt so they know where to operate on the filesystem.
+
+**Two DB layers exist and must stay in sync**: `mcp/src/db.ts` is a minimal standalone layer (no migrations, no UI columns). `web/lib/db.ts` is a superset — it calls `runMigrations()` on startup and adds UI-only columns. When adding a field to `ProjectRow` or `TaskRow`, update both files. The MCP `ProjectRow` type only needs fields the MCP tools use; the web layer can have more.
 
 ## Working in This Repo
 
