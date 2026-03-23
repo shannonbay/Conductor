@@ -34,6 +34,8 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
   const [newTaskParentId, setNewTaskParentId] = useState('')
   const [newTaskLoading, setNewTaskLoading] = useState(false)
   const [newTaskError, setNewTaskError] = useState<string | null>(null)
+  const [promptText, setPromptText] = useState('')
+  const [promptSending, setPromptSending] = useState(false)
   const { setProject, setTree, setAgentSession, agentSession: liveSession, selectedTaskId } = useStore()
 
   async function handleGenerate() {
@@ -87,15 +89,33 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
     }
   }
 
+  async function handleSendPrompt(e: React.FormEvent) {
+    e.preventDefault()
+    if (!promptText.trim() || !currentSession) return
+    setPromptSending(true)
+    try {
+      await fetch(`/api/projects/${project.id}/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: promptText.trim() }),
+      })
+      setPromptText('')
+    } finally {
+      setPromptSending(false)
+    }
+  }
+
   async function handleArchive() {
     setActing(true)
     await fetch(`/api/projects/${project.id}/archive`, { method: 'POST' })
+    router.refresh()
     router.push('/')
   }
 
   async function handleUnarchive() {
     setActing(true)
     await fetch(`/api/projects/${project.id}/restore`, { method: 'POST' })
+    router.refresh()
     router.push('/')
   }
 
@@ -103,6 +123,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
     if (!confirm(`Delete project "${project.name}"? This cannot be undone.`)) return
     setActing(true)
     await fetch(`/api/projects/${project.id}`, { method: 'DELETE' })
+    router.refresh()
     router.push('/')
   }
 
@@ -174,6 +195,26 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
         {/* Detail + Activity */}
         <div className="flex-1 flex flex-col min-w-0">
           <DetailPane projectId={project.id} />
+
+          {/* Prompt bar */}
+          <div className="border-t flex-shrink-0 px-3 py-2">
+            <form onSubmit={handleSendPrompt} className="flex gap-2">
+              <input
+                value={promptText}
+                onChange={e => setPromptText(e.target.value)}
+                disabled={!currentSession || promptSending}
+                placeholder={currentSession ? 'Send instruction to agent…' : 'Start an agent on a task to send instructions'}
+                className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
+              />
+              <button
+                type="submit"
+                disabled={!promptText.trim() || !currentSession || promptSending}
+                className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {promptSending ? '…' : '↑'}
+              </button>
+            </form>
+          </div>
 
           {/* Activity feed */}
           <div className="border-t flex-shrink-0 max-h-48 overflow-y-auto">

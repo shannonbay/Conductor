@@ -16,6 +16,21 @@ import { broadcast } from './ws-broadcaster'
 // ─── In-memory abort controllers (pause/cancel) ───────────────────────────────
 const abortControllers = new Map<string, AbortController>()
 
+// ─── Pending human messages (prompt bar injection) ─────────────────────────────
+const pendingMessages = new Map<string, string[]>()
+
+export function enqueueUserMessage(projectId: string, message: string): void {
+  const queue = pendingMessages.get(projectId) ?? []
+  queue.push(message)
+  pendingMessages.set(projectId, queue)
+}
+
+function drainUserMessages(projectId: string): string[] {
+  const msgs = pendingMessages.get(projectId) ?? []
+  pendingMessages.delete(projectId)
+  return msgs
+}
+
 // ─── Prompt construction ──────────────────────────────────────────────────────
 
 function buildSystemPrompt(projectName: string, rootTaskId: string, workingDir: string | null): string {
@@ -459,6 +474,13 @@ async function runAgentLoop(
     while (true) {
       if (controller.signal.aborted) break
 
+      // Inject any queued human messages before the next API call
+      for (const msg of drainUserMessages(projectId)) {
+        messages.push({ role: 'user', content: msg })
+        recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'human_prompt', actor: 'human', sessionId, payload: { message: msg } })
+        broadcast(projectId, { type: 'human_prompt', sessionId, message: msg })
+      }
+
       const response = await createMessageWithRetry(client, {
         model: 'claude-sonnet-4-6',
         max_tokens: 4096,
@@ -526,6 +548,7 @@ async function runAgentLoop(
   } finally {
     unlockSubtree(sessionId, projectId)
     abortControllers.delete(projectId)
+    pendingMessages.delete(projectId)
   }
 }
 

@@ -18,6 +18,7 @@ const eventLabels: Record<string, string> = {
   agent_paused: 'paused agent',
   agent_resumed: 'resumed agent',
   agent_cancelled: 'cancelled agent',
+  human_prompt: 'sent instruction',
   project_created: 'created project',
   project_updated: 'updated project',
   project_archived: 'archived project',
@@ -60,6 +61,8 @@ export function ActivityFeed({ events }: Props) {
               {label}{' '}
               {event.event_type === 'agent_failed' && payload['error']
                 ? <span className="text-red-500 break-words">{String(payload['error'])}</span>
+                : event.event_type === 'human_prompt' && payload['message']
+                ? <span className="text-gray-500 italic break-words">{String(payload['message'])}</span>
                 : <span className="font-mono text-gray-400">{detail}</span>
               }
             </span>
