@@ -6,6 +6,7 @@ import os from 'os'
 interface ConductorConfig {
   anthropic_api_key?: string
   anthropic_auth_token?: string
+  brave_search_api_key?: string
 }
 
 const CONFIG_DIR = path.join(os.homedir(), '.conductor')
@@ -25,6 +26,10 @@ export function saveConfig(patch: Partial<ConductorConfig>): void {
   const updated = { ...current, ...patch }
   mkdirSync(CONFIG_DIR, { recursive: true })
   writeFileSync(CONFIG_PATH, JSON.stringify(updated, null, 2), 'utf8')
+}
+
+export function getBraveSearchApiKey(): string | undefined {
+  return process.env.BRAVE_SEARCH_API_KEY || getConfig().brave_search_api_key
 }
 
 export function getAnthropicClient(): Anthropic {

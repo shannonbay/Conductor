@@ -1,5 +1,9 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import { getAnthropicClient } from './conductor-config'
+import { getAnthropicClient, getBraveSearchApiKey } from './conductor-config'
+import {
+  toolListDir, toolReadFile, toolWriteFile, toolEditFile,
+  toolGlobFiles, toolSearchFiles, toolRunCommand, toolWebSearch,
+} from './agent-tools'
 import { nanoid } from 'nanoid'
 import {
   getProject, getTask, getTreeStats, getChildren, getSiblings,
@@ -16,20 +20,28 @@ const abortControllers = new Map<string, AbortController>()
 
 function buildSystemPrompt(projectName: string, rootTaskId: string, workingDir: string | null): string {
   return `You are an AI agent working within a task tree project management system.
-You have access to tools for managing your work: create_task, update_task, navigate, set_status, synthesize, get_context.
+You have access to tools for managing your work and for reading/writing files and running commands.
 
 Your current assignment is task ${rootTaskId} in project "${projectName}".${workingDir ? `\nYour working directory is: ${workingDir}` : ''}
 Your autonomy level is: full (proceed without pausing).
 
-Rules:
+Task management rules:
 - Work only within your assigned subtree (task ${rootTaskId} and its descendants).
 - Do not navigate above task ${rootTaskId}.
-- Update your progress via update_task after meaningful work.
-- When decomposing a task into subtasks, create them as children.
+- When decomposing a task into subtasks, use create_task then navigate into each child.
 - If a subtask fails, abandon it with a clear reason and create an alternative sibling.
 - Use the state field to store structured data for downstream tasks.
 - Use the result field for human-readable summaries.
-- Proceed without pausing. The human will intervene if needed.`
+- After completing each plan step, call update_task with advance_step: true to track your progress.
+- Always call update_task with a result summary BEFORE calling set_status completed.
+- Proceed without pausing. The human will intervene if needed.
+
+Filesystem and execution rules:
+- Use list_dir and read_file to understand the codebase before making changes.
+- Use search_files to locate relevant code; use glob_files to find files by name pattern.
+- Prefer edit_file for targeted changes to existing files; use write_file only for new files or complete rewrites.
+- After making changes, use run_command to verify (run tests, lint, build) where appropriate.
+- All file paths are relative to your working directory unless absolute.`
 }
 
 function buildInitialMessage(task: ReturnType<typeof getTask> & {}): string {
@@ -110,6 +122,97 @@ function getToolDefinitions(projectId: string, rootTaskId: string): Anthropic.To
         properties: { target_id: { type: 'string' } },
       },
     },
+    // ── Filesystem tools ──────────────────────────────────────────────────────
+    {
+      name: 'list_dir',
+      description: 'List files and directories at a path (relative to working directory).',
+      input_schema: {
+        type: 'object' as const,
+        properties: { path: { type: 'string', description: 'Directory path. Defaults to working directory.' } },
+      },
+    },
+    {
+      name: 'read_file',
+      description: 'Read the contents of a file (up to 50KB). Use for source files, configs, docs.',
+      input_schema: {
+        type: 'object' as const,
+        required: ['path'],
+        properties: { path: { type: 'string' } },
+      },
+    },
+    {
+      name: 'write_file',
+      description: 'Write or create a file with the given content. Creates parent directories automatically. Use for new files or complete rewrites only.',
+      input_schema: {
+        type: 'object' as const,
+        required: ['path', 'content'],
+        properties: {
+          path: { type: 'string' },
+          content: { type: 'string' },
+        },
+      },
+    },
+    {
+      name: 'edit_file',
+      description: 'Replace an exact string in a file with a new string. The old_string must be unique in the file. Preferred over write_file for targeted edits.',
+      input_schema: {
+        type: 'object' as const,
+        required: ['path', 'old_string', 'new_string'],
+        properties: {
+          path: { type: 'string' },
+          old_string: { type: 'string', description: 'Exact text to find and replace (must be unique in the file, include surrounding context if needed)' },
+          new_string: { type: 'string', description: 'Text to replace it with' },
+        },
+      },
+    },
+    {
+      name: 'glob_files',
+      description: 'Find files by name/path pattern (e.g. "**/*.ts", "src/*.tsx"). Returns matching file paths.',
+      input_schema: {
+        type: 'object' as const,
+        required: ['pattern'],
+        properties: {
+          pattern: { type: 'string', description: 'Glob pattern, e.g. "**/*.ts" or "*.json"' },
+          path: { type: 'string', description: 'Directory to search in. Defaults to working directory.' },
+        },
+      },
+    },
+    {
+      name: 'search_files',
+      description: 'Search file contents using a regex pattern (like grep). Returns matching lines with file and line number.',
+      input_schema: {
+        type: 'object' as const,
+        required: ['pattern'],
+        properties: {
+          pattern: { type: 'string', description: 'Regex pattern to search for' },
+          path: { type: 'string', description: 'Directory to search in. Defaults to working directory.' },
+          glob: { type: 'string', description: 'Optional file glob filter, e.g. "*.ts"' },
+        },
+      },
+    },
+    // ── Shell tool ────────────────────────────────────────────────────────────
+    {
+      name: 'run_command',
+      description: 'Run a shell command in the working directory. Use to run tests, builds, linters, git commands, etc. Returns stdout, stderr, and exit code.',
+      input_schema: {
+        type: 'object' as const,
+        required: ['command'],
+        properties: {
+          command: { type: 'string', description: 'Shell command to execute' },
+          timeout: { type: 'number', description: 'Timeout in milliseconds (default 30000, max 120000)' },
+        },
+      },
+    },
+    // ── Web search ────────────────────────────────────────────────────────────
+    {
+      name: 'web_search',
+      description: 'Search the web for information. Requires BRAVE_SEARCH_API_KEY to be configured in Settings.',
+      input_schema: {
+        type: 'object' as const,
+        required: ['query'],
+        properties: { query: { type: 'string' } },
+      },
+    },
   ]
 }
 
@@ -122,11 +225,12 @@ interface AgentState {
   sessionId: string
 }
 
-function dispatchTool(
+async function dispatchTool(
   toolName: string,
   toolInput: Record<string, unknown>,
   state: AgentState,
-): string {
+  workingDir: string,
+): Promise<string> {
   const { projectId, sessionId } = state
 
   switch (toolName) {
@@ -222,6 +326,42 @@ function dispatchTool(
         abandoned: children.filter((c) => c.status === 'abandoned'),
         pending: children.filter((c) => c.status !== 'completed' && c.status !== 'abandoned'),
       })
+    }
+
+    // ── Filesystem tools ────────────────────────────────────────────────────
+    case 'list_dir': {
+      const { path: p = '.' } = toolInput as { path?: string }
+      return toolListDir(workingDir, p)
+    }
+    case 'read_file': {
+      const { path: p } = toolInput as { path: string }
+      return toolReadFile(workingDir, p)
+    }
+    case 'write_file': {
+      const { path: p, content } = toolInput as { path: string; content: string }
+      return toolWriteFile(workingDir, p, content)
+    }
+    case 'edit_file': {
+      const { path: p, old_string, new_string } = toolInput as { path: string; old_string: string; new_string: string }
+      return toolEditFile(workingDir, p, old_string, new_string)
+    }
+    case 'glob_files': {
+      const { pattern, path: p } = toolInput as { pattern: string; path?: string }
+      return toolGlobFiles(workingDir, pattern, p)
+    }
+    case 'search_files': {
+      const { pattern, path: p, glob } = toolInput as { pattern: string; path?: string; glob?: string }
+      return toolSearchFiles(workingDir, pattern, p, glob)
+    }
+    // ── Shell tool ──────────────────────────────────────────────────────────
+    case 'run_command': {
+      const { command, timeout } = toolInput as { command: string; timeout?: number }
+      return toolRunCommand(workingDir, command, timeout)
+    }
+    // ── Web search ──────────────────────────────────────────────────────────
+    case 'web_search': {
+      const { query } = toolInput as { query: string }
+      return toolWebSearch(query, getBraveSearchApiKey() ?? '')
     }
 
     default:
@@ -322,7 +462,7 @@ async function runAgentLoop(
           if (block.type !== 'tool_use') continue
           if (controller.signal.aborted) break
 
-          const result = dispatchTool(block.name, block.input as Record<string, unknown>, state)
+          const result = await dispatchTool(block.name, block.input as Record<string, unknown>, state, workingDir ?? process.cwd())
           broadcast(projectId, {
             type: 'tool_call',
             sessionId,

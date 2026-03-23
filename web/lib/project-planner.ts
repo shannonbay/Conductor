@@ -1,10 +1,10 @@
 import type Anthropic from '@anthropic-ai/sdk'
-import { readdir, readFile, stat } from 'fs/promises'
 import path from 'path'
 import { z } from 'zod'
 import type { ProjectRow, Task } from './db'
 import type { ProposedTask } from './planning'
 import { getAnthropicClient } from './conductor-config'
+import { safeResolvePath, toolListDir, toolReadFile } from './agent-tools'
 
 export interface ProjectPlanProposal {
   root: { goal: string; plan: string[] }
@@ -26,42 +26,6 @@ const SubmitPlanSchema = z.object({
 })
 
 const MAX_TOOL_CALLS = 50
-const MAX_FILE_BYTES = 20 * 1024 // 20KB
-
-function safeResolvePath(workingDir: string, inputPath: string): string | null {
-  const resolved = path.resolve(workingDir, inputPath)
-  if (!resolved.startsWith(path.resolve(workingDir))) return null
-  return resolved
-}
-
-async function listDir(workingDir: string, inputPath: string): Promise<string> {
-  const resolved = safeResolvePath(workingDir, inputPath)
-  if (!resolved) return JSON.stringify({ error: 'Path is outside the project directory' })
-  try {
-    const entries = await readdir(resolved, { withFileTypes: true })
-    const result = entries
-      .filter(e => !e.name.startsWith('.'))
-      .map(e => ({ name: e.name, type: e.isDirectory() ? 'dir' : 'file' }))
-    return JSON.stringify({ path: resolved, entries: result })
-  } catch (e) {
-    return JSON.stringify({ error: String(e) })
-  }
-}
-
-async function readFileContents(workingDir: string, inputPath: string): Promise<string> {
-  const resolved = safeResolvePath(workingDir, inputPath)
-  if (!resolved) return JSON.stringify({ error: 'Path is outside the project directory' })
-  try {
-    const info = await stat(resolved)
-    if (info.isDirectory()) return JSON.stringify({ error: 'Path is a directory, not a file' })
-    const buf = await readFile(resolved)
-    const truncated = buf.length > MAX_FILE_BYTES
-    const content = buf.slice(0, MAX_FILE_BYTES).toString('utf8')
-    return JSON.stringify({ path: resolved, content, truncated })
-  } catch (e) {
-    return JSON.stringify({ error: String(e) })
-  }
-}
 
 function buildSystemPrompt(project: ProjectRow, existingTasks: Task[]): string {
   const tasksSummary = existingTasks.length > 0
@@ -183,10 +147,10 @@ export async function generateProjectPlan(
       let result: string
       if (block.name === 'list_dir') {
         const input = block.input as { path: string }
-        result = await listDir(project.working_dir, input.path)
+        result = await toolListDir(project.working_dir, input.path)
       } else if (block.name === 'read_file') {
         const input = block.input as { path: string }
-        result = await readFileContents(project.working_dir, input.path)
+        result = await toolReadFile(project.working_dir, input.path)
       } else if (block.name === 'submit_plan') {
         const parsed = SubmitPlanSchema.safeParse(block.input)
         if (!parsed.success) {

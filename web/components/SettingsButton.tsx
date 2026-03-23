@@ -7,6 +7,8 @@ interface SettingsState {
   anthropic_api_key_prefix: string | null
   anthropic_auth_token_set: boolean
   anthropic_auth_token_prefix: string | null
+  brave_search_api_key_set: boolean
+  brave_search_api_key_prefix: string | null
 }
 
 export function SettingsButton() {
@@ -14,6 +16,7 @@ export function SettingsButton() {
   const [settings, setSettings] = useState<SettingsState | null>(null)
   const [apiKey, setApiKey] = useState('')
   const [authToken, setAuthToken] = useState('')
+  const [braveKey, setBraveKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -30,6 +33,7 @@ export function SettingsButton() {
       loadSettings()
       setApiKey('')
       setAuthToken('')
+      setBraveKey('')
       setSaved(false)
       setError(null)
     }
@@ -37,13 +41,14 @@ export function SettingsButton() {
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault()
-    if (!apiKey.trim() && !authToken.trim()) return
+    if (!apiKey.trim() && !authToken.trim() && !braveKey.trim()) return
     setSaving(true)
     setError(null)
     try {
       const body: Record<string, string> = {}
       if (apiKey.trim()) body.anthropic_api_key = apiKey.trim()
       if (authToken.trim()) body.anthropic_auth_token = authToken.trim()
+      if (braveKey.trim()) body.brave_search_api_key = braveKey.trim()
       const res = await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -54,6 +59,7 @@ export function SettingsButton() {
       setSaved(true)
       setApiKey('')
       setAuthToken('')
+      setBraveKey('')
       await loadSettings()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Error')
@@ -121,6 +127,26 @@ export function SettingsButton() {
                 <p className="text-xs text-gray-400 mt-1">Auth token takes priority over API key. Saved to ~/.conductor/config.json</p>
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Brave Search API Key <span className="text-gray-400 font-normal">(for web_search tool)</span>
+                </label>
+                {settings && (
+                  <p className="text-xs text-gray-500 mb-2">
+                    {settings.brave_search_api_key_set
+                      ? <>Set: <span className="font-mono">{settings.brave_search_api_key_prefix}</span></>
+                      : 'Not configured — agents cannot use web_search without this'}
+                  </p>
+                )}
+                <input
+                  type="password"
+                  value={braveKey}
+                  onChange={e => setBraveKey(e.target.value)}
+                  placeholder="BSA…"
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-gray-900"
+                />
+              </div>
+
               {error && <p className="text-sm text-red-600">{error}</p>}
               {saved && <p className="text-sm text-green-600">Saved.</p>}
 
@@ -134,7 +160,7 @@ export function SettingsButton() {
                 </button>
                 <button
                   type="submit"
-                  disabled={(!apiKey.trim() && !authToken.trim()) || saving}
+                  disabled={(!apiKey.trim() && !authToken.trim() && !braveKey.trim()) || saving}
                   className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {saving ? 'Saving…' : 'Save'}
