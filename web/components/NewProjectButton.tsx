@@ -7,6 +7,12 @@ interface Props {
   size?: 'default' | 'lg'
 }
 
+interface BrowseResult {
+  path: string
+  parent: string | null
+  dirs: { name: string; path: string }[]
+}
+
 export function NewProjectButton({ size = 'default' }: Props) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
@@ -14,7 +20,24 @@ export function NewProjectButton({ size = 'default' }: Props) {
   const [workingDir, setWorkingDir] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [browseOpen, setBrowseOpen] = useState(false)
+  const [browseData, setBrowseData] = useState<BrowseResult | null>(null)
+  const [browseError, setBrowseError] = useState<string | null>(null)
   const router = useRouter()
+
+  async function openBrowser(path?: string) {
+    setBrowseError(null)
+    try {
+      const url = path ? `/api/fs/browse?path=${encodeURIComponent(path)}` : '/api/fs/browse'
+      const res = await fetch(url)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Cannot read directory')
+      setBrowseData(data)
+      setBrowseOpen(true)
+    } catch (e) {
+      setBrowseError(e instanceof Error ? e.message : 'Error')
+    }
+  }
 
   async function handleCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -84,25 +107,14 @@ export function NewProjectButton({ size = 'default' }: Props) {
                   />
                   <button
                     type="button"
-                    onClick={() => {
-                      const input = document.createElement('input')
-                      input.type = 'file'
-                      input.setAttribute('webkitdirectory', '')
-                      input.onchange = () => {
-                        const file = input.files?.[0]
-                        if (file?.webkitRelativePath) {
-                          const topDir = file.webkitRelativePath.split('/')[0]
-                          setWorkingDir(topDir)
-                        }
-                      }
-                      input.click()
-                    }}
+                    onClick={() => openBrowser(workingDir || undefined)}
                     className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
                   >
                     Browse
                   </button>
                 </div>
               </div>
+              {browseError && <p className="text-sm text-red-600">{browseError}</p>}
               {error && <p className="text-sm text-red-600">{error}</p>}
               <div className="flex justify-end gap-3 pt-2">
                 <button
@@ -121,6 +133,56 @@ export function NewProjectButton({ size = 'default' }: Props) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {browseOpen && browseData && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm mx-4 p-5">
+            <h3 className="text-sm font-semibold mb-3">Select Working Directory</h3>
+            <div className="text-xs text-gray-500 font-mono bg-gray-50 rounded px-2 py-1.5 mb-3 break-all">
+              {browseData.path}
+            </div>
+            <div className="max-h-64 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+              {browseData.parent && (
+                <button
+                  type="button"
+                  onClick={() => openBrowser(browseData.parent!)}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-500 flex items-center gap-2"
+                >
+                  <span>↑</span> ..
+                </button>
+              )}
+              {browseData.dirs.length === 0 && (
+                <p className="px-3 py-2 text-sm text-gray-400 italic">No subdirectories</p>
+              )}
+              {browseData.dirs.map(d => (
+                <button
+                  key={d.path}
+                  type="button"
+                  onClick={() => openBrowser(d.path)}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 flex items-center gap-2"
+                >
+                  <span className="text-gray-400">📁</span> {d.name}
+                </button>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setBrowseOpen(false)}
+                className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => { setWorkingDir(browseData.path); setBrowseOpen(false) }}
+                className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700"
+              >
+                Select this folder
+              </button>
+            </div>
           </div>
         </div>
       )}
