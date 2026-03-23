@@ -22,7 +22,7 @@ beforeEach(() => {
 
 function insertTestProject(id: string) {
   const now = new Date().toISOString()
-  insertProject({ id, name: 'Test', description: null, status: 'active', focus_task_id: null, created_at: now, updated_at: now })
+  insertProject({ id, name: 'Test', description: null, status: 'active', working_dir: '/tmp', focus_task_id: null, created_at: now, updated_at: now })
   return id
 }
 
@@ -54,7 +54,7 @@ describe('startAgent', () => {
     insertTestTask(projectId, '1')
 
     const now = new Date().toISOString()
-    createSession({ id: 'existing', project_id: projectId, root_task_id: '1', status: 'running', autonomy_level: 'full', model: 'test', started_at: now })
+    createSession({ id: 'existing', project_id: projectId, root_task_id: '1', nickname: 'TestAgent', status: 'running', autonomy_level: 'full', model: 'test', started_at: now })
 
     const { startAgent } = await import('@/lib/agent-runner.js')
     await expect(startAgent(projectId, '1')).rejects.toThrow('already active')
@@ -96,7 +96,7 @@ describe('cancelAgent', () => {
     insertTestTask(projectId, '1')
 
     const now = new Date().toISOString()
-    createSession({ id: 'sess_to_cancel', project_id: projectId, root_task_id: '1', status: 'running', autonomy_level: 'full', model: 'test', started_at: now })
+    createSession({ id: 'sess_to_cancel', project_id: projectId, root_task_id: '1', nickname: 'TestAgent', status: 'running', autonomy_level: 'full', model: 'test', started_at: now })
 
     // Lock the task manually
     getDb().prepare('UPDATE tasks SET locked_by = ?, locked_at = ? WHERE id = ? AND project_id = ?')
@@ -119,7 +119,7 @@ describe('pauseAgent / resumeAgent', () => {
     insertTestTask(projectId, '1')
 
     const now = new Date().toISOString()
-    createSession({ id: 'sess_pause', project_id: projectId, root_task_id: '1', status: 'running', autonomy_level: 'full', model: 'test', started_at: now })
+    createSession({ id: 'sess_pause', project_id: projectId, root_task_id: '1', nickname: 'TestAgent', status: 'running', autonomy_level: 'full', model: 'test', started_at: now })
 
     const { pauseAgent } = await import('@/lib/agent-runner.js')
     pauseAgent(projectId)
@@ -132,7 +132,7 @@ describe('pauseAgent / resumeAgent', () => {
     insertTestTask(projectId, '1')
 
     const now = new Date().toISOString()
-    createSession({ id: 'sess_resume', project_id: projectId, root_task_id: '1', status: 'paused', autonomy_level: 'full', model: 'test', started_at: now })
+    createSession({ id: 'sess_resume', project_id: projectId, root_task_id: '1', nickname: 'TestAgent', status: 'paused', autonomy_level: 'full', model: 'test', started_at: now })
 
     const { resumeAgent } = await import('@/lib/agent-runner.js')
     resumeAgent(projectId)

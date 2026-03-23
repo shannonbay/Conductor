@@ -34,7 +34,7 @@ describe('set_status', () => {
     await navigate({ target_id: '1' })
     await create_task({ goal: 'child 2', plan: ['s1'], status: 'pending', depends_on: ['1.1'] })
     // Try to activate 1.2 while 1.1 is still active
-    await expect(set_status({ target_id: '1.2', status: 'active' })).rejects.toThrow('unmet dependencies')
+    await expect(set_status({ task_id: '1.2', status: 'active' })).rejects.toThrow('unmet dependencies')
   })
 
   it('succeeds activating a task when all dependencies are completed', async () => {
@@ -44,7 +44,7 @@ describe('set_status', () => {
     await set_status({ status: 'completed' })
     await navigate({ target_id: '1' })
     await create_task({ goal: 'child 2', plan: ['s1'], status: 'pending', depends_on: ['1.1'] })
-    const result = await set_status({ target_id: '1.2', status: 'active' })
+    const result = await set_status({ task_id: '1.2', status: 'active' })
     expect(result.focus).toBeDefined()
     const task = getTask(getOpenProject()!, '1.2')!
     expect(task.status).toBe('active')
@@ -72,26 +72,26 @@ describe('set_status', () => {
     expect(result).not.toHaveProperty('warning')
   })
 
-  it('uses focus task when target_id is omitted', async () => {
+  it('uses focus task when task_id is omitted', async () => {
     await create_project({ name: 'Test' })
     await create_task({ goal: 'root', plan: ['s1'] })
     await set_status({ status: 'completed' })
     expect(getTask(getOpenProject()!, '1')!.status).toBe('completed')
   })
 
-  it('uses explicit target_id when provided', async () => {
+  it('uses explicit task_id when provided', async () => {
     await create_project({ name: 'Test' })
     await create_task({ goal: 'root', plan: ['s1'] })
     await create_task({ goal: 'child', plan: ['s1'] })
     // focus is on 1.1; set status on 1 explicitly
-    await set_status({ target_id: '1', status: 'completed' })
+    await set_status({ task_id: '1', status: 'completed' })
     expect(getTask(getOpenProject()!, '1')!.status).toBe('completed')
     expect(getTask(getOpenProject()!, '1.1')!.status).toBe('active')
   })
 
-  it('throws for unknown target_id', async () => {
+  it('throws for unknown task_id', async () => {
     await create_project({ name: 'Test' })
     await create_task({ goal: 'root', plan: ['s1'] })
-    await expect(set_status({ target_id: '99', status: 'completed' })).rejects.toThrow('not found')
+    await expect(set_status({ task_id: '99', status: 'completed' })).rejects.toThrow('not found')
   })
 })

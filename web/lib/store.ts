@@ -19,6 +19,7 @@ interface Store {
 
   // Agent
   agentSession: AgentSession | null
+  sessionNicknames: Record<string, string>
 
   // Activity feed
   events: Event[]
@@ -36,6 +37,7 @@ interface Store {
   toggleExpanded(id: string): void
   expandAll(): void
   setAgentSession(session: AgentSession | null): void
+  setSessionNickname(sessionId: string, nickname: string): void
   setEvents(events: Event[]): void
   appendEvent(event: Event): void
   setPlanDraft(draft: ProposedTask[] | null): void
@@ -51,6 +53,17 @@ function flattenTree(nodes: TreeNode[], map = new Map<string, Task>()): Map<stri
   return map
 }
 
+function computeStats(taskMap: Map<string, Task>): TreeStats {
+  const tasks = Array.from(taskMap.values())
+  return {
+    total_tasks: tasks.length,
+    completed: tasks.filter((t) => t.status === 'completed').length,
+    active: tasks.filter((t) => t.status === 'active').length,
+    pending: tasks.filter((t) => t.status === 'pending').length,
+    abandoned: tasks.filter((t) => t.status === 'abandoned').length,
+  }
+}
+
 export const useStore = create<Store>((set, get) => ({
   project: null,
   treeStats: null,
@@ -59,6 +72,7 @@ export const useStore = create<Store>((set, get) => ({
   selectedTaskId: null,
   expandedIds: new Set(),
   agentSession: null,
+  sessionNicknames: {},
   events: [],
   planDraft: null,
   modifyDiff: null,
@@ -68,7 +82,8 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   setTree(nodes) {
-    set({ tree: nodes, taskMap: flattenTree(nodes) })
+    const taskMap = flattenTree(nodes)
+    set({ tree: nodes, taskMap, treeStats: computeStats(taskMap) })
   },
 
   updateTask(task) {
@@ -107,6 +122,13 @@ export const useStore = create<Store>((set, get) => ({
 
   setAgentSession(session) {
     set({ agentSession: session })
+    if (session?.id && session.nickname) {
+      set((s) => ({ sessionNicknames: { ...s.sessionNicknames, [session.id]: session.nickname } }))
+    }
+  },
+
+  setSessionNickname(sessionId, nickname) {
+    set((s) => ({ sessionNicknames: { ...s.sessionNicknames, [sessionId]: nickname } }))
   },
 
   setEvents(events) {
@@ -114,7 +136,10 @@ export const useStore = create<Store>((set, get) => ({
   },
 
   appendEvent(event) {
-    set((s) => ({ events: [...s.events, event] }))
+    set((s) => {
+      if (s.events.some((e) => e.id === event.id)) return s
+      return { events: [...s.events, event] }
+    })
   },
 
   setPlanDraft(draft) {

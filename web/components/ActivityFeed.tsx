@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { useStore } from '@/lib/store'
 
 const eventLabels: Record<string, string> = {
@@ -29,16 +30,22 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
-function ActorPill({ actor }: { actor: 'human' | 'agent' }) {
+function ActorPill({ actor, nickname }: { actor: 'human' | 'agent'; nickname?: string }) {
   return (
     <span className={`text-xs rounded px-1.5 py-0.5 font-medium ${actor === 'agent' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'}`}>
-      {actor === 'agent' ? '🤖 Agent' : '👤 You'}
+      {actor === 'agent' ? `🤖 ${nickname || 'Agent'}` : '👤 You'}
     </span>
   )
 }
 
 export function ActivityFeed() {
   const events = useStore((s) => s.events)
+  const sessionNicknames = useStore((s) => s.sessionNicknames)
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [events.length])
 
   if (events.length === 0) {
     return <p className="text-xs text-gray-400 text-center py-4">No activity yet</p>
@@ -54,9 +61,9 @@ export function ActivityFeed() {
           : event.task_id
 
         return (
-          <div key={event.id} className="flex items-start gap-2 text-xs">
+          <div key={event.id} className="flex items-start gap-2 text-xs animate-in fade-in-0 duration-200">
             <span className="text-gray-400 flex-shrink-0 tabular-nums">{formatTime(event.created_at)}</span>
-            <ActorPill actor={event.actor} />
+            <ActorPill actor={event.actor} nickname={event.session_id ? sessionNicknames[event.session_id] : undefined} />
             <span className="text-gray-600 min-w-0">
               {label}{' '}
               {event.event_type === 'agent_failed' && payload['error']
@@ -84,6 +91,7 @@ export function ActivityFeed() {
           </div>
         )
       })}
+      <div ref={bottomRef} />
     </div>
   )
 }

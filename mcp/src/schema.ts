@@ -37,7 +37,7 @@ export const NavigateSchema = z.object({
 })
 
 export const SetStatusSchema = z.object({
-  target_id: z.string().optional().describe('Task to update (defaults to current focus)'),
+  task_id: z.string().optional().describe('Task to update (defaults to current focus)'),
   status: z.enum(['active', 'pending', 'completed', 'abandoned']).describe('New status'),
   reason: z.string().optional().describe('Required when status is abandoned'),
 })

@@ -38,7 +38,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
   const [promptText, setPromptText] = useState('')
   const [promptSending, setPromptSending] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
-  const { setProject, setTree, setAgentSession, setEvents, agentSession: liveSession, selectedTaskId, tree: storeTree } = useStore()
+  const { setProject, setTree, setAgentSession, setEvents, agentSession: liveSession, selectedTaskId, tree: storeTree, treeStats: liveStats } = useStore()
 
   async function handleGenerate() {
     setGenOpen(true)
@@ -181,7 +181,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
       <header className="border-b flex items-center gap-4 px-4 py-2 flex-shrink-0">
         <Link href="/" className="text-sm text-gray-500 hover:text-gray-900">← Projects</Link>
         <h1 className="font-semibold text-gray-900 flex-1 min-w-0 truncate">{project.name}</h1>
-        <span className="text-xs text-gray-400">{stats.completed}/{stats.total_tasks} tasks complete</span>
+        <span className="text-xs text-gray-400">{(liveStats ?? stats).completed}/{(liveStats ?? stats).total_tasks} tasks complete</span>
         {project.status === 'active' ? (
           <button onClick={handleArchive} disabled={acting} className="text-xs px-2 py-1 rounded border text-gray-600 hover:bg-gray-50 disabled:opacity-50">Archive</button>
         ) : (

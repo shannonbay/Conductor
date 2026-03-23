@@ -13,7 +13,7 @@ export async function set_status(args: unknown) {
   const focusTaskId = project.focus_task_id
   if (!focusTaskId) throw new Error('No focus task. Use create_task to add the first task.')
 
-  const targetId = input.target_id ?? focusTaskId
+  const targetId = input.task_id ?? focusTaskId
   const task = getTask(projectId, targetId)
   if (!task) throw new Error(`Task ${targetId} not found.`)
 
