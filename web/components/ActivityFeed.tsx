@@ -16,6 +16,7 @@ const eventLabels: Record<string, string> = {
   agent_cancelled: 'cancelled agent',
   human_prompt: 'sent instruction',
   agent_message: 'said',
+  tool_call: 'ran',
   project_created: 'created project',
   project_updated: 'updated project',
   project_archived: 'archived project',
@@ -64,6 +65,19 @@ export function ActivityFeed() {
                 ? <span className="text-gray-500 italic break-words">{String(payload['message'])}</span>
                 : event.event_type === 'agent_message' && payload['text']
                 ? <span className="text-gray-500 break-words whitespace-pre-wrap">{String(payload['text'])}</span>
+                : event.event_type === 'tool_call'
+                ? <span className="font-mono text-gray-400">
+                    {payload['command'] ? String(payload['command'])
+                      : payload['path'] ? String(payload['path'])
+                      : payload['query'] ? String(payload['query'])
+                      : String(payload['tool'])}
+                    {payload['exit_code'] != null && Number(payload['exit_code']) !== 0
+                      ? <span className="text-amber-500 ml-1">(exit {String(payload['exit_code'])})</span>
+                      : null}
+                    {payload['error']
+                      ? <span className="text-red-400 ml-1">{String(payload['error'])}</span>
+                      : null}
+                  </span>
                 : <span className="font-mono text-gray-400">{detail}</span>
               }
             </span>

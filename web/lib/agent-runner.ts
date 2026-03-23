@@ -535,13 +535,28 @@ async function runAgentLoop(
           if (controller.signal.aborted) break
 
           const result = await dispatchTool(block.name, block.input as Record<string, unknown>, state, workingDir ?? process.cwd())
+          const parsedResult = JSON.parse(result)
           broadcast(projectId, {
             type: 'tool_call',
             sessionId,
             tool: block.name,
             input: block.input,
-            result: JSON.parse(result),
+            result: parsedResult,
           })
+
+          // Persist tool calls that have visible side-effects so they show in the activity feed
+          if (['run_command', 'edit_file', 'write_file', 'web_search'].includes(block.name)) {
+            const input = block.input as Record<string, unknown>
+            const summary: Record<string, unknown> = { tool: block.name }
+            if (block.name === 'run_command') summary.command = input['command']
+            else if (block.name === 'edit_file' || block.name === 'write_file') summary.path = input['path']
+            else if (block.name === 'web_search') summary.query = input['query']
+            if (parsedResult && typeof parsedResult === 'object') {
+              if ('exit_code' in parsedResult) summary.exit_code = parsedResult.exit_code
+              if ('error' in parsedResult) summary.error = parsedResult.error
+            }
+            recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'tool_call', actor: 'agent', sessionId, payload: summary })
+          }
 
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result })
         }
