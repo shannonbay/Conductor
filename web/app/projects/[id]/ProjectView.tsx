@@ -38,7 +38,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
   const [promptText, setPromptText] = useState('')
   const [promptSending, setPromptSending] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
-  const { setProject, setTree, setAgentSession, setEvents, agentSession: liveSession, selectedTaskId, tree: storeTree, treeStats: liveStats } = useStore()
+  const { setProject, setTree, setAgentSession, setEvents, expandAll, refreshTree, agentSession: liveSession, selectedTaskId, tree: storeTree, treeStats: liveStats } = useStore()
 
   async function handleGenerate() {
     setGenOpen(true)
@@ -160,6 +160,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
   useEffect(() => {
     setProject(project, stats)
     setTree(tree)
+    expandAll()
     setAgentSession(agentSession)
     setEvents(events)
   }, [project.id])
@@ -263,7 +264,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
           proposal={genProposal}
           onClose={() => setGenOpen(false)}
           onRetry={handleGenerate}
-          onAccepted={() => setGenOpen(false)}
+          onAccepted={() => { setGenOpen(false); refreshTree(project.id) }}
         />
       )}
 

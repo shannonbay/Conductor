@@ -42,6 +42,7 @@ interface Store {
   appendEvent(event: Event): void
   setPlanDraft(draft: ProposedTask[] | null): void
   setModifyDiff(diff: ModifyDiff | null): void
+  refreshTree(projectId: string): Promise<void>
 }
 
 function flattenTree(nodes: TreeNode[], map = new Map<string, Task>()): Map<string, Task> {
@@ -148,5 +149,12 @@ export const useStore = create<Store>((set, get) => ({
 
   setModifyDiff(diff) {
     set({ modifyDiff: diff })
+  },
+
+  async refreshTree(projectId) {
+    const res = await fetch(`/api/projects/${projectId}/tasks`)
+    if (!res.ok) return
+    const nodes: TreeNode[] = await res.json()
+    get().setTree(nodes)
   },
 }))

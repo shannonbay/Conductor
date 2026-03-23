@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
 import { useStore } from '@/lib/store'
 import { StatusBadge } from './StatusBadge'
 import { PlanDraftOverlay } from './PlanDraftOverlay'
@@ -13,9 +12,8 @@ interface Props {
 }
 
 export function DetailPane({ projectId }: Props) {
-  const { selectedTaskId, taskMap, setPlanDraft, planDraft, agentSession } = useStore()
+  const { selectedTaskId, taskMap, setPlanDraft, planDraft, agentSession, refreshTree } = useStore()
   const task = selectedTaskId ? taskMap.get(selectedTaskId) : null
-  const router = useRouter()
 
   const [notesValue, setNotesValue] = useState('')
   const [notesKey, setNotesKey] = useState(0)
@@ -290,7 +288,7 @@ export function DetailPane({ projectId }: Props) {
           projectId={projectId}
           parentTaskId={task.id}
           onClose={() => setPlanDraft(null)}
-          onAccepted={() => { setPlanDraft(null); router.refresh() }}
+          onAccepted={() => { setPlanDraft(null); refreshTree(projectId) }}
         />
       )}
     </div>
