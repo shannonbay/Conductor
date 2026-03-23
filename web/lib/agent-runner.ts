@@ -512,7 +512,20 @@ async function runAgentLoop(
 
       messages.push({ role: 'assistant', content: response.content })
 
-      if (response.stop_reason === 'end_turn') break
+      if (response.stop_reason === 'end_turn') {
+        // Drain any pending human messages that arrived while the agent was working.
+        // If the prompt bar enqueued a message concurrently with the first API call,
+        // it may not have been visible at the top-of-loop drain — give it one more chance.
+        const remaining = drainUserMessages(projectId)
+        if (remaining.length === 0) break
+        for (const msg of remaining) {
+          messages.push({ role: 'user', content: msg })
+          recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'human_prompt', actor: 'human', sessionId, payload: { message: msg } })
+          broadcast(projectId, { type: 'human_prompt', sessionId, message: msg })
+        }
+        // Don't break — let the agent respond to the injected messages
+        continue
+      }
 
       if (response.stop_reason === 'tool_use') {
         const toolResults: Anthropic.ToolResultBlockParam[] = []
