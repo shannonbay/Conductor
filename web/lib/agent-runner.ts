@@ -409,6 +409,33 @@ export async function startAgent(projectId: string, rootTaskId: string): Promise
   return { sessionId }
 }
 
+async function createMessageWithRetry(
+  client: ReturnType<typeof getAnthropicClient>,
+  params: Anthropic.MessageCreateParamsNonStreaming,
+  controller: AbortController,
+  maxRetries = 3,
+): Promise<Anthropic.Message> {
+  let delay = 60_000 // start with 60s for rate limit errors
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    if (controller.signal.aborted) throw new Error('Aborted')
+    try {
+      return await client.messages.create(params)
+    } catch (err) {
+      const isRateLimit = err instanceof Error && (
+        err.message.includes('rate_limit_error') || err.message.startsWith('429')
+      )
+      if (!isRateLimit || attempt === maxRetries) throw err
+      // Wait, then retry
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, delay)
+        controller.signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('Aborted')) }, { once: true })
+      })
+      delay = Math.min(delay * 1.5, 300_000) // cap at 5 min
+    }
+  }
+  throw new Error('Unreachable')
+}
+
 async function runAgentLoop(
   sessionId: string,
   projectId: string,
@@ -432,13 +459,13 @@ async function runAgentLoop(
     while (true) {
       if (controller.signal.aborted) break
 
-      const response = await client.messages.create({
+      const response = await createMessageWithRetry(client, {
         model: 'claude-sonnet-4-6',
         max_tokens: 4096,
         system: buildSystemPrompt(projectName, rootTaskId, workingDir),
         tools: getToolDefinitions(projectId, rootTaskId),
         messages,
-      })
+      }, controller)
 
       inputTokens += response.usage.input_tokens
       outputTokens += response.usage.output_tokens

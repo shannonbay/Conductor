@@ -56,8 +56,12 @@ export function ActivityFeed({ events }: Props) {
           <div key={event.id} className="flex items-start gap-2 text-xs">
             <span className="text-gray-400 flex-shrink-0 tabular-nums">{formatTime(event.created_at)}</span>
             <ActorPill actor={event.actor} />
-            <span className="text-gray-600">
-              {label} <span className="font-mono text-gray-400">{detail}</span>
+            <span className="text-gray-600 min-w-0">
+              {label}{' '}
+              {event.event_type === 'agent_failed' && payload['error']
+                ? <span className="text-red-500 break-words">{String(payload['error'])}</span>
+                : <span className="font-mono text-gray-400">{detail}</span>
+              }
             </span>
           </div>
         )
