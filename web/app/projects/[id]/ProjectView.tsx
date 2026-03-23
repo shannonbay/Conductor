@@ -91,13 +91,24 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
 
   async function handleSendPrompt(e: React.FormEvent) {
     e.preventDefault()
-    if (!promptText.trim() || !currentSession) return
+    const msg = promptText.trim()
+    if (!msg) return
     setPromptSending(true)
     try {
+      if (!currentSession) {
+        // No active session — start the agent on the selected task first
+        const taskId = selectedTaskId ?? project.id
+        const runRes = await fetch(`/api/projects/${project.id}/agent/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ task_id: taskId }),
+        })
+        if (!runRes.ok) return
+      }
       await fetch(`/api/projects/${project.id}/agent/prompt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: promptText.trim() }),
+        body: JSON.stringify({ message: msg }),
       })
       setPromptText('')
     } finally {
@@ -202,13 +213,13 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
               <input
                 value={promptText}
                 onChange={e => setPromptText(e.target.value)}
-                disabled={!currentSession || promptSending}
-                placeholder={currentSession ? 'Send instruction to agent…' : 'Start an agent on a task to send instructions'}
+                disabled={promptSending}
+                placeholder={currentSession ? 'Send instruction to agent…' : 'Send a message to start the agent…'}
                 className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
               />
               <button
                 type="submit"
-                disabled={!promptText.trim() || !currentSession || promptSending}
+                disabled={!promptText.trim() || promptSending}
                 className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {promptSending ? '…' : '↑'}
