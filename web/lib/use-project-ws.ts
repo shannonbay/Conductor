@@ -2,10 +2,10 @@
 
 import { useEffect } from 'react'
 import { useStore } from './store'
-import type { TreeNode, Task, AgentSession } from './db'
+import type { TreeNode, Task, AgentSession, Event } from './db'
 
 export function useProjectWebSocket(projectId: string) {
-  const { setTree, updateTask, removeTask, setAgentSession } = useStore()
+  const { setTree, updateTask, removeTask, setAgentSession, appendEvent } = useStore()
 
   useEffect(() => {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -17,7 +17,8 @@ export function useProjectWebSocket(projectId: string) {
         const data = JSON.parse(msg.data) as { type: string; [key: string]: unknown }
         switch (data.type) {
           case 'event': {
-            const event = data.event as { event_type: string; payload: Record<string, unknown> }
+            const event = data.event as Event
+            appendEvent(event)
             // Refresh tree data on any tree mutation
             if (['task_created', 'task_updated', 'status_changed', 'task_deleted'].includes(event.event_type)) {
               fetchTree(projectId).then(setTree)

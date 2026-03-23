@@ -1,7 +1,7 @@
 'use client'
 
 import { create } from 'zustand'
-import type { Task, TreeNode, AgentSession, ProjectRow, TreeStats } from './db'
+import type { Task, TreeNode, AgentSession, ProjectRow, TreeStats, Event } from './db'
 import type { ProposedTask, ModifyDiff } from './planning'
 
 interface Store {
@@ -20,6 +20,9 @@ interface Store {
   // Agent
   agentSession: AgentSession | null
 
+  // Activity feed
+  events: Event[]
+
   // AI drafts
   planDraft: ProposedTask[] | null
   modifyDiff: ModifyDiff | null
@@ -33,6 +36,8 @@ interface Store {
   toggleExpanded(id: string): void
   expandAll(): void
   setAgentSession(session: AgentSession | null): void
+  setEvents(events: Event[]): void
+  appendEvent(event: Event): void
   setPlanDraft(draft: ProposedTask[] | null): void
   setModifyDiff(diff: ModifyDiff | null): void
 }
@@ -54,6 +59,7 @@ export const useStore = create<Store>((set, get) => ({
   selectedTaskId: null,
   expandedIds: new Set(),
   agentSession: null,
+  events: [],
   planDraft: null,
   modifyDiff: null,
 
@@ -101,6 +107,14 @@ export const useStore = create<Store>((set, get) => ({
 
   setAgentSession(session) {
     set({ agentSession: session })
+  },
+
+  setEvents(events) {
+    set({ events })
+  },
+
+  appendEvent(event) {
+    set((s) => ({ events: [...s.events, event] }))
   },
 
   setPlanDraft(draft) {

@@ -36,7 +36,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
   const [newTaskError, setNewTaskError] = useState<string | null>(null)
   const [promptText, setPromptText] = useState('')
   const [promptSending, setPromptSending] = useState(false)
-  const { setProject, setTree, setAgentSession, agentSession: liveSession, selectedTaskId } = useStore()
+  const { setProject, setTree, setAgentSession, setEvents, agentSession: liveSession, selectedTaskId } = useStore()
 
   async function handleGenerate() {
     setGenOpen(true)
@@ -143,6 +143,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
     setProject(project, stats)
     setTree(tree)
     setAgentSession(agentSession)
+    setEvents(events)
   }, [project.id])
 
   // Subscribe to live updates
@@ -233,7 +234,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
               <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Activity</span>
             </div>
             <div className="px-4 py-3">
-              <ActivityFeed events={events} />
+              <ActivityFeed />
             </div>
           </div>
         </div>

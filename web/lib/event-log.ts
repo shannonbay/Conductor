@@ -17,6 +17,7 @@ export type EventType =
   | 'agent_resumed'
   | 'agent_cancelled'
   | 'human_prompt'
+  | 'agent_message'
   | 'project_created'
   | 'project_updated'
   | 'project_archived'

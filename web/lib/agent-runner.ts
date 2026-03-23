@@ -500,6 +500,16 @@ async function runAgentLoop(
         content: response.content.filter((b) => b.type === 'text'),
       })
 
+      // Persist agent text turns to the event log
+      const textContent = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('\n')
+        .trim()
+      if (textContent) {
+        recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'agent_message', actor: 'agent', sessionId, payload: { text: textContent } })
+      }
+
       messages.push({ role: 'assistant', content: response.content })
 
       if (response.stop_reason === 'end_turn') break

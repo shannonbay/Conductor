@@ -1,10 +1,6 @@
 'use client'
 
-import type { Event } from '@/lib/db'
-
-interface Props {
-  events: Event[]
-}
+import { useStore } from '@/lib/store'
 
 const eventLabels: Record<string, string> = {
   task_created: 'created task',
@@ -19,6 +15,7 @@ const eventLabels: Record<string, string> = {
   agent_resumed: 'resumed agent',
   agent_cancelled: 'cancelled agent',
   human_prompt: 'sent instruction',
+  agent_message: 'said',
   project_created: 'created project',
   project_updated: 'updated project',
   project_archived: 'archived project',
@@ -39,7 +36,9 @@ function ActorPill({ actor }: { actor: 'human' | 'agent' }) {
   )
 }
 
-export function ActivityFeed({ events }: Props) {
+export function ActivityFeed() {
+  const events = useStore((s) => s.events)
+
   if (events.length === 0) {
     return <p className="text-xs text-gray-400 text-center py-4">No activity yet</p>
   }
@@ -63,6 +62,8 @@ export function ActivityFeed({ events }: Props) {
                 ? <span className="text-red-500 break-words">{String(payload['error'])}</span>
                 : event.event_type === 'human_prompt' && payload['message']
                 ? <span className="text-gray-500 italic break-words">{String(payload['message'])}</span>
+                : event.event_type === 'agent_message' && payload['text']
+                ? <span className="text-gray-500 break-words whitespace-pre-wrap">{String(payload['text'])}</span>
                 : <span className="font-mono text-gray-400">{detail}</span>
               }
             </span>
