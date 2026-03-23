@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { listProjects, getTreeStats } from '@/lib/db'
 import { NewProjectButton } from '@/components/NewProjectButton'
+import { SettingsButton } from '@/components/SettingsButton'
 
 export const dynamic = 'force-dynamic'
 
@@ -18,7 +19,10 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold text-gray-900">Conductor</h1>
-        <NewProjectButton />
+        <div className="flex items-center gap-2">
+          <SettingsButton />
+          <NewProjectButton />
+        </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-10">

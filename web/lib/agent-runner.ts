@@ -1,4 +1,5 @@
-import Anthropic from '@anthropic-ai/sdk'
+import type Anthropic from '@anthropic-ai/sdk'
+import { getAnthropicClient } from './conductor-config'
 import { nanoid } from 'nanoid'
 import {
   getProject, getTask, getTreeStats, getChildren, getSiblings,
@@ -277,7 +278,7 @@ async function runAgentLoop(
   rootTask: NonNullable<ReturnType<typeof getTask>>,
   controller: AbortController,
 ): Promise<void> {
-  const client = new Anthropic()
+  const client = getAnthropicClient()
   const state: AgentState = { focusTaskId: rootTaskId, projectId, rootTaskId, sessionId }
 
   const messages: Anthropic.MessageParam[] = [

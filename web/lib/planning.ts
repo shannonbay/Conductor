@@ -1,8 +1,6 @@
-import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
 import type { Task } from './db'
-
-const client = new Anthropic()
+import { getAnthropicClient } from './conductor-config'
 
 export interface ProposedTask {
   goal: string
@@ -137,7 +135,7 @@ export async function generatePlan(
   const context = formatParentSiblingContext(parentGoal, siblings)
   const prompt = buildPlanningPrompt(projectName, task, context, instruction)
 
-  const response = await client.messages.create({
+  const response = await getAnthropicClient().messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
@@ -157,7 +155,7 @@ export async function modifyPlan(
 ): Promise<ModifyDiff> {
   const prompt = buildModifyPrompt(projectName, task, existingChildren, instruction)
 
-  const response = await client.messages.create({
+  const response = await getAnthropicClient().messages.create({
     model: 'claude-sonnet-4-6',
     max_tokens: 2048,
     messages: [{ role: 'user', content: prompt }],
