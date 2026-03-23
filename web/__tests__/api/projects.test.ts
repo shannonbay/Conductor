@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { GET, POST } from '@/app/api/projects/route.js'
-import { GET as GETById, PATCH as PATCHById } from '@/app/api/projects/[id]/route.js'
+import { GET as GETById, PATCH as PATCHById, DELETE as DELETEById } from '@/app/api/projects/[id]/route.js'
 import { POST as POSTArchive } from '@/app/api/projects/[id]/archive/route.js'
 import { POST as POSTRestore } from '@/app/api/projects/[id]/restore/route.js'
 import { NextRequest } from 'next/server'
@@ -98,5 +98,49 @@ describe('POST /api/projects/:id/restore', () => {
     const { status, body } = await jsonResponse(res)
     expect(status).toBe(200)
     expect(body.status).toBe('active')
+  })
+})
+
+describe('DELETE /api/projects/:id', () => {
+  it('deletes a project and it no longer appears in GET /api/projects', async () => {
+    // Create a project
+    const { body: project } = await jsonResponse(
+      await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Delete Me', working_dir: '/tmp/test' }))
+    )
+    expect(project.id).toMatch(/^proj_/)
+
+    // Delete it
+    const deleteReq = makeRequest('DELETE', `http://localhost/api/projects/${project.id}`)
+    const deleteRes = await DELETEById(deleteReq, { params: Promise.resolve({ id: project.id }) })
+    expect(deleteRes.status).toBe(200)
+
+    // Confirm it no longer appears in the project list
+    const listReq = makeRequest('GET', 'http://localhost/api/projects')
+    const listRes = await GET(listReq)
+    const { body: projects } = await jsonResponse(listRes)
+    const ids = projects.map((p: { id: string }) => p.id)
+    expect(ids).not.toContain(project.id)
+  })
+
+  it('returns 404 when deleting a non-existent project', async () => {
+    const deleteReq = makeRequest('DELETE', 'http://localhost/api/projects/proj_does_not_exist')
+    const res = await DELETEById(deleteReq, { params: Promise.resolve({ id: 'proj_does_not_exist' }) })
+    expect(res.status).toBe(404)
+  })
+
+  it('returns 404 when fetching a deleted project by id', async () => {
+    // Create and immediately delete
+    const { body: project } = await jsonResponse(
+      await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Gone', working_dir: '/tmp/test' }))
+    )
+    await DELETEById(
+      makeRequest('DELETE', `http://localhost/api/projects/${project.id}`),
+      { params: Promise.resolve({ id: project.id }) }
+    )
+
+    // Fetching it by ID should now return 404
+    const getReq = makeRequest('GET', `http://localhost/api/projects/${project.id}`)
+    const getRes = await GETById(getReq, { params: Promise.resolve({ id: project.id }) })
+    expect(getRes.status).toBe(404)
   })
 })
