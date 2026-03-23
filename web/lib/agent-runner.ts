@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk'
 import { getAnthropicClient, getBraveSearchApiKey } from './conductor-config'
+import { generateNickname } from './agent-nickname'
 import {
   toolListDir, toolReadFile, toolWriteFile, toolEditFile,
   toolGlobFiles, toolSearchFiles, toolRunCommand, toolWebSearch,
@@ -403,6 +404,7 @@ export async function startAgent(projectId: string, rootTaskId: string): Promise
     id: sessionId,
     project_id: projectId,
     root_task_id: rootTaskId,
+    nickname: generateNickname(),
     status: 'running',
     autonomy_level: 'full',
     model: 'claude-sonnet-4-6',

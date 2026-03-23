@@ -10,6 +10,7 @@ import { DetailPane } from '@/components/DetailPane'
 import { ActivityFeed } from '@/components/ActivityFeed'
 import { ProjectPlanOverlay } from '@/components/ProjectPlanOverlay'
 import { SettingsButton } from '@/components/SettingsButton'
+import { AgentBadge } from '@/components/AgentBadge'
 import type { ProjectRow, TreeNode, TreeStats, Event, AgentSession } from '@/lib/db'
 import type { ProjectPlanProposal } from '@/lib/project-planner'
 
@@ -188,11 +189,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
         )}
         <button onClick={handleDelete} disabled={acting} className="text-xs px-2 py-1 rounded border text-red-600 hover:bg-red-50 disabled:opacity-50">Delete</button>
         <SettingsButton />
-        {currentSession && (
-          <span className={`text-xs px-2 py-0.5 rounded ${currentSession.status === 'running' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'}`}>
-            🤖 Agent {currentSession.status}
-          </span>
-        )}
+        <AgentBadge session={currentSession} projectId={project.id} />
       </header>
 
       {/* Main content */}

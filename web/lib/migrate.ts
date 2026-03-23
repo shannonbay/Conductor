@@ -94,6 +94,12 @@ export function runMigrations(db: Database): void {
       ON agent_sessions(project_id, status)
   `)
 
+  try {
+    db.exec(`ALTER TABLE agent_sessions ADD COLUMN nickname TEXT NOT NULL DEFAULT ''`)
+  } catch {
+    // Column already exists — ignore
+  }
+
   // Immutable event log
   db.exec(`
     CREATE TABLE IF NOT EXISTS events (

@@ -56,6 +56,7 @@ export interface AgentSession {
   id: string
   project_id: string
   root_task_id: string
+  nickname: string
   status: 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
   autonomy_level: 'full' | 'approve_decompositions' | 'approve_steps' | 'manual'
   model: string
@@ -307,6 +308,9 @@ export function deleteTaskTree(projectId: string, taskId: string): void {
 
 export function deleteProject(id: string): void {
   const db = getDb()
+  // Delete in dependency order: events and sessions reference the project via FK
+  db.prepare('DELETE FROM events WHERE project_id = ?').run(id)
+  db.prepare('DELETE FROM agent_sessions WHERE project_id = ?').run(id)
   db.prepare('DELETE FROM tasks WHERE project_id = ?').run(id)
   db.prepare('DELETE FROM projects WHERE id = ?').run(id)
 }
@@ -335,12 +339,13 @@ export function unlockSubtree(sessionId: string, projectId: string): void {
 export function createSession(session: Omit<AgentSession, 'input_tokens' | 'output_tokens' | 'total_cost' | 'error' | 'ended_at'> & Partial<Pick<AgentSession, 'input_tokens' | 'output_tokens' | 'total_cost' | 'error' | 'ended_at'>>): void {
   const db = getDb()
   db.prepare(`
-    INSERT INTO agent_sessions (id, project_id, root_task_id, status, autonomy_level, model, input_tokens, output_tokens, total_cost, error, started_at, ended_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO agent_sessions (id, project_id, root_task_id, nickname, status, autonomy_level, model, input_tokens, output_tokens, total_cost, error, started_at, ended_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     session.id,
     session.project_id,
     session.root_task_id,
+    session.nickname ?? '',
     session.status,
     session.autonomy_level,
     session.model,
@@ -370,6 +375,11 @@ export function getActiveSession(projectId: string): AgentSession | undefined {
 export function getSession(id: string): AgentSession | undefined {
   const db = getDb()
   return db.prepare('SELECT * FROM agent_sessions WHERE id = ?').get(id) as AgentSession | undefined
+}
+
+export function getAllActiveSessions(): AgentSession[] {
+  const db = getDb()
+  return db.prepare("SELECT * FROM agent_sessions WHERE status IN ('running', 'paused') ORDER BY started_at DESC").all() as AgentSession[]
 }
 
 // ─── Event log ────────────────────────────────────────────────────────────────
