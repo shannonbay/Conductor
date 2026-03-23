@@ -36,7 +36,8 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
   const [newTaskError, setNewTaskError] = useState<string | null>(null)
   const [promptText, setPromptText] = useState('')
   const [promptSending, setPromptSending] = useState(false)
-  const { setProject, setTree, setAgentSession, setEvents, agentSession: liveSession, selectedTaskId } = useStore()
+  const [promptError, setPromptError] = useState<string | null>(null)
+  const { setProject, setTree, setAgentSession, setEvents, agentSession: liveSession, selectedTaskId, tree: storeTree } = useStore()
 
   async function handleGenerate() {
     setGenOpen(true)
@@ -94,22 +95,38 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
     const msg = promptText.trim()
     if (!msg) return
     setPromptSending(true)
+    setPromptError(null)
     try {
       if (!currentSession) {
-        // No active session — start the agent on the selected task first
-        const taskId = selectedTaskId ?? project.id
+        // Fall back to root task if nothing is selected
+        const taskId = selectedTaskId ?? storeTree[0]?.id
+        if (!taskId) {
+          setPromptError('Create a task first, then try again.')
+          return
+        }
         const runRes = await fetch(`/api/projects/${project.id}/agent/run`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ task_id: taskId }),
         })
-        if (!runRes.ok) return
+        if (!runRes.ok) {
+          const data = await runRes.json().catch(() => ({}))
+          setPromptError((data as { error?: string }).error ?? 'Failed to start agent')
+          return
+        }
+        // Refresh server data so the session indicator appears
+        router.refresh()
       }
-      await fetch(`/api/projects/${project.id}/agent/prompt`, {
+      const promptRes = await fetch(`/api/projects/${project.id}/agent/prompt`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: msg }),
       })
+      if (!promptRes.ok) {
+        const data = await promptRes.json().catch(() => ({}))
+        setPromptError((data as { error?: string }).error ?? 'Failed to send message')
+        return
+      }
       setPromptText('')
     } finally {
       setPromptSending(false)
@@ -213,7 +230,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
             <form onSubmit={handleSendPrompt} className="flex gap-2">
               <input
                 value={promptText}
-                onChange={e => setPromptText(e.target.value)}
+                onChange={e => { setPromptText(e.target.value); setPromptError(null) }}
                 disabled={promptSending}
                 placeholder={currentSession ? 'Send instruction to agent…' : 'Send a message to start the agent…'}
                 className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-gray-900 disabled:bg-gray-50 disabled:text-gray-400"
@@ -226,6 +243,7 @@ export function ProjectView({ project, tree, stats, events, agentSession }: Prop
                 {promptSending ? '…' : '↑'}
               </button>
             </form>
+            {promptError && <p className="text-xs text-red-500 mt-1">{promptError}</p>}
           </div>
 
           {/* Activity feed */}
