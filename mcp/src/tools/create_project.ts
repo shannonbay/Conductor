@@ -9,11 +9,14 @@ export async function create_project(args: unknown) {
   const id = 'proj_' + nanoid(10)
   const now = new Date().toISOString()
 
+  const working_dir = input.working_dir ?? process.cwd()
+
   insertProject({
     id,
     name: input.name,
     description: input.description ?? null,
     status: 'active',
+    working_dir,
     focus_task_id: null,
     created_at: now,
     updated_at: now,
@@ -26,6 +29,7 @@ export async function create_project(args: unknown) {
     name: input.name,
     description: input.description ?? null,
     status: 'active',
+    working_dir,
     focus_task_id: null,
     created_at: now,
     updated_at: now,

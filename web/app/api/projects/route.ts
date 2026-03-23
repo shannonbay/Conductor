@@ -8,6 +8,7 @@ import { ok, err, serverError } from '@/lib/api-utils'
 const CreateProjectSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
+  working_dir: z.string().min(1),
 })
 
 export async function GET(req: NextRequest) {
@@ -27,13 +28,14 @@ export async function POST(req: NextRequest) {
     const parsed = CreateProjectSchema.safeParse(body)
     if (!parsed.success) return err(parsed.error.message)
 
-    const { name, description } = parsed.data
+    const { name, description, working_dir } = parsed.data
     const now = new Date().toISOString()
     const project = {
       id: `proj_${nanoid(10)}`,
       name,
       description: description ?? null,
       status: 'active' as const,
+      working_dir,
       focus_task_id: null,
       created_at: now,
       updated_at: now,

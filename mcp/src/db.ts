@@ -10,6 +10,7 @@ export interface ProjectRow {
   name: string
   description: string | null
   status: string
+  working_dir: string
   focus_task_id: string | null
   created_at: string
   updated_at: string
@@ -69,6 +70,7 @@ CREATE TABLE IF NOT EXISTS projects (
   name          TEXT NOT NULL,
   description   TEXT,
   status        TEXT NOT NULL DEFAULT 'active',
+  working_dir   TEXT,
   focus_task_id TEXT,
   created_at    TEXT NOT NULL,
   updated_at    TEXT NOT NULL
@@ -168,9 +170,9 @@ export function listProjects(status: 'active' | 'archived' | 'all'): ProjectRow[
 
 export function insertProject(project: ProjectRow): void {
   db.prepare(`
-    INSERT INTO projects (id, name, description, status, focus_task_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(project.id, project.name, project.description, project.status, project.focus_task_id, project.created_at, project.updated_at)
+    INSERT INTO projects (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(project.id, project.name, project.description, project.status, project.working_dir, project.focus_task_id, project.created_at, project.updated_at)
 }
 
 export function updateProject(id: string, fields: Partial<Omit<ProjectRow, 'id'>>): void {

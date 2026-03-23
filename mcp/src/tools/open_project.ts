@@ -19,7 +19,7 @@ export async function open_project(args: unknown) {
 
   if (!project.focus_task_id) {
     return {
-      project: { id: project.id, name: project.name },
+      project: { id: project.id, name: project.name, working_dir: project.working_dir },
       message: 'Project opened. The task tree is empty — use create_task to add the first task.',
     }
   }

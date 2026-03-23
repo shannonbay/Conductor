@@ -26,7 +26,7 @@ async function json(res: Response) {
 }
 
 async function setup() {
-  const projRes = await POSTProject(req('POST', 'http://localhost/api/projects', { name: 'Plan Test' }))
+  const projRes = await POSTProject(req('POST', 'http://localhost/api/projects', { name: 'Plan Test', working_dir: '/tmp/test' }))
   const project = await projRes.json()
 
   const taskRes = await POSTTask(

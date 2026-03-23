@@ -29,7 +29,7 @@ describe('GET /api/projects', () => {
 
 describe('POST /api/projects', () => {
   it('creates a project and returns it with tree_stats', async () => {
-    const req = makeRequest('POST', 'http://localhost/api/projects', { name: 'My Project' })
+    const req = makeRequest('POST', 'http://localhost/api/projects', { name: 'My Project', working_dir: '/tmp/test' })
     const res = await POST(req)
     const { status, body } = await jsonResponse(res)
     expect(status).toBe(201)
@@ -48,7 +48,7 @@ describe('POST /api/projects', () => {
 
 describe('GET /api/projects/:id', () => {
   it('returns project with stats', async () => {
-    const createReq = makeRequest('POST', 'http://localhost/api/projects', { name: 'Test' })
+    const createReq = makeRequest('POST', 'http://localhost/api/projects', { name: 'Test', working_dir: '/tmp/test' })
     const createRes = await POST(createReq)
     const { body: project } = await jsonResponse(createRes)
 
@@ -69,7 +69,7 @@ describe('GET /api/projects/:id', () => {
 
 describe('PATCH /api/projects/:id', () => {
   it('updates project name', async () => {
-    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Old Name' })))
+    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Old Name', working_dir: '/tmp/test' })))
     const patchReq = makeRequest('PATCH', `http://localhost/api/projects/${project.id}`, { name: 'New Name' })
     const res = await PATCHById(patchReq, { params: Promise.resolve({ id: project.id }) })
     const { status, body } = await jsonResponse(res)
@@ -80,7 +80,7 @@ describe('PATCH /api/projects/:id', () => {
 
 describe('POST /api/projects/:id/archive', () => {
   it('archives a project', async () => {
-    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Archive Me' })))
+    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Archive Me', working_dir: '/tmp/test' })))
     const archiveReq = makeRequest('POST', `http://localhost/api/projects/${project.id}/archive`)
     const res = await POSTArchive(archiveReq, { params: Promise.resolve({ id: project.id }) })
     const { status, body } = await jsonResponse(res)
@@ -91,7 +91,7 @@ describe('POST /api/projects/:id/archive', () => {
 
 describe('POST /api/projects/:id/restore', () => {
   it('restores an archived project', async () => {
-    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Restore Me' })))
+    const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Restore Me', working_dir: '/tmp/test' })))
     await POSTArchive(makeRequest('POST', `http://localhost/api/projects/${project.id}/archive`), { params: Promise.resolve({ id: project.id }) })
     const restoreReq = makeRequest('POST', `http://localhost/api/projects/${project.id}/restore`)
     const res = await POSTRestore(restoreReq, { params: Promise.resolve({ id: project.id }) })

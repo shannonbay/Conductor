@@ -11,6 +11,7 @@ export async function list_projects(args: unknown) {
       name: p.name,
       description: p.description,
       status: p.status,
+      working_dir: p.working_dir,
       created_at: p.created_at,
       updated_at: p.updated_at,
       tree_stats: getTreeStats(p.id),

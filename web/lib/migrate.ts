@@ -14,6 +14,7 @@ export function runMigrations(db: Database): void {
       name          TEXT NOT NULL,
       description   TEXT,
       status        TEXT NOT NULL DEFAULT 'active',
+      working_dir   TEXT,
       focus_task_id TEXT,
       created_at    TEXT NOT NULL,
       updated_at    TEXT NOT NULL
@@ -39,6 +40,14 @@ export function runMigrations(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_projects_status  ON projects(status);
     CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC);
   `)
+
+  // Add working_dir column to projects table and backfill existing rows
+  try {
+    db.exec(`ALTER TABLE projects ADD COLUMN working_dir TEXT`)
+  } catch {
+    // Column already exists — ignore
+  }
+  db.exec(`UPDATE projects SET working_dir = '(unknown)' WHERE working_dir IS NULL`)
 
   // Add UI-layer columns to tasks table (wrapped in try/catch — SQLite lacks IF NOT EXISTS for ALTER TABLE)
   const newTaskColumns: [string, string][] = [

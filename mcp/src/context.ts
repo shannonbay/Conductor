@@ -33,7 +33,7 @@ export function buildContext(projectId: string, focusTaskId: string) {
   const tree_stats = getTreeStats(projectId)
 
   return {
-    project: { id: project.id, name: project.name },
+    project: { id: project.id, name: project.name, working_dir: project.working_dir },
     focus,
     parent: parent ? { id: parent.id, goal: parent.goal, status: parent.status } : null,
     siblings: siblings.map(summarize),

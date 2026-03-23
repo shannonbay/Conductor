@@ -3,6 +3,7 @@ import { z } from 'zod'
 export const CreateProjectSchema = z.object({
   name: z.string().min(1).describe('Human-readable project name'),
   description: z.string().optional().describe('Optional summary of the project\'s purpose'),
+  working_dir: z.string().optional().describe('Working directory for the project. Defaults to the server\'s current working directory.'),
 })
 
 export const ListProjectsSchema = z.object({

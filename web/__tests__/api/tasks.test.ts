@@ -19,7 +19,7 @@ async function json(res: Response) {
 }
 
 async function createProject(name = 'Test Project') {
-  const res = await POSTProject(makeRequest('POST', 'http://localhost/api/projects', { name }))
+  const res = await POSTProject(makeRequest('POST', 'http://localhost/api/projects', { name, working_dir: '/tmp/test' }))
   return (await res.json()) as { id: string }
 }
 

@@ -11,6 +11,7 @@ export interface ProjectRow {
   name: string
   description: string | null
   status: 'active' | 'archived'
+  working_dir: string
   focus_task_id: string | null
   created_at: string
   updated_at: string
@@ -136,9 +137,9 @@ export function getProject(id: string): ProjectRow | undefined {
 export function insertProject(project: ProjectRow): void {
   const db = getDb()
   db.prepare(`
-    INSERT INTO projects (id, name, description, status, focus_task_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(project.id, project.name, project.description, project.status, project.focus_task_id, project.created_at, project.updated_at)
+    INSERT INTO projects (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(project.id, project.name, project.description, project.status, project.working_dir, project.focus_task_id, project.created_at, project.updated_at)
 }
 
 export function updateProject(id: string, fields: Partial<Omit<ProjectRow, 'id'>>): void {

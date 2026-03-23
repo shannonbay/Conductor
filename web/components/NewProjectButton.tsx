@@ -11,6 +11,7 @@ export function NewProjectButton({ size = 'default' }: Props) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [workingDir, setWorkingDir] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const router = useRouter()
@@ -24,7 +25,7 @@ export function NewProjectButton({ size = 'default' }: Props) {
       const res = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined }),
+        body: JSON.stringify({ name: name.trim(), description: description.trim() || undefined, working_dir: workingDir || undefined }),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Failed to create project')
@@ -72,18 +73,48 @@ export function NewProjectButton({ size = 'default' }: Props) {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900 resize-none"
                 />
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Working Directory</label>
+                <div className="flex gap-2">
+                  <input
+                    value={workingDir}
+                    onChange={(e) => setWorkingDir(e.target.value)}
+                    placeholder="/path/to/project"
+                    className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-900"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const input = document.createElement('input')
+                      input.type = 'file'
+                      input.setAttribute('webkitdirectory', '')
+                      input.onchange = () => {
+                        const file = input.files?.[0]
+                        if (file?.webkitRelativePath) {
+                          const topDir = file.webkitRelativePath.split('/')[0]
+                          setWorkingDir(topDir)
+                        }
+                      }
+                      input.click()
+                    }}
+                    className="px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
+                    Browse
+                  </button>
+                </div>
+              </div>
               {error && <p className="text-sm text-red-600">{error}</p>}
               <div className="flex justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => { setOpen(false); setName(''); setDescription(''); setError(null) }}
+                  onClick={() => { setOpen(false); setName(''); setDescription(''); setWorkingDir(''); setError(null) }}
                   className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  disabled={!name.trim() || loading}
+                  disabled={!name.trim() || !workingDir.trim() || loading}
                   className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loading ? 'Creating…' : 'Create Project'}

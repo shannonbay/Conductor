@@ -13,11 +13,11 @@ const abortControllers = new Map<string, AbortController>()
 
 // ─── Prompt construction ──────────────────────────────────────────────────────
 
-function buildSystemPrompt(projectName: string, rootTaskId: string): string {
+function buildSystemPrompt(projectName: string, rootTaskId: string, workingDir: string | null): string {
   return `You are an AI agent working within a task tree project management system.
 You have access to tools for managing your work: create_task, update_task, navigate, set_status, synthesize, get_context.
 
-Your current assignment is task ${rootTaskId} in project "${projectName}".
+Your current assignment is task ${rootTaskId} in project "${projectName}".${workingDir ? `\nYour working directory is: ${workingDir}` : ''}
 Your autonomy level is: full (proceed without pausing).
 
 Rules:
@@ -261,7 +261,7 @@ export async function startAgent(projectId: string, rootTaskId: string): Promise
   abortControllers.set(projectId, controller)
 
   // Run agent asynchronously (non-blocking)
-  runAgentLoop(sessionId, projectId, rootTaskId, project.name, task, controller).catch((err) => {
+  runAgentLoop(sessionId, projectId, rootTaskId, project.name, project.working_dir, task, controller).catch((err) => {
     console.error('[AgentRunner] Unhandled error:', err)
   })
 
@@ -273,6 +273,7 @@ async function runAgentLoop(
   projectId: string,
   rootTaskId: string,
   projectName: string,
+  workingDir: string | null,
   rootTask: NonNullable<ReturnType<typeof getTask>>,
   controller: AbortController,
 ): Promise<void> {
@@ -293,7 +294,7 @@ async function runAgentLoop(
       const response = await client.messages.create({
         model: 'claude-sonnet-4-6',
         max_tokens: 4096,
-        system: buildSystemPrompt(projectName, rootTaskId),
+        system: buildSystemPrompt(projectName, rootTaskId, workingDir),
         tools: getToolDefinitions(projectId, rootTaskId),
         messages,
       })
