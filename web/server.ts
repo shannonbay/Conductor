@@ -3,6 +3,7 @@ import { parse } from 'url'
 import next from 'next'
 import { WebSocketServer } from 'ws'
 import { registerClient, unregisterClient } from './lib/ws-broadcaster.js'
+import { startWatchingProject, startPoller } from './lib/mcp-poller.js'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = process.env.HOST ?? 'localhost'
@@ -37,6 +38,7 @@ app.prepare().then(() => {
     const projectId = match[1]
     wss.handleUpgrade(req, socket, head, (ws) => {
       registerClient(projectId, ws)
+      startWatchingProject(projectId)
       ws.on('close', () => unregisterClient(projectId, ws))
       ws.on('error', () => unregisterClient(projectId, ws))
     })
@@ -44,6 +46,7 @@ app.prepare().then(() => {
 
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`)
+    startPoller()
   })
 }).catch((err) => {
   console.error('> Failed to start server:', err)

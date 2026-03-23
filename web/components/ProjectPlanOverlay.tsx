@@ -50,10 +50,9 @@ export function ProjectPlanOverlay({ projectId, loading, error, proposal, onClos
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          root: { goal: rootGoal.trim() || proposal.root.goal, plan: proposal.root.plan },
-          children: accepted.map(({ goal, plan, suggested_depends_on }) => ({
+          root: { goal: rootGoal.trim() || proposal.root.goal },
+          children: accepted.map(({ goal, suggested_depends_on }) => ({
             goal,
-            plan,
             depends_on: suggested_depends_on,
           })),
         }),
@@ -107,14 +106,6 @@ export function ProjectPlanOverlay({ projectId, loading, error, proposal, onClos
                   onChange={e => setRootGoal(e.target.value)}
                   className="w-full text-sm font-medium bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-violet-400 focus:outline-none px-0 py-0.5"
                 />
-                <ol className="mt-2 space-y-0.5">
-                  {proposal.root.plan.map((step, i) => (
-                    <li key={i} className="text-xs text-gray-600 flex gap-1">
-                      <span className="text-gray-400 flex-shrink-0">{i + 1}.</span>
-                      {step}
-                    </li>
-                  ))}
-                </ol>
               </div>
 
               {/* Children */}
@@ -137,14 +128,6 @@ export function ProjectPlanOverlay({ projectId, loading, error, proposal, onClos
                           onChange={e => updateChildGoal(i, e.target.value)}
                           className="w-full text-sm font-medium bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none px-0 py-0.5"
                         />
-                        <ol className="mt-2 space-y-0.5">
-                          {child.plan.map((step, j) => (
-                            <li key={j} className="text-xs text-gray-600 flex gap-1">
-                              <span className="text-gray-400 flex-shrink-0">{j + 1}.</span>
-                              {step}
-                            </li>
-                          ))}
-                        </ol>
                         {child.suggested_depends_on.length > 0 && (
                           <p className="text-xs text-gray-400 mt-1">
                             Depends on: {child.suggested_depends_on.join(', ')}

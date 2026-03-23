@@ -20,16 +20,14 @@ export const ArchiveProjectSchema = z.object({
 
 export const CreateTaskSchema = z.object({
   goal: z.string().min(1).describe('What this task should accomplish'),
-  plan: z.array(z.string()).min(1).describe('Ordered steps to achieve the goal'),
   initial_state: z.record(z.unknown()).optional().describe('Freeform starting state (default {})'),
   depends_on: z.array(z.string()).optional().describe('Sibling task IDs that must complete first'),
   status: z.enum(['active', 'pending']).default('active').describe('Initial status'),
 })
 
 export const UpdateTaskSchema = z.object({
-  result: z.string().describe('Human-readable summary of progress or outcome'),
+  result: z.string().optional().describe('Human-readable summary of progress or outcome'),
   state_patch: z.record(z.unknown()).optional().describe('Shallow-merge patch applied to state'),
-  advance_step: z.boolean().default(false).describe('Increment step to the next plan item'),
 })
 
 export const NavigateSchema = z.object({
@@ -40,6 +38,7 @@ export const SetStatusSchema = z.object({
   task_id: z.string().optional().describe('Task to update (defaults to current focus)'),
   status: z.enum(['active', 'pending', 'completed', 'abandoned']).describe('New status'),
   reason: z.string().optional().describe('Required when status is abandoned'),
+  result: z.string().optional().describe('Optional summary of what the task produced'),
 })
 
 export const SynthesizeSchema = z.object({

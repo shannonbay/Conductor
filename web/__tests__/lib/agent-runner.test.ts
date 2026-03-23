@@ -32,8 +32,6 @@ function insertTestTask(projectId: string, id: string) {
     id,
     project_id: projectId,
     goal: `Task ${id}`,
-    plan: ['Step 1'],
-    step: 0,
     status: 'active',
     result: null,
     abandon_reason: null,

@@ -17,7 +17,7 @@ export interface ModifyDiff {
 
 const ProposedTaskSchema = z.object({
   goal: z.string().min(1),
-  plan: z.array(z.string()).min(1),
+  plan: z.array(z.string()).default([]),
   suggested_depends_on: z.array(z.string()).default([]),
 })
 
@@ -46,7 +46,6 @@ ${parentAndSiblingContext}
 
 Rules:
 - Propose concrete, actionable child tasks with clear goals.
-- Each proposed task should include a goal and 2-5 plan steps.
 - Suggest dependencies between siblings where ordering matters (use sibling index 1, 2, 3... to reference).
 - Keep decompositions to 3-7 children — enough detail to be useful, not so many as to be overwhelming.
 - If any sibling tasks have been abandoned, note their reasons and avoid proposing approaches that would hit the same problems.
@@ -56,7 +55,6 @@ Respond with ONLY a valid JSON array of proposed tasks. No markdown, no explanat
 [
   {
     "goal": "...",
-    "plan": ["step 1", "step 2", ...],
     "suggested_depends_on": []
   }
 ]`
@@ -98,8 +96,8 @@ Rules for modifications:
 Respond with ONLY a valid JSON object. No markdown, no explanation. Format:
 {
   "unchanged": ["1.1", "1.2"],
-  "modified": [{ "replaces_id": "1.3", "goal": "...", "plan": [...], "suggested_depends_on": [] }],
-  "added": [{ "goal": "...", "plan": [...], "suggested_depends_on": [] }],
+  "modified": [{ "replaces_id": "1.3", "goal": "...", "suggested_depends_on": [] }],
+  "added": [{ "goal": "...", "suggested_depends_on": [] }],
   "removed": ["1.4"]
 }`
 }

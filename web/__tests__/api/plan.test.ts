@@ -30,7 +30,7 @@ async function setup() {
   const project = await projRes.json()
 
   const taskRes = await POSTTask(
-    req('POST', `http://localhost/api/projects/${project.id}/tasks`, { goal: 'Root task', plan: ['step 1'] }),
+    req('POST', `http://localhost/api/projects/${project.id}/tasks`, { goal: 'Root task' }),
     { params: Promise.resolve({ id: project.id }) },
   )
   const task = await taskRes.json()
@@ -41,7 +41,7 @@ async function setup() {
 describe('POST /tasks/:id/plan', () => {
   it('calls generatePlan and returns draft without creating tasks', async () => {
     const { generatePlan } = await import('@/lib/planning.js')
-    const proposed = [{ goal: 'Sub A', plan: ['step'], suggested_depends_on: [] }]
+    const proposed = [{ goal: 'Sub A', suggested_depends_on: [] }]
     ;(generatePlan as ReturnType<typeof vi.fn>).mockResolvedValue(proposed)
 
     const { projectId, taskId } = await setup()
@@ -64,8 +64,8 @@ describe('POST /tasks/:id/plan/accept', () => {
     const res = await POSTAcceptPlan(
       req('POST', `http://localhost`, {
         tasks: [
-          { goal: 'Child A', plan: ['step A'] },
-          { goal: 'Child B', plan: ['step B'] },
+          { goal: 'Child A' },
+          { goal: 'Child B' },
         ],
       }),
       { params: Promise.resolve({ id: projectId, taskId }) },
@@ -90,14 +90,14 @@ describe('POST /tasks/:id/plan/accept', () => {
 describe('POST /tasks/:id/modify-plan', () => {
   it('calls modifyPlan and returns diff without mutating DB', async () => {
     const { modifyPlan } = await import('@/lib/planning.js')
-    const diff = { unchanged: [], modified: [], added: [{ goal: 'New', plan: ['s'], suggested_depends_on: [] }], removed: [] }
+    const diff = { unchanged: [], modified: [], added: [{ goal: 'New', suggested_depends_on: [] }], removed: [] }
     ;(modifyPlan as ReturnType<typeof vi.fn>).mockResolvedValue(diff)
 
     const { projectId, taskId } = await setup()
 
     // Add a child first
     await POSTAcceptPlan(
-      req('POST', `http://localhost`, { tasks: [{ goal: 'Existing', plan: ['step'] }] }),
+      req('POST', `http://localhost`, { tasks: [{ goal: 'Existing' }] }),
       { params: Promise.resolve({ id: projectId, taskId }) },
     )
 
@@ -121,8 +121,8 @@ describe('POST /tasks/:id/modify-plan/accept', () => {
     await POSTAcceptPlan(
       req('POST', `http://localhost`, {
         tasks: [
-          { goal: 'Keep this', plan: ['s'] },
-          { goal: 'Remove this', plan: ['s'] },
+          { goal: 'Keep this' },
+          { goal: 'Remove this' },
         ],
       }),
       { params: Promise.resolve({ id: projectId, taskId }) },
@@ -131,7 +131,7 @@ describe('POST /tasks/:id/modify-plan/accept', () => {
     const res = await POSTAcceptModify(
       req('POST', `http://localhost`, {
         removed: [`${taskId}.2`],
-        added: [{ goal: 'New child', plan: ['new step'], suggested_depends_on: [] }],
+        added: [{ goal: 'New child', suggested_depends_on: [] }],
       }),
       { params: Promise.resolve({ id: projectId, taskId }) },
     )
@@ -150,7 +150,7 @@ describe('POST /tasks/:id/modify-plan/accept', () => {
   it('does not remove completed tasks even if requested', async () => {
     const { projectId, taskId } = await setup()
     await POSTAcceptPlan(
-      req('POST', `http://localhost`, { tasks: [{ goal: 'Completed task', plan: ['s'] }] }),
+      req('POST', `http://localhost`, { tasks: [{ goal: 'Completed task' }] }),
       { params: Promise.resolve({ id: projectId, taskId }) },
     )
 

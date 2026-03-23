@@ -92,7 +92,8 @@ export function useProjectWebSocket(projectId: string) {
               break
             }
 
-            case 'tool_call': {
+            case 'tool_call':
+            case 'mcp_update': {
               // Re-fetch tree to show agent's changes
               fetchTree(projectId).then(actions.setTree)
               break

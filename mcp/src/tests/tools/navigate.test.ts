@@ -11,14 +11,14 @@ describe('navigate', () => {
 
   it('throws for unknown task id', async () => {
     const p = await create_project({ name: 'Test' })
-    await create_task({ goal: 'root', plan: ['s1'] })
+    await create_task({ goal: 'root' })
     await expect(navigate({ target_id: '99' })).rejects.toThrow('not found')
   })
 
   it('updates focus_task_id on the project', async () => {
     const p = await create_project({ name: 'Test' })
-    await create_task({ goal: 'root', plan: ['s1'] })
-    await create_task({ goal: 'child', plan: ['s1'] })
+    await create_task({ goal: 'root' })
+    await create_task({ goal: 'child' })
     // focus is on 1.1; navigate back to 1
     await navigate({ target_id: '1' })
     expect(getProject(p.id)!.focus_task_id).toBe('1')
@@ -26,8 +26,8 @@ describe('navigate', () => {
 
   it('returns context for the target task', async () => {
     await create_project({ name: 'Test' })
-    await create_task({ goal: 'root', plan: ['s1'] })
-    await create_task({ goal: 'child', plan: ['s1'] })
+    await create_task({ goal: 'root' })
+    await create_task({ goal: 'child' })
     const result = await navigate({ target_id: '1' })
     expect(result.focus.id).toBe('1')
     expect(result.focus.goal).toBe('root')

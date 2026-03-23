@@ -20,8 +20,6 @@ export interface TaskRow {
   id: string
   project_id: string
   goal: string
-  plan: string       // JSON string[]
-  step: number
   status: string
   result: string | null
   abandon_reason: string | null
@@ -35,8 +33,6 @@ export interface Task {
   id: string
   project_id: string
   goal: string
-  plan: string[]
-  step: number
   status: string
   result: string | null
   abandon_reason: string | null
@@ -80,8 +76,6 @@ CREATE TABLE IF NOT EXISTS tasks (
   id             TEXT NOT NULL,
   project_id     TEXT NOT NULL REFERENCES projects(id),
   goal           TEXT NOT NULL,
-  plan           TEXT NOT NULL,
-  step           INTEGER NOT NULL DEFAULT 0,
   status         TEXT NOT NULL DEFAULT 'active',
   result         TEXT,
   abandon_reason TEXT,
@@ -97,12 +91,16 @@ CREATE INDEX IF NOT EXISTS idx_projects_status  ON projects(status);
 CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC);
 `)
 
+// Drop legacy columns from existing databases (SQLite 3.35+)
+for (const col of ['plan', 'step']) {
+  try { db.exec(`ALTER TABLE tasks DROP COLUMN ${col}`) } catch { /* already gone */ }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseTask(row: TaskRow): Task {
   return {
     ...row,
-    plan: JSON.parse(row.plan) as string[],
     state: JSON.parse(row.state) as Record<string, unknown>,
     depends_on: row.depends_on ? JSON.parse(row.depends_on) as string[] : null,
   }
@@ -185,14 +183,12 @@ export function updateProject(id: string, fields: Partial<Omit<ProjectRow, 'id'>
 
 export function insertTask(task: Task): void {
   db.prepare(`
-    INSERT INTO tasks (id, project_id, goal, plan, step, status, result, abandon_reason, state, depends_on, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tasks (id, project_id, goal, status, result, abandon_reason, state, depends_on, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     task.id,
     task.project_id,
     task.goal,
-    JSON.stringify(task.plan),
-    task.step,
     task.status,
     task.result,
     task.abandon_reason,
@@ -205,7 +201,6 @@ export function insertTask(task: Task): void {
 
 export function updateTask(projectId: string, taskId: string, fields: Partial<Omit<Task, 'id' | 'project_id'>>): void {
   const serialized: Record<string, unknown> = { ...fields }
-  if ('plan' in serialized) serialized.plan = JSON.stringify(serialized.plan)
   if ('state' in serialized) serialized.state = JSON.stringify(serialized.state)
   if ('depends_on' in serialized) serialized.depends_on = serialized.depends_on ? JSON.stringify(serialized.depends_on) : null
 

@@ -7,20 +7,18 @@ import { getAnthropicClient } from './conductor-config'
 import { safeResolvePath, toolListDir, toolReadFile } from './agent-tools'
 
 export interface ProjectPlanProposal {
-  root: { goal: string; plan: string[] }
+  root: { goal: string }
   children: ProposedTask[]
 }
 
 const ProposedTaskSchema = z.object({
   goal: z.string().min(1),
-  plan: z.array(z.string()).min(1),
   suggested_depends_on: z.array(z.string()).default([]),
 })
 
 const SubmitPlanSchema = z.object({
   root: z.object({
     goal: z.string().min(1),
-    plan: z.array(z.string()).min(1),
   }),
   children: z.array(ProposedTaskSchema).min(1),
 })
@@ -45,7 +43,7 @@ Instructions:
 
 Rules for your plan:
 - The root task goal should be a concise statement of the project's primary objective.
-- Each child task should be concrete and actionable with 2-5 plan steps.
+- Each child task should be concrete and actionable.
 - Order children logically; use suggested_depends_on to express sequencing (by child index, 0-based).
 - Do not propose tasks that are already completed.
 - Aim for 3-5 children for focused tasks, up to 7 for larger projects.`
@@ -92,9 +90,8 @@ export async function generateProjectPlan(
             description: 'The root task representing the overall project goal',
             properties: {
               goal: { type: 'string', description: 'Concise statement of the project\'s primary objective' },
-              plan: { type: 'array', items: { type: 'string' }, description: '2-5 high-level steps to achieve the root goal' },
             },
-            required: ['goal', 'plan'],
+            required: ['goal'],
           },
           children: {
             type: 'array',
@@ -103,10 +100,9 @@ export async function generateProjectPlan(
               type: 'object',
               properties: {
                 goal: { type: 'string' },
-                plan: { type: 'array', items: { type: 'string' } },
                 suggested_depends_on: { type: 'array', items: { type: 'string' }, description: 'Indices of sibling tasks this depends on (e.g. ["0", "1"])' },
               },
-              required: ['goal', 'plan', 'suggested_depends_on'],
+              required: ['goal', 'suggested_depends_on'],
             },
           },
         },

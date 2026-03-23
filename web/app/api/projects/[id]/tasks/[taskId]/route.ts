@@ -6,11 +6,9 @@ import { ok, err, notFound, conflict, serverError } from '@/lib/api-utils'
 
 const UpdateTaskSchema = z.object({
   goal: z.string().min(1).optional(),
-  plan: z.array(z.string()).optional(),
   notes: z.string().nullable().optional(),
   result: z.string().nullable().optional(),
   assigned_to: z.enum(['human', 'agent']).nullable().optional(),
-  advance_step: z.boolean().optional(),
   state_patch: z.record(z.unknown()).optional(),
 })
 
@@ -55,19 +53,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const parsed = UpdateTaskSchema.safeParse(body)
     if (!parsed.success) return err(parsed.error.message)
 
-    const { goal, plan, notes, result, assigned_to, advance_step, state_patch } = parsed.data
+    const { goal, notes, result, assigned_to, state_patch } = parsed.data
     const now = new Date().toISOString()
     const fields: Record<string, unknown> = { updated_at: now }
 
     if (goal !== undefined) fields['goal'] = goal
-    if (plan !== undefined) fields['plan'] = plan
     if (notes !== undefined) fields['notes'] = notes
     if (result !== undefined) fields['result'] = result
     if (assigned_to !== undefined) fields['assigned_to'] = assigned_to
-    if (advance_step) {
-      const nextStep = Math.min(task.step + 1, task.plan.length - 1)
-      fields['step'] = nextStep
-    }
     if (state_patch) {
       fields['state'] = { ...task.state, ...state_patch }
     }

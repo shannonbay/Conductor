@@ -42,9 +42,27 @@ export function ActivityFeed() {
   const events = useStore((s) => s.events)
   const sessionNicknames = useStore((s) => s.sessionNicknames)
   const bottomRef = useRef<HTMLDivElement>(null)
-
+  // scrollAnchorRef is the outer scrollable container (passed via data-scroll-container)
+  // We walk up from bottomRef to find the nearest overflow-y container and only
+  // auto-scroll when the user is within 80px of the bottom.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ block: 'nearest' })
+    const bottom = bottomRef.current
+    if (!bottom) return
+    // Walk up the DOM to find the nearest scrollable ancestor
+    let scrollEl: HTMLElement | null = bottom.parentElement
+    while (scrollEl && scrollEl !== document.body) {
+      const overflow = window.getComputedStyle(scrollEl).overflowY
+      if (overflow === 'auto' || overflow === 'scroll') break
+      scrollEl = scrollEl.parentElement
+    }
+    if (!scrollEl || scrollEl === document.body) {
+      bottom.scrollIntoView({ block: 'nearest' })
+      return
+    }
+    const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight
+    if (distanceFromBottom <= 80) {
+      bottom.scrollIntoView({ block: 'nearest' })
+    }
   }, [events.length])
 
   if (events.length === 0) {

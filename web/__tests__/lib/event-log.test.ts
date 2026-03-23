@@ -67,7 +67,7 @@ describe('recordEvent broadcasts to WebSocket clients', () => {
 // ── getEvents ordering ────────────────────────────────────────────────────────
 
 describe('GET /api/projects/:id/events ordering', () => {
-  it('returns events newest-first (DESC by created_at)', async () => {
+  it('returns events oldest-first (ASC by created_at) for the feed', async () => {
     const project = await createProject('Order Test')
 
     for (const goal of ['First', 'Second', 'Third']) {
@@ -75,7 +75,7 @@ describe('GET /api/projects/:id/events ordering', () => {
         new NextRequest(`http://localhost/api/projects/${project.id}/tasks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ goal, plan: ['step'] }),
+          body: JSON.stringify({ goal }),
         }),
         { params: Promise.resolve({ id: project.id }) },
       )
@@ -88,8 +88,9 @@ describe('GET /api/projects/:id/events ordering', () => {
     const events = (await res.json()) as Array<{ created_at: string }>
 
     expect(events.length).toBeGreaterThan(1)
+    // Route returns oldest-first (reversed from DB DESC) so feed shows chronologically
     for (let i = 0; i < events.length - 1; i++) {
-      expect(events[i].created_at >= events[i + 1].created_at).toBe(true)
+      expect(events[i].created_at <= events[i + 1].created_at).toBe(true)
     }
   })
 })

@@ -17,17 +17,12 @@ export async function update_task(args: unknown) {
   if (!task) throw new Error(`Task ${focusTaskId} not found.`)
 
   const newState = { ...task.state, ...(input.state_patch ?? {}) }
-  const newStep = input.advance_step
-    ? Math.min(task.step + 1, task.plan.length - 1)
-    : task.step
 
   const now = new Date().toISOString()
-  updateTask(projectId, focusTaskId, {
-    result: input.result,
-    state: newState,
-    step: newStep,
-    updated_at: now,
-  })
+  const fields: Parameters<typeof updateTask>[2] = { state: newState, updated_at: now }
+  if (input.result !== undefined) fields.result = input.result
+
+  updateTask(projectId, focusTaskId, fields)
   touchProject(projectId)
 
   return buildContext(projectId, focusTaskId)

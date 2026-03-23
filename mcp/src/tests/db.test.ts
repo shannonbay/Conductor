@@ -38,8 +38,6 @@ function makeTask(projectId: string, id: string, overrides: Partial<Task> = {}):
     id,
     project_id: projectId,
     goal: `Goal for ${id}`,
-    plan: ['step 1', 'step 2'],
-    step: 0,
     status: 'active',
     result: null,
     abandon_reason: null,
@@ -117,14 +115,12 @@ describe('insertTask / getTask', () => {
   it('round-trips a task with JSON fields', () => {
     insertProject(makeProject('p1'))
     const task = makeTask('p1', '1', {
-      plan: ['step a', 'step b'],
       state: { key: 'value', count: 42 },
       depends_on: ['2', '3'],
     })
     insertTask(task)
     const fetched = getTask('p1', '1')
     expect(fetched).toBeDefined()
-    expect(fetched!.plan).toEqual(['step a', 'step b'])
     expect(fetched!.state).toEqual({ key: 'value', count: 42 })
     expect(fetched!.depends_on).toEqual(['2', '3'])
   })

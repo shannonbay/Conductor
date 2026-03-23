@@ -55,8 +55,6 @@ export async function create_task(args: unknown) {
     id: newId,
     project_id: projectId,
     goal: input.goal,
-    plan: input.plan,
-    step: 0,
     status: input.status,
     result: null,
     abandon_reason: null,

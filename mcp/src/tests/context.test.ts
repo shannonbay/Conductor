@@ -24,8 +24,6 @@ function makeTask(projectId: string, id: string, overrides: Partial<Task> = {}):
     id,
     project_id: projectId,
     goal: `Goal for ${id}`,
-    plan: ['step 1'],
-    step: 0,
     status: 'active',
     result: null,
     abandon_reason: null,

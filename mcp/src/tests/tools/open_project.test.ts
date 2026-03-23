@@ -30,7 +30,7 @@ describe('open_project', () => {
 
   it('returns context when project has tasks', async () => {
     const p = await create_project({ name: 'With Tasks' })
-    await create_task({ goal: 'root', plan: ['step 1'] })
+    await create_task({ goal: 'root' })
     const result = await open_project({ project_id: p.id })
     expect(result).toHaveProperty('focus')
     expect(result).toHaveProperty('tree_stats')

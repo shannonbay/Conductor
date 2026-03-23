@@ -6,7 +6,6 @@ import { ok, err, notFound, serverError } from '@/lib/api-utils'
 
 const CreateTaskSchema = z.object({
   goal: z.string().min(1),
-  plan: z.array(z.string()).min(1),
   parent_id: z.string().nullable().optional(),
   status: z.enum(['active', 'pending']).default('pending'),
   initial_state: z.record(z.unknown()).optional(),
@@ -35,7 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const parsed = CreateTaskSchema.safeParse(body)
     if (!parsed.success) return err(parsed.error.message)
 
-    const { goal, plan, parent_id, status, initial_state, depends_on, notes } = parsed.data
+    const { goal, parent_id, status, initial_state, depends_on, notes } = parsed.data
 
     // Validate: root task requires empty tree
     if (!parent_id && countAllTasks(projectId) > 0) {
@@ -75,8 +74,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       id: taskId,
       project_id: projectId,
       goal,
-      plan,
-      step: 0,
       status,
       result: null,
       abandon_reason: null,

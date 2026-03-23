@@ -7,11 +7,9 @@ import { ok, err, notFound, serverError } from '@/lib/api-utils'
 const AcceptSchema = z.object({
   root: z.object({
     goal: z.string().min(1),
-    plan: z.array(z.string()).min(1),
   }),
   children: z.array(z.object({
     goal: z.string().min(1),
-    plan: z.array(z.string()).min(1),
     depends_on: z.array(z.string()).optional(),
   })),
 })
@@ -35,8 +33,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       id: rootId,
       project_id: projectId,
       goal: root.goal,
-      plan: root.plan,
-      step: 0,
       status: 'pending',
       result: null,
       abandon_reason: null,
@@ -57,8 +53,6 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         id: childId,
         project_id: projectId,
         goal: child.goal,
-        plan: child.plan,
-        step: 0,
         status: 'pending',
         result: null,
         abandon_reason: null,

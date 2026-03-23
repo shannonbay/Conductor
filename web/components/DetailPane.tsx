@@ -137,21 +137,6 @@ export function DetailPane({ projectId }: Props) {
         </div>
       )}
 
-      {/* Plan */}
-      <div>
-        <p className="text-xs font-medium text-gray-500 mb-2">Plan</p>
-        <ol className="space-y-1">
-          {task.plan.map((step, i) => (
-            <li key={i} className="flex items-start gap-2 text-sm">
-              <span className={`flex-shrink-0 mt-0.5 ${i < task.step ? 'text-green-500' : i === task.step ? 'text-blue-500' : 'text-gray-300'}`}>
-                {i < task.step ? '✓' : i === task.step ? '►' : '○'}
-              </span>
-              <span className={i < task.step ? 'line-through text-gray-400' : 'text-gray-700'}>{step}</span>
-            </li>
-          ))}
-        </ol>
-      </div>
-
       {/* Result */}
       {task.result && (
         <div>

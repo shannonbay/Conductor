@@ -24,8 +24,6 @@ export function runMigrations(db: Database): void {
       id             TEXT NOT NULL,
       project_id     TEXT NOT NULL REFERENCES projects(id),
       goal           TEXT NOT NULL,
-      plan           TEXT NOT NULL,
-      step           INTEGER NOT NULL DEFAULT 0,
       status         TEXT NOT NULL DEFAULT 'active',
       result         TEXT,
       abandon_reason TEXT,
@@ -66,6 +64,15 @@ export function runMigrations(db: Database): void {
       db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`)
     } catch {
       // Column already exists — ignore
+    }
+  }
+
+  // Drop legacy plan/step columns from existing databases (SQLite 3.35+)
+  for (const col of ['plan', 'step']) {
+    try {
+      db.exec(`ALTER TABLE tasks DROP COLUMN ${col}`)
+    } catch {
+      // Column already gone — ignore
     }
   }
 

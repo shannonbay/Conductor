@@ -21,8 +21,6 @@ export interface Task {
   id: string
   project_id: string
   goal: string
-  plan: string[]
-  step: number
   status: 'active' | 'pending' | 'completed' | 'abandoned'
   result: string | null
   abandon_reason: string | null
@@ -113,7 +111,6 @@ export function resetDb(): void {
 function deserializeTask(row: Record<string, unknown>): Task {
   return {
     ...row,
-    plan: JSON.parse(row.plan as string),
     state: JSON.parse(row.state as string),
     depends_on: row.depends_on ? JSON.parse(row.depends_on as string) : null,
     requires_approval: Boolean(row.requires_approval),
@@ -223,12 +220,12 @@ export function insertTask(task: Omit<Task, 'locked_by' | 'locked_at' | 'require
   const db = getDb()
   db.prepare(`
     INSERT INTO tasks (
-      id, project_id, goal, plan, step, status, result, abandon_reason,
+      id, project_id, goal, status, result, abandon_reason,
       state, depends_on, locked_by, locked_at, requires_approval,
       approved_by, approved_at, created_by, assigned_to, notes,
       created_at, updated_at
     ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?, ?, ?, ?,
       ?, ?
@@ -237,8 +234,6 @@ export function insertTask(task: Omit<Task, 'locked_by' | 'locked_at' | 'require
     task.id,
     task.project_id,
     task.goal,
-    JSON.stringify(task.plan),
-    task.step,
     task.status,
     task.result ?? null,
     task.abandon_reason ?? null,
@@ -260,7 +255,6 @@ export function insertTask(task: Omit<Task, 'locked_by' | 'locked_at' | 'require
 export function updateTask(projectId: string, taskId: string, fields: Partial<Task>): void {
   const db = getDb()
   const serialized: Record<string, unknown> = { ...fields }
-  if ('plan' in fields) serialized['plan'] = JSON.stringify(fields.plan)
   if ('state' in fields) serialized['state'] = JSON.stringify(fields.state)
   if ('depends_on' in fields) serialized['depends_on'] = fields.depends_on ? JSON.stringify(fields.depends_on) : null
   if ('requires_approval' in fields) serialized['requires_approval'] = fields.requires_approval ? 1 : 0
@@ -401,13 +395,14 @@ export function insertEvent(event: Omit<Event, 'created_at'> & { created_at?: st
   )
 }
 
-export function getEvents(projectId: string, taskId?: string): Event[] {
+export function getEvents(projectId: string, taskId?: string, limit?: number): Event[] {
   const db = getDb()
   let rows: Record<string, unknown>[]
+  const limitClause = limit && limit > 0 ? ` LIMIT ${Math.floor(limit)}` : ''
   if (taskId) {
-    rows = db.prepare('SELECT * FROM events WHERE project_id = ? AND task_id = ? ORDER BY created_at DESC').all(projectId, taskId) as Record<string, unknown>[]
+    rows = db.prepare(`SELECT * FROM events WHERE project_id = ? AND task_id = ? ORDER BY created_at DESC${limitClause}`).all(projectId, taskId) as Record<string, unknown>[]
   } else {
-    rows = db.prepare('SELECT * FROM events WHERE project_id = ? ORDER BY created_at DESC').all(projectId) as Record<string, unknown>[]
+    rows = db.prepare(`SELECT * FROM events WHERE project_id = ? ORDER BY created_at DESC${limitClause}`).all(projectId) as Record<string, unknown>[]
   }
   return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload as string) } as Event))
 }

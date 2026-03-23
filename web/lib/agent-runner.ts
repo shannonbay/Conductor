@@ -48,8 +48,7 @@ Task management rules:
 - If a subtask fails, abandon it with a clear reason and create an alternative sibling.
 - Use the state field to store structured data for downstream tasks.
 - Use the result field for human-readable summaries.
-- After completing each plan step, call update_task with advance_step: true to track your progress.
-- Always call update_task with a result summary BEFORE calling set_status completed.
+- Always call set_status completed with a result summary when finishing a task.
 - Proceed without pausing. The human will intervene if needed.
 
 Filesystem and execution rules:
@@ -65,9 +64,6 @@ function buildInitialMessage(task: ReturnType<typeof getTask> & {}): string {
 
 Task ${task.id}: "${task.goal}"
 Status: ${task.status}
-Plan:
-${task.plan.map((s, i) => `  ${i + 1}. ${s}`).join('\n')}
-Current step: ${task.step + 1}
 
 Begin working on this task. Decompose it into child tasks as needed, execute them in order, and mark them complete when done.`
 }
@@ -86,10 +82,9 @@ function getToolDefinitions(projectId: string, rootTaskId: string): Anthropic.To
       description: 'Create a child task under the current focus task.',
       input_schema: {
         type: 'object' as const,
-        required: ['goal', 'plan'],
+        required: ['goal'],
         properties: {
           goal: { type: 'string' },
-          plan: { type: 'array', items: { type: 'string' } },
           status: { type: 'string', enum: ['active', 'pending'] },
           depends_on: { type: 'array', items: { type: 'string' } },
         },
@@ -100,10 +95,8 @@ function getToolDefinitions(projectId: string, rootTaskId: string): Anthropic.To
       description: 'Record progress on the current focus task.',
       input_schema: {
         type: 'object' as const,
-        required: ['result'],
         properties: {
           result: { type: 'string' },
-          advance_step: { type: 'boolean' },
           state_patch: { type: 'object' },
         },
       },
@@ -118,6 +111,7 @@ function getToolDefinitions(projectId: string, rootTaskId: string): Anthropic.To
           target_id: { type: 'string' },
           status: { type: 'string', enum: ['active', 'pending', 'completed', 'abandoned'] },
           reason: { type: 'string' },
+          result: { type: 'string' },
         },
       },
     },
@@ -267,8 +261,8 @@ async function dispatchTool(
     }
 
     case 'create_task': {
-      const { goal, plan, status = 'active', depends_on } = toolInput as {
-        goal: string; plan: string[]; status?: 'active' | 'pending'; depends_on?: string[]
+      const { goal, status = 'active', depends_on } = toolInput as {
+        goal: string; status?: 'active' | 'pending'; depends_on?: string[]
       }
       const childId = nextChildId(projectId, state.focusTaskId)
       const now = new Date().toISOString()
@@ -276,8 +270,6 @@ async function dispatchTool(
         id: childId,
         project_id: projectId,
         goal,
-        plan,
-        step: 0,
         status,
         result: null,
         abandon_reason: null,
@@ -294,14 +286,14 @@ async function dispatchTool(
     }
 
     case 'update_task': {
-      const { result, advance_step, state_patch } = toolInput as {
-        result: string; advance_step?: boolean; state_patch?: Record<string, unknown>
+      const { result, state_patch } = toolInput as {
+        result?: string; state_patch?: Record<string, unknown>
       }
       const task = getTask(projectId, state.focusTaskId)
       if (!task) return JSON.stringify({ error: 'No focus task' })
       const now = new Date().toISOString()
-      const fields: Record<string, unknown> = { result, updated_at: now }
-      if (advance_step) fields['step'] = Math.min(task.step + 1, task.plan.length - 1)
+      const fields: Record<string, unknown> = { updated_at: now }
+      if (result !== undefined) fields['result'] = result
       if (state_patch) fields['state'] = { ...task.state, ...state_patch }
       updateTask(projectId, state.focusTaskId, fields)
       touchProject(projectId)
@@ -310,8 +302,8 @@ async function dispatchTool(
     }
 
     case 'set_status': {
-      const { target_id, status, reason } = toolInput as {
-        target_id?: string; status: 'active' | 'pending' | 'completed' | 'abandoned'; reason?: string
+      const { target_id, status, reason, result } = toolInput as {
+        target_id?: string; status: 'active' | 'pending' | 'completed' | 'abandoned'; reason?: string; result?: string
       }
       const targetId = target_id ?? state.focusTaskId
       const task = getTask(projectId, targetId)
@@ -319,6 +311,7 @@ async function dispatchTool(
       const now = new Date().toISOString()
       const fields: Record<string, unknown> = { status, updated_at: now }
       if (status === 'abandoned' && reason) fields['abandon_reason'] = reason
+      if (result !== undefined) fields['result'] = result
       updateTask(projectId, targetId, fields)
       touchProject(projectId)
       recordEvent({ projectId, taskId: targetId, eventType: 'status_changed', actor: 'agent', sessionId, payload: { to: status, reason } })

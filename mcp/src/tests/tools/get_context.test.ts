@@ -19,7 +19,7 @@ describe('get_context', () => {
 
   it('returns full context when project has tasks', async () => {
     await create_project({ name: 'Test' })
-    await create_task({ goal: 'root', plan: ['s1'] })
+    await create_task({ goal: 'root' })
     const result = await get_context({})
     expect(result).toHaveProperty('focus')
     expect(result).toHaveProperty('tree_stats')
@@ -29,7 +29,7 @@ describe('get_context', () => {
 
   it('is read-only — does not change focus or state', async () => {
     const p = await create_project({ name: 'Test' })
-    await create_task({ goal: 'root', plan: ['s1'] })
+    await create_task({ goal: 'root' })
     await get_context({})
     await get_context({})
     // Focus should still be on task 1

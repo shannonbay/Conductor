@@ -6,7 +6,6 @@ import { ok, err, notFound, serverError } from '@/lib/api-utils'
 
 const AcceptedTaskSchema = z.object({
   goal: z.string().min(1),
-  plan: z.array(z.string()).min(1),
   depends_on: z.array(z.string()).optional(),
 })
 
@@ -37,8 +36,6 @@ export async function POST(req: NextRequest, { params }: Params) {
         id: childId,
         project_id: projectId,
         goal: t.goal,
-        plan: t.plan,
-        step: 0,
         status: 'pending',
         result: null,
         abandon_reason: null,

@@ -46,6 +46,7 @@ export async function set_status(args: unknown) {
   const now = new Date().toISOString()
   const fields: Record<string, unknown> = { status: input.status, updated_at: now }
   if (input.status === 'abandoned') fields.abandon_reason = input.reason!
+  if (input.result !== undefined) fields.result = input.result
 
   updateTask(projectId, targetId, fields as Parameters<typeof updateTask>[2])
   touchProject(projectId)

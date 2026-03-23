@@ -8,12 +8,10 @@ const AcceptModifySchema = z.object({
   modified: z.array(z.object({
     replaces_id: z.string(),
     goal: z.string(),
-    plan: z.array(z.string()),
     suggested_depends_on: z.array(z.string()).optional(),
   })).optional(),
   added: z.array(z.object({
     goal: z.string(),
-    plan: z.array(z.string()),
     suggested_depends_on: z.array(z.string()).optional(),
   })).optional(),
   removed: z.array(z.string()).optional(),
@@ -45,7 +43,6 @@ export async function POST(req: NextRequest, { params }: Params) {
         if (existing.status === 'completed' || existing.status === 'active') return // guard
         updateTask(projectId, mod.replaces_id, {
           goal: mod.goal,
-          plan: mod.plan,
           depends_on: mod.suggested_depends_on?.length ? mod.suggested_depends_on : null,
           updated_at: now,
         })
@@ -67,8 +64,6 @@ export async function POST(req: NextRequest, { params }: Params) {
           id: childId,
           project_id: projectId,
           goal: t.goal,
-          plan: t.plan,
-          step: 0,
           status: 'pending',
           result: null,
           abandon_reason: null,

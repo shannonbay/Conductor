@@ -48,22 +48,25 @@ describe('GET /api/projects/:id/events', () => {
     expect(body[0].event_type).toBe('project_created')
   })
 
-  it('returns events after task creation', async () => {
+  it('returns events after task creation in oldest-first order', async () => {
     const project = await createProject()
-    await createTask(project.id, { goal: 'Root', plan: ['step 1'], status: 'active' })
+    await createTask(project.id, { goal: 'Root',status: 'active' })
 
     const { status, body } = await getEvents(project.id)
     expect(status).toBe(200)
-    expect(body.length).toBeGreaterThan(0)
-    expect(body[0].event_type).toBe('task_created')
-    expect(body[0].actor).toBe('human')
+    expect(body.length).toBeGreaterThan(1)
+    // oldest-first: project_created comes before task_created
+    expect(body[0].event_type).toBe('project_created')
+    const taskEvent = body.find((e: { event_type: string }) => e.event_type === 'task_created')
+    expect(taskEvent).toBeDefined()
+    expect(taskEvent.actor).toBe('human')
   })
 
   it('accumulates events across multiple task creations', async () => {
     const project = await createProject()
-    await createTask(project.id, { goal: 'Root', plan: ['step'] })
-    await createTask(project.id, { goal: 'Child A', plan: ['step'], parent_id: '1' })
-    await createTask(project.id, { goal: 'Child B', plan: ['step'], parent_id: '1' })
+    await createTask(project.id, { goal: 'Root' })
+    await createTask(project.id, { goal: 'Child A', parent_id: '1' })
+    await createTask(project.id, { goal: 'Child B', parent_id: '1' })
 
     const { body } = await getEvents(project.id)
     const taskEvents = body.filter((e: { event_type: string }) => e.event_type === 'task_created')
@@ -72,7 +75,7 @@ describe('GET /api/projects/:id/events', () => {
 
   it('events have required fields', async () => {
     const project = await createProject()
-    await createTask(project.id, { goal: 'Root', plan: ['step'] })
+    await createTask(project.id, { goal: 'Root' })
 
     const { body } = await getEvents(project.id)
     const event = body[0]

@@ -34,7 +34,7 @@ export function PlanDraftOverlay({ proposed, projectId, parentTaskId, onClose, o
     const res = await fetch(`/api/projects/${projectId}/tasks/${parentTaskId}/plan/accept`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ tasks: accepted.map(({ goal, plan, suggested_depends_on }) => ({ goal, plan, depends_on: suggested_depends_on })) }),
+      body: JSON.stringify({ tasks: accepted.map(({ goal, suggested_depends_on }) => ({ goal, depends_on: suggested_depends_on })) }),
     })
     const data = await res.json()
     if (!res.ok) { setError(data.error); setLoading(false) }
@@ -71,14 +71,6 @@ export function PlanDraftOverlay({ proposed, projectId, parentTaskId, onClose, o
                     onChange={(e) => updateGoal(i, e.target.value)}
                     className="w-full text-sm font-medium bg-transparent border-0 border-b border-transparent hover:border-gray-300 focus:border-blue-400 focus:outline-none px-0 py-0.5"
                   />
-                  <ol className="mt-2 space-y-0.5">
-                    {task.plan.map((step, j) => (
-                      <li key={j} className="text-xs text-gray-600 flex gap-1">
-                        <span className="text-gray-400 flex-shrink-0">{j + 1}.</span>
-                        {step}
-                      </li>
-                    ))}
-                  </ol>
                   {task.suggested_depends_on.length > 0 && (
                     <p className="text-xs text-gray-400 mt-1">
                       Depends on: {task.suggested_depends_on.join(', ')}

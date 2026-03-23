@@ -11,7 +11,7 @@ export default async function ProjectPage({ params }: { params: Promise<{ id: st
 
   const tree = getFullTree(id)
   const stats = getTreeStats(id)
-  const events = getEvents(id)
+  const events = getEvents(id, undefined, 200).reverse()
   const agentSession = getActiveSession(id) ?? null
 
   return (

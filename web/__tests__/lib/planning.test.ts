@@ -22,8 +22,6 @@ function makeTask(overrides: Partial<Task> = {}): Task {
     id: '1',
     project_id: 'proj_test',
     goal: 'Test task',
-    plan: ['Step 1', 'Step 2'],
-    step: 0,
     status: 'active',
     result: null,
     abandon_reason: null,
@@ -46,8 +44,8 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 describe('generatePlan', () => {
   it('returns parsed ProposedTask[] from valid AI response', async () => {
     const proposed = [
-      { goal: 'Subtask A', plan: ['Do A1', 'Do A2'], suggested_depends_on: [] },
-      { goal: 'Subtask B', plan: ['Do B1'], suggested_depends_on: [] },
+      { goal: 'Subtask A', suggested_depends_on: [] },
+      { goal: 'Subtask B', suggested_depends_on: [] },
     ]
     mockCreate.mockResolvedValue({
       content: [{ type: 'text', text: JSON.stringify(proposed) }],
@@ -57,7 +55,6 @@ describe('generatePlan', () => {
 
     expect(result).toHaveLength(2)
     expect(result[0].goal).toBe('Subtask A')
-    expect(result[0].plan).toEqual(['Do A1', 'Do A2'])
     expect(result[1].goal).toBe('Subtask B')
   })
 
@@ -70,7 +67,7 @@ describe('generatePlan', () => {
   })
 
   it('strips markdown code blocks from response', async () => {
-    const proposed = [{ goal: 'Task', plan: ['Step 1'], suggested_depends_on: [] }]
+    const proposed = [{ goal: 'Task', suggested_depends_on: [] }]
     mockCreate.mockResolvedValue({
       content: [{ type: 'text', text: '```json\n' + JSON.stringify(proposed) + '\n```' }],
     })
@@ -81,7 +78,7 @@ describe('generatePlan', () => {
   })
 
   it('includes parent context and siblings in prompt', async () => {
-    const proposed = [{ goal: 'Task', plan: ['Step'], suggested_depends_on: [] }]
+    const proposed = [{ goal: 'Task', suggested_depends_on: [] }]
     mockCreate.mockResolvedValue({
       content: [{ type: 'text', text: JSON.stringify(proposed) }],
     })
@@ -101,8 +98,8 @@ describe('modifyPlan', () => {
   it('returns a diff with unchanged, modified, added, removed', async () => {
     const diff = {
       unchanged: ['1.1'],
-      modified: [{ replaces_id: '1.2', goal: 'Updated 1.2', plan: ['New step'], suggested_depends_on: [] }],
-      added: [{ goal: 'New task', plan: ['Step'], suggested_depends_on: [] }],
+      modified: [{ replaces_id: '1.2', goal: 'Updated 1.2', suggested_depends_on: [] }],
+      added: [{ goal: 'New task', suggested_depends_on: [] }],
       removed: ['1.3'],
     }
     mockCreate.mockResolvedValue({
