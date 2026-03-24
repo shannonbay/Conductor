@@ -8,10 +8,10 @@ import type { Task } from '@/lib/db'
 import type { ProposedTask } from '@/lib/planning'
 
 interface Props {
-  projectId: string
+  planId: string
 }
 
-export function DetailPane({ projectId }: Props) {
+export function DetailPane({ planId }: Props) {
   const { selectedTaskId, taskMap, setPlanDraft, planDraft, agentSession, refreshTree } = useStore()
   const task = selectedTaskId ? taskMap.get(selectedTaskId) : null
 
@@ -34,26 +34,26 @@ export function DetailPane({ projectId }: Props) {
 
   async function handleNotesSave() {
     if (!task) return
-    await fetch(`/api/projects/${projectId}/tasks/${task.id}`, {
+    await fetch(`/api/plans/${planId}/tasks/${task.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ notes: notesValue }),
     })
-    router.refresh()
+    refreshTree(planId)
   }
 
   async function handleStatusChange(status: Task['status'], reason?: string) {
     if (!task) return
     setStatusLoading(true)
     setError(null)
-    const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}/status`, {
+    const res = await fetch(`/api/plans/${planId}/tasks/${task.id}/status`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status, reason }),
     })
     const data = await res.json()
     if (!res.ok) setError(data.error)
-    else router.refresh()
+    else refreshTree(planId)
     setStatusLoading(false)
   }
 
@@ -61,14 +61,14 @@ export function DetailPane({ projectId }: Props) {
     if (!task) return
     setAgentLoading(true)
     setError(null)
-    const res = await fetch(`/api/projects/${projectId}/agent/run`, {
+    const res = await fetch(`/api/plans/${planId}/agent/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ task_id: task.id }),
     })
     const data = await res.json()
     if (!res.ok) setError(data.error)
-    else router.refresh()
+    else refreshTree(planId)
     setAgentLoading(false)
   }
 
@@ -76,7 +76,7 @@ export function DetailPane({ projectId }: Props) {
     if (!task) return
     setPlanLoading(true)
     setError(null)
-    const res = await fetch(`/api/projects/${projectId}/tasks/${task.id}/plan`, {
+    const res = await fetch(`/api/plans/${planId}/tasks/${task.id}/plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ instruction: instruction || undefined }),
@@ -92,18 +92,18 @@ export function DetailPane({ projectId }: Props) {
   }
 
   async function handleCancelAgent() {
-    await fetch(`/api/projects/${projectId}/agent/cancel`, { method: 'POST' })
-    router.refresh()
+    await fetch(`/api/plans/${planId}/agent/cancel`, { method: 'POST' })
+    refreshTree(planId)
   }
 
   async function handlePauseAgent() {
-    await fetch(`/api/projects/${projectId}/agent/pause`, { method: 'POST' })
-    router.refresh()
+    await fetch(`/api/plans/${planId}/agent/pause`, { method: 'POST' })
+    refreshTree(planId)
   }
 
   async function handleResumeAgent() {
-    await fetch(`/api/projects/${projectId}/agent/resume`, { method: 'POST' })
-    router.refresh()
+    await fetch(`/api/plans/${planId}/agent/resume`, { method: 'POST' })
+    refreshTree(planId)
   }
 
   const isLocked = Boolean(task.locked_by)
@@ -285,10 +285,10 @@ export function DetailPane({ projectId }: Props) {
       {planDraft && (
         <PlanDraftOverlay
           proposed={planDraft}
-          projectId={projectId}
+          planId={planId}
           parentTaskId={task.id}
           onClose={() => setPlanDraft(null)}
-          onAccepted={() => { setPlanDraft(null); refreshTree(projectId) }}
+          onAccepted={() => { setPlanDraft(null); refreshTree(planId) }}
         />
       )}
     </div>

@@ -8,7 +8,7 @@ export async function POST() {
     let terminated = 0
     for (const s of sessions) {
       try {
-        cancelAgent(s.project_id)
+        cancelAgent(s.plan_id)
         terminated++
       } catch {
         // Session may have ended between query and cancel — ignore

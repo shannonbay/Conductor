@@ -2,22 +2,22 @@ import type { WebSocket } from 'ws'
 
 const clients = new Map<string, Set<WebSocket>>()
 
-export function registerClient(projectId: string, ws: WebSocket): void {
-  if (!clients.has(projectId)) {
-    clients.set(projectId, new Set())
+export function registerClient(planId: string, ws: WebSocket): void {
+  if (!clients.has(planId)) {
+    clients.set(planId, new Set())
   }
-  clients.get(projectId)!.add(ws)
+  clients.get(planId)!.add(ws)
 }
 
-export function unregisterClient(projectId: string, ws: WebSocket): void {
-  const set = clients.get(projectId)
+export function unregisterClient(planId: string, ws: WebSocket): void {
+  const set = clients.get(planId)
   if (!set) return
   set.delete(ws)
-  if (set.size === 0) clients.delete(projectId)
+  if (set.size === 0) clients.delete(planId)
 }
 
-export function broadcast(projectId: string, event: object): void {
-  const set = clients.get(projectId)
+export function broadcast(planId: string, event: object): void {
+  const set = clients.get(planId)
   if (!set || set.size === 0) return
   const message = JSON.stringify(event)
   for (const ws of set) {
@@ -31,7 +31,7 @@ export function broadcast(projectId: string, event: object): void {
   }
 }
 
-/** Returns connected client count for a project. Used in tests. */
-export function clientCount(projectId: string): number {
-  return clients.get(projectId)?.size ?? 0
+/** Returns connected client count for a plan. Used in tests. */
+export function clientCount(planId: string): number {
+  return clients.get(planId)?.size ?? 0
 }

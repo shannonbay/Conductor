@@ -16,7 +16,7 @@ Conductor/
       index.ts        — MCP entry point; registers all tools and dispatches calls
       schema.ts       — Zod schemas for every tool's input parameters
       db.ts           — SQLite layer via better-sqlite3
-      session.ts      — In-memory open-project cursor
+      session.ts      — In-memory open-plan cursor
       context.ts      — Builds context view objects
       tools/          — One file per MCP tool handler
     package.json
@@ -51,7 +51,7 @@ npm run test:watch  # Watch mode
 
 Tests live in `mcp/src/tests/`. `vitest.config.ts` sets `CONDUCTOR_DB=:memory:`. Each test gets a clean slate via `beforeEach` in `src/tests/setup.ts`. Call tool handlers directly as async functions — no MCP transport needed.
 
-To run a single test file: `npm test -- src/tests/tools/create_project.test.ts`
+To run a single test file: `npm test -- src/tests/tools/create_plan.test.ts`
 
 ### Web App (`cd web`)
 
@@ -65,7 +65,7 @@ node server.ts      # Start custom HTTP + WebSocket server
 
 Tests live in `web/__tests__/`. `vitest.config.ts` sets `CONDUCTOR_DB=:memory:`. Each test gets a clean slate via `beforeEach` in `__tests__/setup.ts` which calls `clearAllData()` and `resetDb()`.
 
-To run a single test file: `npm test -- __tests__/api/projects.test.ts`
+To run a single test file: `npm test -- __tests__/api/plans.test.ts`
 
 ### Root
 
@@ -79,16 +79,16 @@ npm install         # Install all workspace dependencies
 1. `src/index.ts` routes by tool name → calls the handler in `tools/`
 2. Handler parses args with the Zod schema from `schema.ts`
 3. Reads/writes SQLite via `db.ts` helpers
-4. Checks/updates the in-memory open project via `session.ts`
+4. Checks/updates the in-memory open plan via `session.ts`
 5. Returns a context view built by `context.ts`
 
 ## Web App Architecture
 
 **Database layer** (`web/lib/db.ts`): Superset of `mcp/src/db.ts`. Adds `getFullTree()`, `lockSubtree()`, `unlockSubtree()`, `deleteTaskTree()`, session CRUD, and event log. Runs migrations on startup via `web/lib/migrate.ts`.
 
-**Migrations** (`web/lib/migrate.ts`): Creates base `projects`/`tasks` tables (idempotent), adds UI-layer columns (`locked_by`, `requires_approval`, `created_by`, `assigned_to`, `notes`), creates `agent_sessions` and `events` tables. Adding a column uses try/catch around `ALTER TABLE` (SQLite lacks `IF NOT EXISTS` for ALTER). New columns added to the base CREATE TABLE must also get an ALTER TABLE block for existing databases, plus an UPDATE to backfill any NOT NULL semantics.
+**Migrations** (`web/lib/migrate.ts`): Creates base `plans`/`tasks` tables (idempotent), adds UI-layer columns (`locked_by`, `requires_approval`, `created_by`, `assigned_to`, `notes`), creates `agent_sessions` and `events` tables. Adding a column uses try/catch around `ALTER TABLE` (SQLite lacks `IF NOT EXISTS` for ALTER). New columns added to the base CREATE TABLE must also get an ALTER TABLE block for existing databases, plus an UPDATE to backfill any NOT NULL semantics.
 
-**Real-time updates**: `web/lib/ws-broadcaster.ts` pushes events to connected browsers. Custom server (`web/server.ts`) routes WebSocket upgrades for `/api/projects/:id/ws`.
+**Real-time updates**: `web/lib/ws-broadcaster.ts` pushes events to connected browsers. Custom server (`web/server.ts`) routes WebSocket upgrades for `/api/plans/:id/ws`.
 
 **Planning** (`web/lib/planning.ts`): `generatePlan()` and `modifyPlan()` use Anthropic SDK for single API calls. Never write to DB — callers use `/plan/accept` and `/modify-plan/accept` routes to commit results.
 
@@ -100,7 +100,7 @@ npm install         # Install all workspace dependencies
 
 **`getChildren()` uses a LIKE query** on the ID prefix, then filters to the exact depth. IDs are structural and permanent — renaming/moving tasks is not supported.
 
-**Session state is in-memory only** (`mcp/src/session.ts`). If the MCP server restarts, the client must call `open_project` again. The focus cursor is also stored on the project row in SQLite, so `open_project` restores it.
+**Session state is in-memory only** (`mcp/src/session.ts`). If the MCP server restarts, the client must call `open_plan` again. The focus cursor is also stored on the plan row in SQLite, so `open_plan` restores it.
 
 **`state` updates are shallow-merge patches.** `update_task` with `state_patch` merges at the top level.
 
@@ -108,13 +108,13 @@ npm install         # Install all workspace dependencies
 
 **`set_status` to `active` is blocked** if `depends_on` lists any sibling not yet `completed`.
 
-**`working_dir` is required on every project** and is never null. MCP's `create_project` defaults it to `process.cwd()` (the directory Claude Code was launched from). Web UI requires the user to select one. Agents receive it in their system prompt so they know where to operate on the filesystem.
+**`working_dir` is required on every plan** and is never null. MCP's `create_plan` defaults it to `process.cwd()` (the directory Claude Code was launched from). Web UI requires the user to select one. Agents receive it in their system prompt so they know where to operate on the filesystem.
 
-**Two DB layers exist and must stay in sync**: `mcp/src/db.ts` is a minimal standalone layer (no migrations, no UI columns). `web/lib/db.ts` is a superset — it calls `runMigrations()` on startup and adds UI-only columns. When adding a field to `ProjectRow` or `TaskRow`, update both files. The MCP `ProjectRow` type only needs fields the MCP tools use; the web layer can have more.
+**Two DB layers exist and must stay in sync**: `mcp/src/db.ts` is a minimal standalone layer (no migrations, no UI columns). `web/lib/db.ts` is a superset — it calls `runMigrations()` on startup and adds UI-only columns. When adding a field to `PlanRow` or `TaskRow`, update both files. The MCP `PlanRow` type only needs fields the MCP tools use; the web layer can have more.
 
 ## Working in This Repo
 
-**Use Conductor to plan and track your own work** — not the Claude Code `TaskCreate`/`TaskUpdate` tools. Before starting any multi-step task, call `mcp__conductor__list_projects` to check for existing in-progress work, then either resume it with `mcp__conductor__open_project` or create a new project with `mcp__conductor__create_project`. Decompose the work into tasks, record progress with `mcp__conductor__update_task`, and archive the project when done.
+**Use Conductor to plan and track your own work** — not the Claude Code `TaskCreate`/`TaskUpdate` tools. Before starting any multi-step task, call `mcp__conductor__list_plans` to check for existing in-progress work, then either resume it with `mcp__conductor__open_plan` or create a new plan with `mcp__conductor__create_plan`. Decompose the work into tasks, record progress with `mcp__conductor__update_task`, and archive the plan when done.
 
 ## Adding a New MCP Tool
 

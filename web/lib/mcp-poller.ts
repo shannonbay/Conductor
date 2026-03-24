@@ -1,18 +1,18 @@
 import { getDb } from './db'
 import { broadcast, clientCount } from './ws-broadcaster'
 
-// Per-project high-water mark: ISO timestamp of the last change we detected.
+// Per-plan high-water mark: ISO timestamp of the last change we detected.
 const cursors = new Map<string, string>()
 
 let pollInterval: ReturnType<typeof setInterval> | null = null
 
 /**
- * Begin watching a project for MCP-driven SQLite changes.
+ * Begin watching a plan for MCP-driven SQLite changes.
  * Sets the cursor to now so we only detect future mutations.
  */
-export function startWatchingProject(projectId: string): void {
-  if (!cursors.has(projectId)) {
-    cursors.set(projectId, new Date().toISOString())
+export function startWatchingPlan(planId: string): void {
+  if (!cursors.has(planId)) {
+    cursors.set(planId, new Date().toISOString())
   }
 }
 
@@ -37,16 +37,16 @@ export function stopPoller(): void {
 function pollOnce(): void {
   const db = getDb()
   const stmt = db.prepare(
-    'SELECT 1 FROM tasks WHERE project_id = ? AND updated_at > ? LIMIT 1'
+    'SELECT 1 FROM tasks WHERE plan_id = ? AND updated_at > ? LIMIT 1'
   )
 
-  for (const [projectId, lastSeen] of cursors) {
-    if (clientCount(projectId) === 0) continue
+  for (const [planId, lastSeen] of cursors) {
+    if (clientCount(planId) === 0) continue
 
-    const row = stmt.get(projectId, lastSeen)
+    const row = stmt.get(planId, lastSeen)
     if (row) {
-      cursors.set(projectId, new Date().toISOString())
-      broadcast(projectId, { type: 'mcp_update' })
+      cursors.set(planId, new Date().toISOString())
+      broadcast(planId, { type: 'mcp_update' })
     }
   }
 }

@@ -1,23 +1,23 @@
 import { describe, it, expect } from 'vitest'
 import {
-  insertProject,
-  getProject,
+  insertPlan,
+  getPlan,
   insertTask,
   getTask,
   getChildren,
   getSiblings,
   nextChildId,
   getTreeStats,
-  listProjects,
-  updateProject,
+  listPlans,
+  updatePlan,
   updateTask,
   countAllTasks,
 } from '../db.js'
-import type { ProjectRow, Task } from '../db.js'
+import type { PlanRow, Task } from '../db.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeProject(id: string, overrides: Partial<ProjectRow> = {}): ProjectRow {
+function makeProject(id: string, overrides: Partial<PlanRow> = {}): PlanRow {
   const now = new Date().toISOString()
   return {
     id,
@@ -36,7 +36,7 @@ function makeTask(projectId: string, id: string, overrides: Partial<Task> = {}):
   const now = new Date().toISOString()
   return {
     id,
-    project_id: projectId,
+    plan_id: projectId,
     goal: `Goal for ${id}`,
     status: 'active',
     result: null,
@@ -51,61 +51,61 @@ function makeTask(projectId: string, id: string, overrides: Partial<Task> = {}):
 
 // ── Project tests ─────────────────────────────────────────────────────────────
 
-describe('insertProject / getProject', () => {
+describe('insertPlan / getPlan', () => {
   it('round-trips a project', () => {
-    const p = makeProject('proj_1')
-    insertProject(p)
-    const fetched = getProject('proj_1')
+    const p = makeProject('plan_1')
+    insertPlan(p)
+    const fetched = getPlan('plan_1')
     expect(fetched).toBeDefined()
-    expect(fetched!.id).toBe('proj_1')
-    expect(fetched!.name).toBe('Project proj_1')
+    expect(fetched!.id).toBe('plan_1')
+    expect(fetched!.name).toBe('Project plan_1')
   })
 
   it('returns undefined for unknown id', () => {
-    expect(getProject('nonexistent')).toBeUndefined()
+    expect(getPlan('nonexistent')).toBeUndefined()
   })
 })
 
-describe('listProjects', () => {
+describe('listPlans', () => {
   it('filters active projects', () => {
-    insertProject(makeProject('p1', { status: 'active' }))
-    insertProject(makeProject('p2', { status: 'archived' }))
-    const active = listProjects('active')
+    insertPlan(makeProject('p1', { status: 'active' }))
+    insertPlan(makeProject('p2', { status: 'archived' }))
+    const active = listPlans('active')
     expect(active.map(p => p.id)).toContain('p1')
     expect(active.map(p => p.id)).not.toContain('p2')
   })
 
   it('filters archived projects', () => {
-    insertProject(makeProject('p1', { status: 'active' }))
-    insertProject(makeProject('p2', { status: 'archived' }))
-    const archived = listProjects('archived')
+    insertPlan(makeProject('p1', { status: 'active' }))
+    insertPlan(makeProject('p2', { status: 'archived' }))
+    const archived = listPlans('archived')
     expect(archived.map(p => p.id)).toContain('p2')
     expect(archived.map(p => p.id)).not.toContain('p1')
   })
 
   it('returns all projects', () => {
-    insertProject(makeProject('p1', { status: 'active' }))
-    insertProject(makeProject('p2', { status: 'archived' }))
-    const all = listProjects('all')
+    insertPlan(makeProject('p1', { status: 'active' }))
+    insertPlan(makeProject('p2', { status: 'archived' }))
+    const all = listPlans('all')
     expect(all.map(p => p.id)).toContain('p1')
     expect(all.map(p => p.id)).toContain('p2')
   })
 })
 
-describe('updateProject', () => {
+describe('updatePlan', () => {
   it('updates specified fields only', () => {
-    insertProject(makeProject('p1', { status: 'active', description: null }))
-    updateProject('p1', { status: 'archived', description: 'updated' })
-    const p = getProject('p1')!
+    insertPlan(makeProject('p1', { status: 'active', description: null }))
+    updatePlan('p1', { status: 'archived', description: 'updated' })
+    const p = getPlan('p1')!
     expect(p.status).toBe('archived')
     expect(p.description).toBe('updated')
     expect(p.name).toBe('Project p1')
   })
 
   it('no-ops on empty fields', () => {
-    insertProject(makeProject('p1'))
-    updateProject('p1', {})
-    expect(getProject('p1')!.name).toBe('Project p1')
+    insertPlan(makeProject('p1'))
+    updatePlan('p1', {})
+    expect(getPlan('p1')!.name).toBe('Project p1')
   })
 })
 
@@ -113,7 +113,7 @@ describe('updateProject', () => {
 
 describe('insertTask / getTask', () => {
   it('round-trips a task with JSON fields', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     const task = makeTask('p1', '1', {
       state: { key: 'value', count: 42 },
       depends_on: ['2', '3'],
@@ -126,12 +126,12 @@ describe('insertTask / getTask', () => {
   })
 
   it('returns undefined for unknown task', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     expect(getTask('p1', 'nonexistent')).toBeUndefined()
   })
 
   it('null depends_on round-trips as null', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1', { depends_on: null }))
     expect(getTask('p1', '1')!.depends_on).toBeNull()
   })
@@ -139,14 +139,14 @@ describe('insertTask / getTask', () => {
 
 describe('updateTask', () => {
   it('updates state via serialization', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1', { state: { a: 1 } }))
     updateTask('p1', '1', { state: { a: 1, b: 2 } })
     expect(getTask('p1', '1')!.state).toEqual({ a: 1, b: 2 })
   })
 
   it('updates status', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     updateTask('p1', '1', { status: 'completed' })
     expect(getTask('p1', '1')!.status).toBe('completed')
@@ -157,7 +157,7 @@ describe('updateTask', () => {
 
 describe('getChildren', () => {
   it('returns direct children only, not grandchildren', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1'))
     insertTask(makeTask('p1', '1.2'))
@@ -173,13 +173,13 @@ describe('getChildren', () => {
   })
 
   it('returns empty array for leaf node', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     expect(getChildren('p1', '1')).toEqual([])
   })
 
   it('returns children for nested parent', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1'))
     insertTask(makeTask('p1', '1.1.1'))
@@ -192,7 +192,7 @@ describe('getChildren', () => {
 
 describe('getSiblings', () => {
   it('returns siblings at root level (no dot)', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '2'))
     insertTask(makeTask('p1', '3'))
@@ -207,7 +207,7 @@ describe('getSiblings', () => {
   })
 
   it('returns siblings at nested level', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1'))
     insertTask(makeTask('p1', '1.2'))
@@ -223,7 +223,7 @@ describe('getSiblings', () => {
   })
 
   it('returns empty array when only child', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1'))
     expect(getSiblings('p1', '1.1')).toEqual([])
@@ -232,13 +232,13 @@ describe('getSiblings', () => {
 
 describe('nextChildId', () => {
   it('returns parentId.1 when no children exist', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     expect(nextChildId('p1', '1')).toBe('1.1')
   })
 
   it('increments based on direct child count', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1'))
     insertTask(makeTask('p1', '1.2'))
@@ -246,7 +246,7 @@ describe('nextChildId', () => {
   })
 
   it('works for nested parent', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1'))
     insertTask(makeTask('p1', '1.1.1'))
@@ -258,7 +258,7 @@ describe('nextChildId', () => {
 
 describe('getTreeStats', () => {
   it('counts tasks by status', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1', { status: 'active' }))
     insertTask(makeTask('p1', '1.1', { status: 'completed' }))
     insertTask(makeTask('p1', '1.2', { status: 'completed' }))
@@ -274,7 +274,7 @@ describe('getTreeStats', () => {
   })
 
   it('returns zeros for empty project', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     const stats = getTreeStats('p1')
     expect(stats.total_tasks).toBe(0)
     expect(stats.active).toBe(0)
@@ -284,14 +284,14 @@ describe('getTreeStats', () => {
 
 describe('countAllTasks', () => {
   it('counts all tasks in a project', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1'))
     expect(countAllTasks('p1')).toBe(2)
   })
 
   it('returns 0 for empty project', () => {
-    insertProject(makeProject('p1'))
+    insertPlan(makeProject('p1'))
     expect(countAllTasks('p1')).toBe(0)
   })
 })

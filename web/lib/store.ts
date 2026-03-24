@@ -1,12 +1,12 @@
 'use client'
 
 import { create } from 'zustand'
-import type { Task, TreeNode, AgentSession, ProjectRow, TreeStats, Event } from './db'
+import type { Task, TreeNode, AgentSession, PlanRow, TreeStats, Event } from './db'
 import type { ProposedTask, ModifyDiff } from './planning'
 
 interface Store {
-  // Project
-  project: ProjectRow | null
+  // Plan
+  plan: PlanRow | null
   treeStats: TreeStats | null
 
   // Tree
@@ -29,7 +29,7 @@ interface Store {
   modifyDiff: ModifyDiff | null
 
   // Actions
-  setProject(project: ProjectRow, stats: TreeStats): void
+  setPlan(plan: PlanRow, stats: TreeStats): void
   setTree(nodes: TreeNode[]): void
   updateTask(task: Task): void
   removeTask(taskId: string): void
@@ -66,7 +66,7 @@ function computeStats(taskMap: Map<string, Task>): TreeStats {
 }
 
 export const useStore = create<Store>((set, get) => ({
-  project: null,
+  plan: null,
   treeStats: null,
   tree: [],
   taskMap: new Map(),
@@ -78,8 +78,8 @@ export const useStore = create<Store>((set, get) => ({
   planDraft: null,
   modifyDiff: null,
 
-  setProject(project, stats) {
-    set({ project, treeStats: stats })
+  setPlan(plan, stats) {
+    set({ plan, treeStats: stats })
   },
 
   setTree(nodes) {
@@ -151,8 +151,8 @@ export const useStore = create<Store>((set, get) => ({
     set({ modifyDiff: diff })
   },
 
-  async refreshTree(projectId) {
-    const res = await fetch(`/api/projects/${projectId}/tasks`)
+  async refreshTree(planId) {
+    const res = await fetch(`/api/plans/${planId}/tasks`)
     if (!res.ok) return
     const nodes: TreeNode[] = await res.json()
     get().setTree(nodes)

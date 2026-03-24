@@ -1,25 +1,25 @@
-import { getProject } from '../db.js'
-import { getOpenProject } from '../session.js'
+import { getPlan } from '../db.js'
+import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { GetContextSchema } from '../schema.js'
 
 export async function get_context(args: unknown) {
   GetContextSchema.parse(args)
 
-  const projectId = getOpenProject()
-  if (!projectId) {
+  const planId = getOpenPlan()
+  if (!planId) {
     return {
-      error: 'No project is open. Use list_projects to see available projects, then open_project to open one.',
+      error: 'No plan is open. Use list_plans and open_plan to open one.',
     }
   }
 
-  const project = getProject(projectId)!
+  const project = getPlan(planId)!
   if (!project.focus_task_id) {
     return {
-      project: { id: project.id, name: project.name },
-      message: 'Project is open but the task tree is empty. Use create_task to add the first task.',
+      plan: { id: project.id, name: project.name },
+      message: 'Plan is open but the task tree is empty. Use create_task to add the first task.',
     }
   }
 
-  return buildContext(projectId, project.focus_task_id)
+  return buildContext(planId, project.focus_task_id)
 }

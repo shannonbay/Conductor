@@ -1,11 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { NextRequest } from 'next/server'
-import { POST as POSTProject } from '@/app/api/projects/route.js'
-import { POST as POSTTask } from '@/app/api/projects/[id]/tasks/route.js'
-import { POST as POSTPlan } from '@/app/api/projects/[id]/tasks/[taskId]/plan/route.js'
-import { POST as POSTAcceptPlan } from '@/app/api/projects/[id]/tasks/[taskId]/plan/accept/route.js'
-import { POST as POSTModifyPlan } from '@/app/api/projects/[id]/tasks/[taskId]/modify-plan/route.js'
-import { POST as POSTAcceptModify } from '@/app/api/projects/[id]/tasks/[taskId]/modify-plan/accept/route.js'
+import { POST as POSTProject } from '@/app/api/plans/route.js'
+import { POST as POSTTask } from '@/app/api/plans/[id]/tasks/route.js'
+import { POST as POSTPlan } from '@/app/api/plans/[id]/tasks/[taskId]/plan/route.js'
+import { POST as POSTAcceptPlan } from '@/app/api/plans/[id]/tasks/[taskId]/plan/accept/route.js'
+import { POST as POSTModifyPlan } from '@/app/api/plans/[id]/tasks/[taskId]/modify-plan/route.js'
+import { POST as POSTAcceptModify } from '@/app/api/plans/[id]/tasks/[taskId]/modify-plan/accept/route.js'
 import { getTask, getChildren } from '@/lib/db.js'
 
 vi.mock('@/lib/planning.js', () => ({
@@ -30,7 +30,7 @@ async function setup() {
   const project = await projRes.json()
 
   const taskRes = await POSTTask(
-    req('POST', `http://localhost/api/projects/${project.id}/tasks`, { goal: 'Root task' }),
+    req('POST', `http://localhost/api/plans/${project.id}/tasks`, { goal: 'Root task' }),
     { params: Promise.resolve({ id: project.id }) },
   )
   const task = await taskRes.json()

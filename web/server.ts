@@ -3,7 +3,7 @@ import { parse } from 'url'
 import next from 'next'
 import { WebSocketServer } from 'ws'
 import { registerClient, unregisterClient } from './lib/ws-broadcaster.js'
-import { startWatchingProject, startPoller } from './lib/mcp-poller.js'
+import { startWatchingPlan, startPoller } from './lib/mcp-poller.js'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = process.env.HOST ?? 'localhost'
@@ -30,17 +30,17 @@ app.prepare().then(() => {
 
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = parse(req.url!)
-    const match = pathname?.match(/^\/api\/projects\/([^/]+)\/ws$/)
+    const match = pathname?.match(/^\/api\/plans\/([^/]+)\/ws$/)
     if (!match) {
       socket.destroy()
       return
     }
-    const projectId = match[1]
+    const planId = match[1]
     wss.handleUpgrade(req, socket, head, (ws) => {
-      registerClient(projectId, ws)
-      startWatchingProject(projectId)
-      ws.on('close', () => unregisterClient(projectId, ws))
-      ws.on('error', () => unregisterClient(projectId, ws))
+      registerClient(planId, ws)
+      startWatchingPlan(planId)
+      ws.on('close', () => unregisterClient(planId, ws))
+      ws.on('error', () => unregisterClient(planId, ws))
     })
   })
 

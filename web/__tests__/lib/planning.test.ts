@@ -20,7 +20,7 @@ beforeEach(() => {
 function makeTask(overrides: Partial<Task> = {}): Task {
   return {
     id: '1',
-    project_id: 'proj_test',
+    plan_id: 'plan_test',
     goal: 'Test task',
     status: 'active',
     result: null,

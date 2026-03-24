@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { synthesize } from '../../tools/synthesize.js'
-import { create_project } from '../../tools/create_project.js'
+import { create_plan } from '../../tools/create_plan.js'
 import { create_task } from '../../tools/create_task.js'
 import { set_status } from '../../tools/set_status.js'
 import { navigate } from '../../tools/navigate.js'
@@ -8,17 +8,17 @@ import { update_task } from '../../tools/update_task.js'
 
 describe('synthesize', () => {
   it('throws when no project is open', async () => {
-    await expect(synthesize({})).rejects.toThrow('No project is open')
+    await expect(synthesize({})).rejects.toThrow('No plan is open')
   })
 
   it('throws for unknown target_id', async () => {
-    await create_project({ name: 'Test' })
+    await create_plan({ name: 'Test' })
     await create_task({ goal: 'root' })
     await expect(synthesize({ target_id: '99' })).rejects.toThrow('not found')
   })
 
   it('groups children into completed, abandoned, pending', async () => {
-    await create_project({ name: 'Test' })
+    await create_plan({ name: 'Test' })
     await create_task({ goal: 'root' })
 
     await create_task({ goal: 'child 1' })
@@ -48,7 +48,7 @@ describe('synthesize', () => {
   })
 
   it('active children appear in pending bucket', async () => {
-    await create_project({ name: 'Test' })
+    await create_plan({ name: 'Test' })
     await create_task({ goal: 'root' })
     await create_task({ goal: 'active child' })  // status=active
     await navigate({ target_id: '1' })
@@ -58,7 +58,7 @@ describe('synthesize', () => {
   })
 
   it('uses target_id override', async () => {
-    await create_project({ name: 'Test' })
+    await create_plan({ name: 'Test' })
     await create_task({ goal: 'root' })
     await create_task({ goal: 'child' })
     // focus is on 1.1; synthesize root (1) explicitly
@@ -67,7 +67,7 @@ describe('synthesize', () => {
   })
 
   it('response includes context and synthesis key', async () => {
-    await create_project({ name: 'Test' })
+    await create_plan({ name: 'Test' })
     await create_task({ goal: 'root' })
     const result = await synthesize({})
     expect(result).toHaveProperty('focus')
@@ -76,7 +76,7 @@ describe('synthesize', () => {
   })
 
   it('completed children include state', async () => {
-    await create_project({ name: 'Test' })
+    await create_plan({ name: 'Test' })
     await create_task({ goal: 'root' })
     await create_task({ goal: 'child', initial_state: { x: 1 } })
     await update_task({ result: 'done', state_patch: { y: 2 } })

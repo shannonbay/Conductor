@@ -1,9 +1,9 @@
-let openProjectId: string | null = null
+let openPlanId: string | null = null
 
-export function getOpenProject(): string | null {
-  return openProjectId
+export function getOpenPlan(): string | null {
+  return openPlanId
 }
 
-export function setOpenProject(id: string | null): void {
-  openProjectId = id
+export function setOpenPlan(id: string | null): void {
+  openPlanId = id
 }

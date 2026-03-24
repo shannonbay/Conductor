@@ -6,7 +6,7 @@ import { runMigrations } from './migrate'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export interface ProjectRow {
+export interface PlanRow {
   id: string
   name: string
   description: string | null
@@ -19,7 +19,7 @@ export interface ProjectRow {
 
 export interface Task {
   id: string
-  project_id: string
+  plan_id: string
   goal: string
   status: 'active' | 'pending' | 'completed' | 'abandoned'
   result: string | null
@@ -52,7 +52,7 @@ export interface TreeNode extends Task {
 
 export interface AgentSession {
   id: string
-  project_id: string
+  plan_id: string
   root_task_id: string
   nickname: string
   status: 'running' | 'paused' | 'completed' | 'failed' | 'cancelled'
@@ -68,7 +68,7 @@ export interface AgentSession {
 
 export interface Event {
   id: string
-  project_id: string
+  plan_id: string
   task_id: string
   event_type: string
   actor: 'human' | 'agent'
@@ -117,77 +117,77 @@ function deserializeTask(row: Record<string, unknown>): Task {
   } as Task
 }
 
-// ─── Projects ─────────────────────────────────────────────────────────────────
+// ─── Plans ────────────────────────────────────────────────────────────────────
 
-export function listProjects(status: 'active' | 'archived' | 'all' = 'active'): ProjectRow[] {
+export function listPlans(status: 'active' | 'archived' | 'all' = 'active'): PlanRow[] {
   const db = getDb()
   if (status === 'all') {
-    return db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as ProjectRow[]
+    return db.prepare('SELECT * FROM plans ORDER BY updated_at DESC').all() as PlanRow[]
   }
-  return db.prepare('SELECT * FROM projects WHERE status = ? ORDER BY updated_at DESC').all(status) as ProjectRow[]
+  return db.prepare('SELECT * FROM plans WHERE status = ? ORDER BY updated_at DESC').all(status) as PlanRow[]
 }
 
-export function getProject(id: string): ProjectRow | undefined {
+export function getPlan(id: string): PlanRow | undefined {
   const db = getDb()
-  return db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow | undefined
+  return db.prepare('SELECT * FROM plans WHERE id = ?').get(id) as PlanRow | undefined
 }
 
-export function insertProject(project: ProjectRow): void {
+export function insertPlan(plan: PlanRow): void {
   const db = getDb()
   db.prepare(`
-    INSERT INTO projects (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
+    INSERT INTO plans (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(project.id, project.name, project.description, project.status, project.working_dir, project.focus_task_id, project.created_at, project.updated_at)
+  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.focus_task_id, plan.created_at, plan.updated_at)
 }
 
-export function updateProject(id: string, fields: Partial<Omit<ProjectRow, 'id'>>): void {
+export function updatePlan(id: string, fields: Partial<Omit<PlanRow, 'id'>>): void {
   const db = getDb()
   const entries = Object.entries(fields)
   if (entries.length === 0) return
   const setClauses = entries.map(([k]) => `${k} = ?`).join(', ')
-  db.prepare(`UPDATE projects SET ${setClauses} WHERE id = ?`).run(...entries.map(([, v]) => v), id)
+  db.prepare(`UPDATE plans SET ${setClauses} WHERE id = ?`).run(...entries.map(([, v]) => v), id)
 }
 
-export function touchProject(id: string): void {
-  updateProject(id, { updated_at: new Date().toISOString() })
+export function touchPlan(id: string): void {
+  updatePlan(id, { updated_at: new Date().toISOString() })
 }
 
 // ─── Tasks ────────────────────────────────────────────────────────────────────
 
-export function getTask(projectId: string, taskId: string): Task | undefined {
+export function getTask(planId: string, taskId: string): Task | undefined {
   const db = getDb()
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ? AND project_id = ?').get(taskId, projectId) as Record<string, unknown> | undefined
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ? AND plan_id = ?').get(taskId, planId) as Record<string, unknown> | undefined
   return row ? deserializeTask(row) : undefined
 }
 
-export function getChildren(projectId: string, parentId: string): Task[] {
+export function getChildren(planId: string, parentId: string): Task[] {
   const db = getDb()
   const prefix = parentId === '' ? '' : `${parentId}.`
   const pattern = `${prefix}%`
   const parentDepth = parentId === '' ? 0 : parentId.split('.').length
-  const rows = db.prepare('SELECT * FROM tasks WHERE project_id = ? AND id LIKE ?').all(projectId, pattern) as Record<string, unknown>[]
+  const rows = db.prepare('SELECT * FROM tasks WHERE plan_id = ? AND id LIKE ?').all(planId, pattern) as Record<string, unknown>[]
   return rows
     .filter((r) => (r.id as string).split('.').length === parentDepth + 1)
     .map(deserializeTask)
 }
 
-export function getSiblings(projectId: string, taskId: string): Task[] {
+export function getSiblings(planId: string, taskId: string): Task[] {
   const db = getDb()
   const parts = taskId.split('.')
   const parentId = parts.length === 1 ? null : parts.slice(0, -1).join('.')
   let rows: Record<string, unknown>[]
   if (!parentId) {
-    rows = db.prepare("SELECT * FROM tasks WHERE project_id = ? AND id NOT LIKE '%.%' AND id != ?").all(projectId, taskId) as Record<string, unknown>[]
+    rows = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%' AND id != ?").all(planId, taskId) as Record<string, unknown>[]
   } else {
-    rows = db.prepare("SELECT * FROM tasks WHERE project_id = ? AND id LIKE ? AND id NOT LIKE ? AND id != ?")
-      .all(projectId, `${parentId}.%`, `${parentId}.%.%`, taskId) as Record<string, unknown>[]
+    rows = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id LIKE ? AND id NOT LIKE ? AND id != ?")
+      .all(planId, `${parentId}.%`, `${parentId}.%.%`, taskId) as Record<string, unknown>[]
   }
   return rows.map(deserializeTask)
 }
 
-export function getTreeStats(projectId: string): TreeStats {
+export function getTreeStats(planId: string): TreeStats {
   const db = getDb()
-  const rows = db.prepare('SELECT status, COUNT(*) as count FROM tasks WHERE project_id = ? GROUP BY status').all(projectId) as { status: string; count: number }[]
+  const rows = db.prepare('SELECT status, COUNT(*) as count FROM tasks WHERE plan_id = ? GROUP BY status').all(planId) as { status: string; count: number }[]
   const map: Record<string, number> = {}
   for (const row of rows) map[row.status] = row.count
   return {
@@ -199,20 +199,20 @@ export function getTreeStats(projectId: string): TreeStats {
   }
 }
 
-export function nextChildId(projectId: string, parentId: string | null): string {
+export function nextChildId(planId: string, parentId: string | null): string {
   const db = getDb()
   if (!parentId) {
-    const row = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE project_id = ? AND id NOT LIKE '%.%'").get(projectId) as { count: number }
+    const row = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%'").get(planId) as { count: number }
     return String(row.count + 1)
   }
-  const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE project_id = ? AND id LIKE ? AND id NOT LIKE ?')
-    .get(projectId, `${parentId}.%`, `${parentId}.%.%`) as { count: number }
+  const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE plan_id = ? AND id LIKE ? AND id NOT LIKE ?')
+    .get(planId, `${parentId}.%`, `${parentId}.%.%`) as { count: number }
   return `${parentId}.${row.count + 1}`
 }
 
-export function countAllTasks(projectId: string): number {
+export function countAllTasks(planId: string): number {
   const db = getDb()
-  const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE project_id = ?').get(projectId) as { count: number }
+  const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE plan_id = ?').get(planId) as { count: number }
   return row.count
 }
 
@@ -220,7 +220,7 @@ export function insertTask(task: Omit<Task, 'locked_by' | 'locked_at' | 'require
   const db = getDb()
   db.prepare(`
     INSERT INTO tasks (
-      id, project_id, goal, status, result, abandon_reason,
+      id, plan_id, goal, status, result, abandon_reason,
       state, depends_on, locked_by, locked_at, requires_approval,
       approved_by, approved_at, created_by, assigned_to, notes,
       created_at, updated_at
@@ -232,7 +232,7 @@ export function insertTask(task: Omit<Task, 'locked_by' | 'locked_at' | 'require
     )
   `).run(
     task.id,
-    task.project_id,
+    task.plan_id,
     task.goal,
     task.status,
     task.result ?? null,
@@ -252,7 +252,7 @@ export function insertTask(task: Omit<Task, 'locked_by' | 'locked_at' | 'require
   )
 }
 
-export function updateTask(projectId: string, taskId: string, fields: Partial<Task>): void {
+export function updateTask(planId: string, taskId: string, fields: Partial<Task>): void {
   const db = getDb()
   const serialized: Record<string, unknown> = { ...fields }
   if ('state' in fields) serialized['state'] = JSON.stringify(fields.state)
@@ -261,18 +261,18 @@ export function updateTask(projectId: string, taskId: string, fields: Partial<Ta
   const entries = Object.entries(serialized)
   if (entries.length === 0) return
   const setClauses = entries.map(([k]) => `${k} = ?`).join(', ')
-  db.prepare(`UPDATE tasks SET ${setClauses} WHERE id = ? AND project_id = ?`).run(...entries.map(([, v]) => v), taskId, projectId)
+  db.prepare(`UPDATE tasks SET ${setClauses} WHERE id = ? AND plan_id = ?`).run(...entries.map(([, v]) => v), taskId, planId)
 }
 
 // ─── UI-specific task operations ──────────────────────────────────────────────
 
 /**
- * Returns all tasks for a project as a nested tree structure.
+ * Returns all tasks for a plan as a nested tree structure.
  * Root tasks are tasks whose ID has no dots (e.g. "1").
  */
-export function getFullTree(projectId: string): TreeNode[] {
+export function getFullTree(planId: string): TreeNode[] {
   const db = getDb()
-  const rows = db.prepare('SELECT * FROM tasks WHERE project_id = ? ORDER BY id').all(projectId) as Record<string, unknown>[]
+  const rows = db.prepare('SELECT * FROM tasks WHERE plan_id = ? ORDER BY id').all(planId) as Record<string, unknown>[]
   const tasks = rows.map(deserializeTask)
 
   const byId = new Map<string, TreeNode>()
@@ -295,37 +295,37 @@ export function getFullTree(projectId: string): TreeNode[] {
 /**
  * Deletes a task and all its descendants (LIKE prefix query).
  */
-export function deleteTaskTree(projectId: string, taskId: string): void {
+export function deleteTaskTree(planId: string, taskId: string): void {
   const db = getDb()
-  db.prepare("DELETE FROM tasks WHERE project_id = ? AND (id = ? OR id LIKE ?)").run(projectId, taskId, `${taskId}.%`)
+  db.prepare("DELETE FROM tasks WHERE plan_id = ? AND (id = ? OR id LIKE ?)").run(planId, taskId, `${taskId}.%`)
 }
 
-export function deleteProject(id: string): void {
+export function deletePlan(id: string): void {
   const db = getDb()
-  // Delete in dependency order: events and sessions reference the project via FK
-  db.prepare('DELETE FROM events WHERE project_id = ?').run(id)
-  db.prepare('DELETE FROM agent_sessions WHERE project_id = ?').run(id)
-  db.prepare('DELETE FROM tasks WHERE project_id = ?').run(id)
-  db.prepare('DELETE FROM projects WHERE id = ?').run(id)
+  // Delete in dependency order: events and sessions reference the plan via FK
+  db.prepare('DELETE FROM events WHERE plan_id = ?').run(id)
+  db.prepare('DELETE FROM agent_sessions WHERE plan_id = ?').run(id)
+  db.prepare('DELETE FROM tasks WHERE plan_id = ?').run(id)
+  db.prepare('DELETE FROM plans WHERE id = ?').run(id)
 }
 
 /**
  * Acquires write locks on a task and all its descendants for the given session.
  */
-export function lockSubtree(sessionId: string, projectId: string, rootTaskId: string): void {
+export function lockSubtree(sessionId: string, planId: string, rootTaskId: string): void {
   const db = getDb()
   const now = new Date().toISOString()
-  db.prepare("UPDATE tasks SET locked_by = ?, locked_at = ? WHERE project_id = ? AND (id = ? OR id LIKE ?)")
-    .run(sessionId, now, projectId, rootTaskId, `${rootTaskId}.%`)
+  db.prepare("UPDATE tasks SET locked_by = ?, locked_at = ? WHERE plan_id = ? AND (id = ? OR id LIKE ?)")
+    .run(sessionId, now, planId, rootTaskId, `${rootTaskId}.%`)
 }
 
 /**
  * Releases write locks held by the given session.
  */
-export function unlockSubtree(sessionId: string, projectId: string): void {
+export function unlockSubtree(sessionId: string, planId: string): void {
   const db = getDb()
-  db.prepare("UPDATE tasks SET locked_by = NULL, locked_at = NULL WHERE project_id = ? AND locked_by = ?")
-    .run(projectId, sessionId)
+  db.prepare("UPDATE tasks SET locked_by = NULL, locked_at = NULL WHERE plan_id = ? AND locked_by = ?")
+    .run(planId, sessionId)
 }
 
 // ─── Agent sessions ───────────────────────────────────────────────────────────
@@ -333,11 +333,11 @@ export function unlockSubtree(sessionId: string, projectId: string): void {
 export function createSession(session: Omit<AgentSession, 'input_tokens' | 'output_tokens' | 'total_cost' | 'error' | 'ended_at'> & Partial<Pick<AgentSession, 'input_tokens' | 'output_tokens' | 'total_cost' | 'error' | 'ended_at'>>): void {
   const db = getDb()
   db.prepare(`
-    INSERT INTO agent_sessions (id, project_id, root_task_id, nickname, status, autonomy_level, model, input_tokens, output_tokens, total_cost, error, started_at, ended_at)
+    INSERT INTO agent_sessions (id, plan_id, root_task_id, nickname, status, autonomy_level, model, input_tokens, output_tokens, total_cost, error, started_at, ended_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     session.id,
-    session.project_id,
+    session.plan_id,
     session.root_task_id,
     session.nickname ?? '',
     session.status,
@@ -360,10 +360,10 @@ export function updateSession(id: string, fields: Partial<AgentSession>): void {
   db.prepare(`UPDATE agent_sessions SET ${setClauses} WHERE id = ?`).run(...entries.map(([, v]) => v), id)
 }
 
-export function getActiveSession(projectId: string): AgentSession | undefined {
+export function getActiveSession(planId: string): AgentSession | undefined {
   const db = getDb()
-  return db.prepare("SELECT * FROM agent_sessions WHERE project_id = ? AND status IN ('running', 'paused') ORDER BY started_at DESC LIMIT 1")
-    .get(projectId) as AgentSession | undefined
+  return db.prepare("SELECT * FROM agent_sessions WHERE plan_id = ? AND status IN ('running', 'paused') ORDER BY started_at DESC LIMIT 1")
+    .get(planId) as AgentSession | undefined
 }
 
 export function getSession(id: string): AgentSession | undefined {
@@ -381,11 +381,11 @@ export function getAllActiveSessions(): AgentSession[] {
 export function insertEvent(event: Omit<Event, 'created_at'> & { created_at?: string }): void {
   const db = getDb()
   db.prepare(`
-    INSERT INTO events (id, project_id, task_id, event_type, actor, session_id, payload, created_at)
+    INSERT INTO events (id, plan_id, task_id, event_type, actor, session_id, payload, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     event.id,
-    event.project_id,
+    event.plan_id,
     event.task_id,
     event.event_type,
     event.actor,
@@ -395,14 +395,14 @@ export function insertEvent(event: Omit<Event, 'created_at'> & { created_at?: st
   )
 }
 
-export function getEvents(projectId: string, taskId?: string, limit?: number): Event[] {
+export function getEvents(planId: string, taskId?: string, limit?: number): Event[] {
   const db = getDb()
   let rows: Record<string, unknown>[]
   const limitClause = limit && limit > 0 ? ` LIMIT ${Math.floor(limit)}` : ''
   if (taskId) {
-    rows = db.prepare(`SELECT * FROM events WHERE project_id = ? AND task_id = ? ORDER BY created_at DESC${limitClause}`).all(projectId, taskId) as Record<string, unknown>[]
+    rows = db.prepare(`SELECT * FROM events WHERE plan_id = ? AND task_id = ? ORDER BY created_at DESC${limitClause}`).all(planId, taskId) as Record<string, unknown>[]
   } else {
-    rows = db.prepare(`SELECT * FROM events WHERE project_id = ? ORDER BY created_at DESC${limitClause}`).all(projectId) as Record<string, unknown>[]
+    rows = db.prepare(`SELECT * FROM events WHERE plan_id = ? ORDER BY created_at DESC${limitClause}`).all(planId) as Record<string, unknown>[]
   }
   return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload as string) } as Event))
 }
@@ -411,5 +411,5 @@ export function getEvents(projectId: string, taskId?: string, limit?: number): E
 
 export function clearAllData(): void {
   const db = getDb()
-  db.exec('DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM projects;')
+  db.exec('DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
 }

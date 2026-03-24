@@ -18,10 +18,10 @@ const eventLabels: Record<string, string> = {
   human_prompt: 'sent instruction',
   agent_message: 'said',
   tool_call: 'ran',
-  project_created: 'created project',
-  project_updated: 'updated project',
-  project_archived: 'archived project',
-  project_restored: 'restored project',
+  plan_created: 'created plan',
+  plan_updated: 'updated plan',
+  plan_archived: 'archived plan',
+  plan_restored: 'restored plan',
   task_deleted: 'deleted task',
 }
 

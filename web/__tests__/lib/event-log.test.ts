@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { NextRequest } from 'next/server'
-import { POST as POSTProject } from '@/app/api/projects/route.js'
-import { POST as POSTTask } from '@/app/api/projects/[id]/tasks/route.js'
-import { GET as GETEvents } from '@/app/api/projects/[id]/events/route.js'
+import { POST as POSTProject } from '@/app/api/plans/route.js'
+import { POST as POSTTask } from '@/app/api/plans/[id]/tasks/route.js'
+import { GET as GETEvents } from '@/app/api/plans/[id]/events/route.js'
 import { recordEvent } from '@/lib/event-log.js'
 
 // vi.mock is hoisted, so the mock variable must be created with vi.hoisted()
@@ -36,9 +36,9 @@ describe('recordEvent broadcasts to WebSocket clients', () => {
     broadcastMock.mockClear() // ignore project_created broadcast from createProject
 
     recordEvent({
-      projectId: project.id,
+      planId: project.id,
       taskId: project.id,
-      eventType: 'project_updated',
+      eventType: 'plan_updated',
       actor: 'human',
       payload: { name: 'Renamed' },
     })
@@ -47,7 +47,7 @@ describe('recordEvent broadcasts to WebSocket clients', () => {
     const [calledProjectId, message] = broadcastMock.mock.calls[0]
     expect(calledProjectId).toBe(project.id)
     expect(message.type).toBe('event')
-    expect(message.event.event_type).toBe('project_updated')
+    expect(message.event.event_type).toBe('plan_updated')
     expect(message.event.actor).toBe('human')
     expect(message.event.payload).toEqual({ name: 'Renamed' })
   })
@@ -56,7 +56,7 @@ describe('recordEvent broadcasts to WebSocket clients', () => {
     const project = await createProject('Fields Test')
     broadcastMock.mockClear()
 
-    recordEvent({ projectId: project.id, taskId: project.id, eventType: 'project_updated', actor: 'human' })
+    recordEvent({ planId: project.id, taskId: project.id, eventType: 'plan_updated', actor: 'human' })
 
     const message = broadcastMock.mock.calls[0][1]
     expect(message.event.id).toBeTruthy()
@@ -66,13 +66,13 @@ describe('recordEvent broadcasts to WebSocket clients', () => {
 
 // ── getEvents ordering ────────────────────────────────────────────────────────
 
-describe('GET /api/projects/:id/events ordering', () => {
+describe('GET /api/plans/:id/events ordering', () => {
   it('returns events oldest-first (ASC by created_at) for the feed', async () => {
     const project = await createProject('Order Test')
 
     for (const goal of ['First', 'Second', 'Third']) {
       await POSTTask(
-        new NextRequest(`http://localhost/api/projects/${project.id}/tasks`, {
+        new NextRequest(`http://localhost/api/plans/${project.id}/tasks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ goal }),
@@ -82,7 +82,7 @@ describe('GET /api/projects/:id/events ordering', () => {
     }
 
     const res = await GETEvents(
-      new NextRequest(`http://localhost/api/projects/${project.id}/events`),
+      new NextRequest(`http://localhost/api/plans/${project.id}/events`),
       { params: Promise.resolve({ id: project.id }) },
     )
     const events = (await res.json()) as Array<{ created_at: string }>

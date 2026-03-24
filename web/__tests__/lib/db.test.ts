@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  insertProject, getProject, insertTask as _insertTask,
+  insertPlan, getPlan, insertTask as _insertTask,
   getTask, getFullTree,
   lockSubtree, unlockSubtree, deleteTaskTree,
   createSession, updateSession, getActiveSession, getDb,
@@ -12,7 +12,7 @@ import {
 function makeProject(id?: string) {
   const now = new Date().toISOString()
   return {
-    id: id ?? `proj_${Math.random().toString(36).slice(2, 10)}`,
+    id: id ?? `plan_${Math.random().toString(36).slice(2, 10)}`,
     name: 'Test Project',
     description: null,
     status: 'active' as const,
@@ -23,11 +23,11 @@ function makeProject(id?: string) {
   }
 }
 
-function createTestTask(projectId: string, id: string, overrides: Record<string, unknown> = {}) {
+function createTestTask(planId: string, id: string, overrides: Record<string, unknown> = {}) {
   const now = new Date().toISOString()
   _insertTask({
     id,
-    project_id: projectId,
+    plan_id: planId,
     goal: `Task ${id}`,
     status: 'pending',
     result: null,
@@ -40,11 +40,11 @@ function createTestTask(projectId: string, id: string, overrides: Record<string,
   } as Parameters<typeof _insertTask>[0])
 }
 
-function makeSession(projectId: string, rootTaskId: string, overrides: Record<string, unknown> = {}) {
+function makeSession(planId: string, rootTaskId: string, overrides: Record<string, unknown> = {}) {
   const now = new Date().toISOString()
   return {
     id: `sess_${Math.random().toString(36).slice(2, 10)}`,
-    project_id: projectId,
+    plan_id: planId,
     root_task_id: rootTaskId,
     nickname: 'TestAgent',
     status: 'running' as const,
@@ -60,7 +60,7 @@ function makeSession(projectId: string, rootTaskId: string, overrides: Record<st
 describe('getFullTree', () => {
   it('returns nested tree structure', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1', { goal: 'Root' })
     createTestTask(p.id, '1.1', { goal: 'Child A' })
     createTestTask(p.id, '1.2', { goal: 'Child B' })
@@ -77,7 +77,7 @@ describe('getFullTree', () => {
 
   it('returns empty array when no tasks', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     expect(getFullTree(p.id)).toEqual([])
   })
 })
@@ -87,7 +87,7 @@ describe('getFullTree', () => {
 describe('lockSubtree / unlockSubtree', () => {
   it('sets locked_by on root task and all descendants', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
     createTestTask(p.id, '1.1')
     createTestTask(p.id, '1.2')
@@ -106,7 +106,7 @@ describe('lockSubtree / unlockSubtree', () => {
 
   it('unlockSubtree clears locked_by for the session', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
     createTestTask(p.id, '1.1')
     const sessionId = 'sess_unlock_test'
@@ -119,7 +119,7 @@ describe('lockSubtree / unlockSubtree', () => {
 
   it('does not unlock tasks from a different session', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
     createTestTask(p.id, '2')
     lockSubtree('sess_a', p.id, '1')
@@ -137,7 +137,7 @@ describe('lockSubtree / unlockSubtree', () => {
 describe('deleteTaskTree', () => {
   it('removes root task and all descendants', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
     createTestTask(p.id, '1.1')
     createTestTask(p.id, '1.1.1')
@@ -153,7 +153,7 @@ describe('deleteTaskTree', () => {
 
   it('only removes the specified subtree', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
     createTestTask(p.id, '1.1')
     createTestTask(p.id, '1.2')
@@ -173,7 +173,7 @@ describe('deleteTaskTree', () => {
 describe('agent sessions', () => {
   it('createSession and getActiveSession', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
 
     const sess = makeSession(p.id, '1')
@@ -187,7 +187,7 @@ describe('agent sessions', () => {
 
   it('getActiveSession returns undefined when no running/paused sessions', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
 
     const sess = makeSession(p.id, '1', { status: 'completed' as const })
@@ -198,7 +198,7 @@ describe('agent sessions', () => {
 
   it('updateSession updates status and ended_at', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
 
     const sess = makeSession(p.id, '1')
@@ -220,12 +220,12 @@ describe('agent sessions', () => {
 describe('event log', () => {
   it('insertEvent and getEvents for a task', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
 
     insertEvent({
       id: 'evt_1',
-      project_id: p.id,
+      plan_id: p.id,
       task_id: '1',
       event_type: 'task_created',
       actor: 'human',
@@ -241,12 +241,12 @@ describe('event log', () => {
 
   it('getEvents without taskId returns all project events', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
     createTestTask(p.id, '1.1')
 
-    insertEvent({ id: 'e1', project_id: p.id, task_id: '1', event_type: 'task_created', actor: 'human', session_id: null, payload: {} })
-    insertEvent({ id: 'e2', project_id: p.id, task_id: '1.1', event_type: 'task_created', actor: 'agent', session_id: null, payload: {} })
+    insertEvent({ id: 'e1', plan_id: p.id, task_id: '1', event_type: 'task_created', actor: 'human', session_id: null, payload: {} })
+    insertEvent({ id: 'e2', plan_id: p.id, task_id: '1.1', event_type: 'task_created', actor: 'agent', session_id: null, payload: {} })
 
     const events = getEvents(p.id)
     expect(events).toHaveLength(2)
@@ -254,10 +254,10 @@ describe('event log', () => {
 
   it('deserializes payload JSON', () => {
     const p = makeProject()
-    insertProject(p)
+    insertPlan(p)
     createTestTask(p.id, '1')
 
-    insertEvent({ id: 'e_json', project_id: p.id, task_id: '1', event_type: 'task_updated', actor: 'agent', session_id: null, payload: { step: 2, value: [1, 2, 3] } })
+    insertEvent({ id: 'e_json', plan_id: p.id, task_id: '1', event_type: 'task_updated', actor: 'agent', session_id: null, payload: { step: 2, value: [1, 2, 3] } })
 
     const events = getEvents(p.id, '1')
     expect(events[0].payload).toEqual({ step: 2, value: [1, 2, 3] })

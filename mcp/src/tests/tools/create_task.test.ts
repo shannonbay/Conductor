@@ -1,17 +1,17 @@
 import { describe, it, expect } from 'vitest'
 import { create_task } from '../../tools/create_task.js'
-import { create_project } from '../../tools/create_project.js'
+import { create_plan } from '../../tools/create_plan.js'
 import { set_status } from '../../tools/set_status.js'
 import { navigate } from '../../tools/navigate.js'
-import { getProject } from '../../db.js'
+import { getPlan } from '../../db.js'
 
 async function setup() {
-  return create_project({ name: 'Test Project' })
+  return create_plan({ name: 'Test Project' })
 }
 
 describe('create_task', () => {
   it('throws when no project is open', async () => {
-    await expect(create_task({ goal: 'g' })).rejects.toThrow('No project is open')
+    await expect(create_task({ goal: 'g' })).rejects.toThrow('No plan is open')
   })
 
   it('creates root task with id "1" on empty tree', async () => {
@@ -53,9 +53,9 @@ describe('create_task', () => {
   it('focus moves to new task', async () => {
     const p = await setup()
     await create_task({ goal: 'root' })
-    expect(getProject(p.id)!.focus_task_id).toBe('1')
+    expect(getPlan(p.id)!.focus_task_id).toBe('1')
     await create_task({ goal: 'child' })
-    expect(getProject(p.id)!.focus_task_id).toBe('1.1')
+    expect(getPlan(p.id)!.focus_task_id).toBe('1.1')
   })
 
   it('stores initial_state', async () => {

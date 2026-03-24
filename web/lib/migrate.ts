@@ -3,13 +3,28 @@ import type { Database } from 'better-sqlite3'
 /**
  * Runs all migrations on the shared Conductor SQLite database.
  * Safe to call multiple times — all operations are idempotent.
- * Creates the base MCP schema (projects + tasks) if not present, then adds UI extensions.
+ * Creates the base MCP schema (plans + tasks) if not present, then adds UI extensions.
  * This allows the web app to work standalone (e.g. in tests) without a running MCP server.
  */
 export function runMigrations(db: Database): void {
+  // Rename projects → plans for existing databases (idempotent via try/catch)
+  try { db.exec('ALTER TABLE projects RENAME TO plans') } catch { /* already renamed or doesn't exist */ }
+  try { db.exec('ALTER TABLE tasks RENAME COLUMN project_id TO plan_id') } catch { /* already renamed */ }
+  try { db.exec('ALTER TABLE agent_sessions RENAME COLUMN project_id TO plan_id') } catch { /* already renamed */ }
+  try { db.exec('ALTER TABLE events RENAME COLUMN project_id TO plan_id') } catch { /* already renamed */ }
+
+  // Drop old indexes (idempotent)
+  db.exec(`
+    DROP INDEX IF EXISTS idx_tasks_project;
+    DROP INDEX IF EXISTS idx_projects_status;
+    DROP INDEX IF EXISTS idx_projects_updated;
+    DROP INDEX IF EXISTS idx_sessions_project;
+    DROP INDEX IF EXISTS idx_events_project;
+  `)
+
   // Base schema — mirrors mcp/src/db.ts (CREATE TABLE IF NOT EXISTS is idempotent)
   db.exec(`
-    CREATE TABLE IF NOT EXISTS projects (
+    CREATE TABLE IF NOT EXISTS plans (
       id            TEXT PRIMARY KEY,
       name          TEXT NOT NULL,
       description   TEXT,
@@ -22,7 +37,7 @@ export function runMigrations(db: Database): void {
 
     CREATE TABLE IF NOT EXISTS tasks (
       id             TEXT NOT NULL,
-      project_id     TEXT NOT NULL REFERENCES projects(id),
+      plan_id        TEXT NOT NULL REFERENCES plans(id),
       goal           TEXT NOT NULL,
       status         TEXT NOT NULL DEFAULT 'active',
       result         TEXT,
@@ -31,21 +46,21 @@ export function runMigrations(db: Database): void {
       depends_on     TEXT,
       created_at     TEXT NOT NULL,
       updated_at     TEXT NOT NULL,
-      PRIMARY KEY (id, project_id)
+      PRIMARY KEY (id, plan_id)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_tasks_project    ON tasks(project_id);
-    CREATE INDEX IF NOT EXISTS idx_projects_status  ON projects(status);
-    CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_tasks_plan    ON tasks(plan_id);
+    CREATE INDEX IF NOT EXISTS idx_plans_status  ON plans(status);
+    CREATE INDEX IF NOT EXISTS idx_plans_updated ON plans(updated_at DESC);
   `)
 
-  // Add working_dir column to projects table and backfill existing rows
+  // Add working_dir column to plans table and backfill existing rows
   try {
-    db.exec(`ALTER TABLE projects ADD COLUMN working_dir TEXT`)
+    db.exec(`ALTER TABLE plans ADD COLUMN working_dir TEXT`)
   } catch {
     // Column already exists — ignore
   }
-  db.exec(`UPDATE projects SET working_dir = '(unknown)' WHERE working_dir IS NULL`)
+  db.exec(`UPDATE plans SET working_dir = '(unknown)' WHERE working_dir IS NULL`)
 
   // Add UI-layer columns to tasks table (wrapped in try/catch — SQLite lacks IF NOT EXISTS for ALTER TABLE)
   const newTaskColumns: [string, string][] = [
@@ -80,7 +95,7 @@ export function runMigrations(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS agent_sessions (
       id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id),
+      plan_id TEXT NOT NULL REFERENCES plans(id),
       root_task_id TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'running'
         CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled')),
@@ -97,8 +112,8 @@ export function runMigrations(db: Database): void {
   `)
 
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_sessions_project
-      ON agent_sessions(project_id, status)
+    CREATE INDEX IF NOT EXISTS idx_sessions_plan
+      ON agent_sessions(plan_id, status)
   `)
 
   try {
@@ -111,7 +126,7 @@ export function runMigrations(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS events (
       id TEXT PRIMARY KEY,
-      project_id TEXT NOT NULL REFERENCES projects(id),
+      plan_id TEXT NOT NULL REFERENCES plans(id),
       task_id TEXT NOT NULL,
       event_type TEXT NOT NULL,
       actor TEXT NOT NULL CHECK (actor IN ('human', 'agent')),
@@ -123,11 +138,11 @@ export function runMigrations(db: Database): void {
 
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_events_task
-      ON events(project_id, task_id, created_at)
+      ON events(plan_id, task_id, created_at)
   `)
 
   db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_events_project
-      ON events(project_id, created_at)
+    CREATE INDEX IF NOT EXISTS idx_events_plan
+      ON events(plan_id, created_at)
   `)
 }

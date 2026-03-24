@@ -21,7 +21,7 @@ describe('migrate', () => {
     const info = db.prepare("PRAGMA table_info(agent_sessions)").all() as { name: string }[]
     const cols = info.map((c) => c.name)
     expect(cols).toContain('id')
-    expect(cols).toContain('project_id')
+    expect(cols).toContain('plan_id')
     expect(cols).toContain('root_task_id')
     expect(cols).toContain('status')
     expect(cols).toContain('autonomy_level')
@@ -38,7 +38,7 @@ describe('migrate', () => {
     const info = db.prepare("PRAGMA table_info(events)").all() as { name: string }[]
     const cols = info.map((c) => c.name)
     expect(cols).toContain('id')
-    expect(cols).toContain('project_id')
+    expect(cols).toContain('plan_id')
     expect(cols).toContain('task_id')
     expect(cols).toContain('event_type')
     expect(cols).toContain('actor')

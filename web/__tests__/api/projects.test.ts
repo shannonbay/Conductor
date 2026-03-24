@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { GET, POST } from '@/app/api/projects/route.js'
-import { GET as GETById, PATCH as PATCHById, DELETE as DELETEById } from '@/app/api/projects/[id]/route.js'
-import { POST as POSTArchive } from '@/app/api/projects/[id]/archive/route.js'
-import { POST as POSTRestore } from '@/app/api/projects/[id]/restore/route.js'
+import { GET, POST } from '@/app/api/plans/route.js'
+import { GET as GETById, PATCH as PATCHById, DELETE as DELETEById } from '@/app/api/plans/[id]/route.js'
+import { POST as POSTArchive } from '@/app/api/plans/[id]/archive/route.js'
+import { POST as POSTRestore } from '@/app/api/plans/[id]/restore/route.js'
 import { NextRequest } from 'next/server'
 
 function makeRequest(method: string, url: string, body?: unknown): NextRequest {
@@ -36,7 +36,7 @@ describe('POST /api/projects', () => {
     expect(body.name).toBe('My Project')
     expect(body.status).toBe('active')
     expect(body.tree_stats.total_tasks).toBe(0)
-    expect(body.id).toMatch(/^proj_/)
+    expect(body.id).toMatch(/^plan_/)
   })
 
   it('returns 400 when name is missing', async () => {
@@ -46,13 +46,13 @@ describe('POST /api/projects', () => {
   })
 })
 
-describe('GET /api/projects/:id', () => {
+describe('GET /api/plans/:id', () => {
   it('returns project with stats', async () => {
     const createReq = makeRequest('POST', 'http://localhost/api/projects', { name: 'Test', working_dir: '/tmp/test' })
     const createRes = await POST(createReq)
     const { body: project } = await jsonResponse(createRes)
 
-    const getReq = makeRequest('GET', `http://localhost/api/projects/${project.id}`)
+    const getReq = makeRequest('GET', `http://localhost/api/plans/${project.id}`)
     const getRes = await GETById(getReq, { params: Promise.resolve({ id: project.id }) })
     const { status, body } = await jsonResponse(getRes)
     expect(status).toBe(200)
@@ -61,16 +61,16 @@ describe('GET /api/projects/:id', () => {
   })
 
   it('returns 404 for unknown project', async () => {
-    const req = makeRequest('GET', 'http://localhost/api/projects/proj_unknown')
-    const res = await GETById(req, { params: Promise.resolve({ id: 'proj_unknown' }) })
+    const req = makeRequest('GET', 'http://localhost/api/plans/plan_unknown')
+    const res = await GETById(req, { params: Promise.resolve({ id: 'plan_unknown' }) })
     expect(res.status).toBe(404)
   })
 })
 
-describe('PATCH /api/projects/:id', () => {
+describe('PATCH /api/plans/:id', () => {
   it('updates project name', async () => {
     const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Old Name', working_dir: '/tmp/test' })))
-    const patchReq = makeRequest('PATCH', `http://localhost/api/projects/${project.id}`, { name: 'New Name' })
+    const patchReq = makeRequest('PATCH', `http://localhost/api/plans/${project.id}`, { name: 'New Name' })
     const res = await PATCHById(patchReq, { params: Promise.resolve({ id: project.id }) })
     const { status, body } = await jsonResponse(res)
     expect(status).toBe(200)
@@ -78,10 +78,10 @@ describe('PATCH /api/projects/:id', () => {
   })
 })
 
-describe('POST /api/projects/:id/archive', () => {
+describe('POST /api/plans/:id/archive', () => {
   it('archives a project', async () => {
     const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Archive Me', working_dir: '/tmp/test' })))
-    const archiveReq = makeRequest('POST', `http://localhost/api/projects/${project.id}/archive`)
+    const archiveReq = makeRequest('POST', `http://localhost/api/plans/${project.id}/archive`)
     const res = await POSTArchive(archiveReq, { params: Promise.resolve({ id: project.id }) })
     const { status, body } = await jsonResponse(res)
     expect(status).toBe(200)
@@ -89,11 +89,11 @@ describe('POST /api/projects/:id/archive', () => {
   })
 })
 
-describe('POST /api/projects/:id/restore', () => {
+describe('POST /api/plans/:id/restore', () => {
   it('restores an archived project', async () => {
     const { body: project } = await jsonResponse(await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Restore Me', working_dir: '/tmp/test' })))
-    await POSTArchive(makeRequest('POST', `http://localhost/api/projects/${project.id}/archive`), { params: Promise.resolve({ id: project.id }) })
-    const restoreReq = makeRequest('POST', `http://localhost/api/projects/${project.id}/restore`)
+    await POSTArchive(makeRequest('POST', `http://localhost/api/plans/${project.id}/archive`), { params: Promise.resolve({ id: project.id }) })
+    const restoreReq = makeRequest('POST', `http://localhost/api/plans/${project.id}/restore`)
     const res = await POSTRestore(restoreReq, { params: Promise.resolve({ id: project.id }) })
     const { status, body } = await jsonResponse(res)
     expect(status).toBe(200)
@@ -101,16 +101,16 @@ describe('POST /api/projects/:id/restore', () => {
   })
 })
 
-describe('DELETE /api/projects/:id', () => {
+describe('DELETE /api/plans/:id', () => {
   it('deletes a project and it no longer appears in GET /api/projects', async () => {
     // Create a project
     const { body: project } = await jsonResponse(
       await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Delete Me', working_dir: '/tmp/test' }))
     )
-    expect(project.id).toMatch(/^proj_/)
+    expect(project.id).toMatch(/^plan_/)
 
     // Delete it
-    const deleteReq = makeRequest('DELETE', `http://localhost/api/projects/${project.id}`)
+    const deleteReq = makeRequest('DELETE', `http://localhost/api/plans/${project.id}`)
     const deleteRes = await DELETEById(deleteReq, { params: Promise.resolve({ id: project.id }) })
     expect(deleteRes.status).toBe(200)
 
@@ -123,8 +123,8 @@ describe('DELETE /api/projects/:id', () => {
   })
 
   it('returns 404 when deleting a non-existent project', async () => {
-    const deleteReq = makeRequest('DELETE', 'http://localhost/api/projects/proj_does_not_exist')
-    const res = await DELETEById(deleteReq, { params: Promise.resolve({ id: 'proj_does_not_exist' }) })
+    const deleteReq = makeRequest('DELETE', 'http://localhost/api/plans/plan_does_not_exist')
+    const res = await DELETEById(deleteReq, { params: Promise.resolve({ id: 'plan_does_not_exist' }) })
     expect(res.status).toBe(404)
   })
 
@@ -134,12 +134,12 @@ describe('DELETE /api/projects/:id', () => {
       await POST(makeRequest('POST', 'http://localhost/api/projects', { name: 'Gone', working_dir: '/tmp/test' }))
     )
     await DELETEById(
-      makeRequest('DELETE', `http://localhost/api/projects/${project.id}`),
+      makeRequest('DELETE', `http://localhost/api/plans/${project.id}`),
       { params: Promise.resolve({ id: project.id }) }
     )
 
     // Fetching it by ID should now return 404
-    const getReq = makeRequest('GET', `http://localhost/api/projects/${project.id}`)
+    const getReq = makeRequest('GET', `http://localhost/api/plans/${project.id}`)
     const getRes = await GETById(getReq, { params: Promise.resolve({ id: project.id }) })
     expect(getRes.status).toBe(404)
   })

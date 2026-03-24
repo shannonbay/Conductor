@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { NextRequest } from 'next/server'
-import { POST as POSTProject } from '@/app/api/projects/route.js'
-import { POST as POSTTask } from '@/app/api/projects/[id]/tasks/route.js'
-import { GET as GETEvents } from '@/app/api/projects/[id]/events/route.js'
+import { POST as POSTProject } from '@/app/api/plans/route.js'
+import { POST as POSTTask } from '@/app/api/plans/[id]/tasks/route.js'
+import { GET as GETEvents } from '@/app/api/plans/[id]/events/route.js'
 
 function makeRequest(method: string, url: string, body?: unknown): NextRequest {
   return new NextRequest(url, {
@@ -17,35 +17,35 @@ async function createProject(name = 'Test Project') {
   return (await res.json()) as { id: string }
 }
 
-async function createTask(projectId: string, body: object) {
+async function createTask(planId: string, body: object) {
   return POSTTask(
-    makeRequest('POST', `http://localhost/api/projects/${projectId}/tasks`, body),
-    { params: Promise.resolve({ id: projectId }) },
+    makeRequest('POST', `http://localhost/api/plans/${planId}/tasks`, body),
+    { params: Promise.resolve({ id: planId }) },
   )
 }
 
-async function getEvents(projectId: string) {
+async function getEvents(planId: string) {
   const res = await GETEvents(
-    makeRequest('GET', `http://localhost/api/projects/${projectId}/events`),
-    { params: Promise.resolve({ id: projectId }) },
+    makeRequest('GET', `http://localhost/api/plans/${planId}/events`),
+    { params: Promise.resolve({ id: planId }) },
   )
   return { status: res.status, body: await res.json() }
 }
 
-// ── GET /api/projects/:id/events ─────────────────────────────────────────────
+// ── GET /api/plans/:id/events ─────────────────────────────────────────────
 
-describe('GET /api/projects/:id/events', () => {
+describe('GET /api/plans/:id/events', () => {
   it('returns 404 for unknown project', async () => {
-    const { status } = await getEvents('proj_does_not_exist')
+    const { status } = await getEvents('plan_does_not_exist')
     expect(status).toBe(404)
   })
 
-  it('returns only the project_created event for a new project with no tasks', async () => {
+  it('returns only the plan_created event for a new project with no tasks', async () => {
     const project = await createProject()
     const { status, body } = await getEvents(project.id)
     expect(status).toBe(200)
     expect(body).toHaveLength(1)
-    expect(body[0].event_type).toBe('project_created')
+    expect(body[0].event_type).toBe('plan_created')
   })
 
   it('returns events after task creation in oldest-first order', async () => {
@@ -55,8 +55,8 @@ describe('GET /api/projects/:id/events', () => {
     const { status, body } = await getEvents(project.id)
     expect(status).toBe(200)
     expect(body.length).toBeGreaterThan(1)
-    // oldest-first: project_created comes before task_created
-    expect(body[0].event_type).toBe('project_created')
+    // oldest-first: plan_created comes before task_created
+    expect(body[0].event_type).toBe('plan_created')
     const taskEvent = body.find((e: { event_type: string }) => e.event_type === 'task_created')
     expect(taskEvent).toBeDefined()
     expect(taskEvent.actor).toBe('human')
@@ -80,7 +80,7 @@ describe('GET /api/projects/:id/events', () => {
     const { body } = await getEvents(project.id)
     const event = body[0]
     expect(event).toHaveProperty('id')
-    expect(event).toHaveProperty('project_id', project.id)
+    expect(event).toHaveProperty('plan_id', project.id)
     expect(event).toHaveProperty('task_id')
     expect(event).toHaveProperty('event_type')
     expect(event).toHaveProperty('actor')
@@ -99,7 +99,7 @@ describe('store appendEvent deduplication', () => {
 
     const event = {
       id: 'evt_dedup_test',
-      project_id: 'proj_x',
+      plan_id: 'plan_x',
       task_id: '1',
       event_type: 'task_created',
       actor: 'human' as const,
@@ -122,7 +122,7 @@ describe('store appendEvent deduplication', () => {
     const before = useStore.getState().events.length
 
     const base = {
-      project_id: 'proj_x',
+      plan_id: 'plan_x',
       task_id: '1',
       event_type: 'task_updated',
       actor: 'agent' as const,

@@ -5,7 +5,7 @@ import { mkdirSync } from 'fs'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-export interface ProjectRow {
+export interface PlanRow {
   id: string
   name: string
   description: string | null
@@ -18,7 +18,7 @@ export interface ProjectRow {
 
 export interface TaskRow {
   id: string
-  project_id: string
+  plan_id: string
   goal: string
   status: string
   result: string | null
@@ -31,7 +31,7 @@ export interface TaskRow {
 
 export interface Task {
   id: string
-  project_id: string
+  plan_id: string
   goal: string
   status: string
   result: string | null
@@ -60,8 +60,12 @@ const db = new Database(dbPath)
 db.pragma('journal_mode = WAL')
 db.pragma('foreign_keys = ON')
 
+// Rename legacy tables for existing databases (idempotent)
+try { db.exec('ALTER TABLE projects RENAME TO plans') } catch { /* already renamed */ }
+try { db.exec('ALTER TABLE tasks RENAME COLUMN project_id TO plan_id') } catch { /* already renamed */ }
+
 db.exec(`
-CREATE TABLE IF NOT EXISTS projects (
+CREATE TABLE IF NOT EXISTS plans (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   description   TEXT,
@@ -74,7 +78,7 @@ CREATE TABLE IF NOT EXISTS projects (
 
 CREATE TABLE IF NOT EXISTS tasks (
   id             TEXT NOT NULL,
-  project_id     TEXT NOT NULL REFERENCES projects(id),
+  plan_id        TEXT NOT NULL REFERENCES plans(id),
   goal           TEXT NOT NULL,
   status         TEXT NOT NULL DEFAULT 'active',
   result         TEXT,
@@ -83,12 +87,15 @@ CREATE TABLE IF NOT EXISTS tasks (
   depends_on     TEXT,
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL,
-  PRIMARY KEY (id, project_id)
+  PRIMARY KEY (id, plan_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_project    ON tasks(project_id);
-CREATE INDEX IF NOT EXISTS idx_projects_status  ON projects(status);
-CREATE INDEX IF NOT EXISTS idx_projects_updated ON projects(updated_at DESC);
+DROP INDEX IF EXISTS idx_tasks_project;
+DROP INDEX IF EXISTS idx_projects_status;
+DROP INDEX IF EXISTS idx_projects_updated;
+CREATE INDEX IF NOT EXISTS idx_tasks_plan    ON tasks(plan_id);
+CREATE INDEX IF NOT EXISTS idx_plans_status  ON plans(status);
+CREATE INDEX IF NOT EXISTS idx_plans_updated ON plans(updated_at DESC);
 `)
 
 // Drop legacy columns from existing databases (SQLite 3.35+)
@@ -106,37 +113,37 @@ function parseTask(row: TaskRow): Task {
   }
 }
 
-export function getProject(id: string): ProjectRow | undefined {
-  return db.prepare('SELECT * FROM projects WHERE id = ?').get(id) as ProjectRow | undefined
+export function getPlan(id: string): PlanRow | undefined {
+  return db.prepare('SELECT * FROM plans WHERE id = ?').get(id) as PlanRow | undefined
 }
 
-export function getTask(projectId: string, taskId: string): Task | undefined {
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ? AND project_id = ?').get(taskId, projectId) as TaskRow | undefined
+export function getTask(planId: string, taskId: string): Task | undefined {
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ? AND plan_id = ?').get(taskId, planId) as TaskRow | undefined
   return row ? parseTask(row) : undefined
 }
 
-export function getChildren(projectId: string, parentId: string): Task[] {
+export function getChildren(planId: string, parentId: string): Task[] {
   const prefix = parentId + '.'
   const depth = parentId.split('.').length + 1
-  const rows = db.prepare("SELECT * FROM tasks WHERE project_id = ? AND id LIKE ?").all(projectId, prefix + '%') as TaskRow[]
+  const rows = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id LIKE ?").all(planId, prefix + '%') as TaskRow[]
   return rows
     .filter(r => r.id.split('.').length === depth)
     .map(parseTask)
 }
 
-export function getSiblings(projectId: string, taskId: string): Task[] {
+export function getSiblings(planId: string, taskId: string): Task[] {
   const segments = taskId.split('.')
   if (segments.length === 1) {
     // Root-level siblings: other tasks with no dot in id
-    const rows = db.prepare("SELECT * FROM tasks WHERE project_id = ? AND id != ? AND id NOT LIKE '%.%'").all(projectId, taskId) as TaskRow[]
+    const rows = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id != ? AND id NOT LIKE '%.%'").all(planId, taskId) as TaskRow[]
     return rows.map(parseTask)
   }
   const parentId = segments.slice(0, -1).join('.')
-  return getChildren(projectId, parentId).filter(t => t.id !== taskId)
+  return getChildren(planId, parentId).filter(t => t.id !== taskId)
 }
 
-export function getTreeStats(projectId: string): TreeStats {
-  const rows = db.prepare('SELECT status, COUNT(*) as count FROM tasks WHERE project_id = ? GROUP BY status').all(projectId) as { status: string; count: number }[]
+export function getTreeStats(planId: string): TreeStats {
+  const rows = db.prepare('SELECT status, COUNT(*) as count FROM tasks WHERE plan_id = ? GROUP BY status').all(planId) as { status: string; count: number }[]
   const stats: TreeStats = { total_tasks: 0, active: 0, completed: 0, pending: 0, abandoned: 0 }
   for (const row of rows) {
     stats.total_tasks += row.count
@@ -148,46 +155,46 @@ export function getTreeStats(projectId: string): TreeStats {
   return stats
 }
 
-export function nextChildId(projectId: string, parentId: string): string {
-  const count = (db.prepare("SELECT COUNT(*) as count FROM tasks WHERE project_id = ? AND id LIKE ?").get(projectId, parentId + '.%') as { count: number }).count
+export function nextChildId(planId: string, parentId: string): string {
+  const count = (db.prepare("SELECT COUNT(*) as count FROM tasks WHERE plan_id = ? AND id LIKE ?").get(planId, parentId + '.%') as { count: number }).count
   // Filter to direct children only (one level deeper)
-  const directChildren = getChildren(projectId, parentId)
+  const directChildren = getChildren(planId, parentId)
   return parentId + '.' + (directChildren.length + 1)
 }
 
-export function touchProject(projectId: string): void {
-  db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), projectId)
+export function touchPlan(planId: string): void {
+  db.prepare("UPDATE plans SET updated_at = ? WHERE id = ?").run(new Date().toISOString(), planId)
 }
 
-export function listProjects(status: 'active' | 'archived' | 'all'): ProjectRow[] {
+export function listPlans(status: 'active' | 'archived' | 'all'): PlanRow[] {
   if (status === 'all') {
-    return db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all() as ProjectRow[]
+    return db.prepare('SELECT * FROM plans ORDER BY updated_at DESC').all() as PlanRow[]
   }
-  return db.prepare('SELECT * FROM projects WHERE status = ? ORDER BY updated_at DESC').all(status) as ProjectRow[]
+  return db.prepare('SELECT * FROM plans WHERE status = ? ORDER BY updated_at DESC').all(status) as PlanRow[]
 }
 
-export function insertProject(project: ProjectRow): void {
+export function insertPlan(plan: PlanRow): void {
   db.prepare(`
-    INSERT INTO projects (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
+    INSERT INTO plans (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(project.id, project.name, project.description, project.status, project.working_dir, project.focus_task_id, project.created_at, project.updated_at)
+  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.focus_task_id, plan.created_at, plan.updated_at)
 }
 
-export function updateProject(id: string, fields: Partial<Omit<ProjectRow, 'id'>>): void {
+export function updatePlan(id: string, fields: Partial<Omit<PlanRow, 'id'>>): void {
   const entries = Object.entries(fields)
   if (entries.length === 0) return
   const sets = entries.map(([k]) => `${k} = ?`).join(', ')
   const values = entries.map(([, v]) => v)
-  db.prepare(`UPDATE projects SET ${sets} WHERE id = ?`).run(...values, id)
+  db.prepare(`UPDATE plans SET ${sets} WHERE id = ?`).run(...values, id)
 }
 
 export function insertTask(task: Task): void {
   db.prepare(`
-    INSERT INTO tasks (id, project_id, goal, status, result, abandon_reason, state, depends_on, created_at, updated_at)
+    INSERT INTO tasks (id, plan_id, goal, status, result, abandon_reason, state, depends_on, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     task.id,
-    task.project_id,
+    task.plan_id,
     task.goal,
     task.status,
     task.result,
@@ -199,7 +206,7 @@ export function insertTask(task: Task): void {
   )
 }
 
-export function updateTask(projectId: string, taskId: string, fields: Partial<Omit<Task, 'id' | 'project_id'>>): void {
+export function updateTask(planId: string, taskId: string, fields: Partial<Omit<Task, 'id' | 'plan_id'>>): void {
   const serialized: Record<string, unknown> = { ...fields }
   if ('state' in serialized) serialized.state = JSON.stringify(serialized.state)
   if ('depends_on' in serialized) serialized.depends_on = serialized.depends_on ? JSON.stringify(serialized.depends_on) : null
@@ -208,14 +215,14 @@ export function updateTask(projectId: string, taskId: string, fields: Partial<Om
   if (entries.length === 0) return
   const sets = entries.map(([k]) => `${k} = ?`).join(', ')
   const values = entries.map(([, v]) => v)
-  db.prepare(`UPDATE tasks SET ${sets} WHERE id = ? AND project_id = ?`).run(...values, taskId, projectId)
+  db.prepare(`UPDATE tasks SET ${sets} WHERE id = ? AND plan_id = ?`).run(...values, taskId, planId)
 }
 
-export function countAllTasks(projectId: string): number {
-  const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE project_id = ?').get(projectId) as { count: number }
+export function countAllTasks(planId: string): number {
+  const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE plan_id = ?').get(planId) as { count: number }
   return row.count
 }
 
 export function clearAllData(): void {
-  db.exec('DELETE FROM tasks; DELETE FROM projects;')
+  db.exec('DELETE FROM tasks; DELETE FROM plans;')
 }

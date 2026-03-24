@@ -19,14 +19,14 @@ export type EventType =
   | 'human_prompt'
   | 'agent_message'
   | 'tool_call'
-  | 'project_created'
-  | 'project_updated'
-  | 'project_archived'
-  | 'project_restored'
+  | 'plan_created'
+  | 'plan_updated'
+  | 'plan_archived'
+  | 'plan_restored'
   | 'task_deleted'
 
 interface RecordEventOptions {
-  projectId: string
+  planId: string
   taskId: string
   eventType: EventType
   actor: 'human' | 'agent'
@@ -37,7 +37,7 @@ interface RecordEventOptions {
 export function recordEvent(opts: RecordEventOptions): void {
   const event = {
     id: nanoid(),
-    project_id: opts.projectId,
+    plan_id: opts.planId,
     task_id: opts.taskId,
     event_type: opts.eventType,
     actor: opts.actor,
@@ -46,5 +46,5 @@ export function recordEvent(opts: RecordEventOptions): void {
     created_at: new Date().toISOString(),
   }
   insertEvent(event)
-  broadcast(opts.projectId, { type: 'event', event })
+  broadcast(opts.planId, { type: 'event', event })
 }

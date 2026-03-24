@@ -1,21 +1,21 @@
 import { z } from 'zod'
 
-export const CreateProjectSchema = z.object({
-  name: z.string().min(1).describe('Human-readable project name'),
-  description: z.string().optional().describe('Optional summary of the project\'s purpose'),
-  working_dir: z.string().optional().describe('Working directory for the project. Defaults to the server\'s current working directory.'),
+export const CreatePlanSchema = z.object({
+  name: z.string().min(1).describe('Human-readable plan name'),
+  description: z.string().optional().describe('Optional summary of the plan\'s purpose'),
+  working_dir: z.string().optional().describe('Working directory for the plan. Defaults to the server\'s current working directory.'),
 })
 
-export const ListProjectsSchema = z.object({
+export const ListPlansSchema = z.object({
   status: z.enum(['active', 'archived', 'all']).default('active').describe('Filter by status'),
 })
 
-export const OpenProjectSchema = z.object({
-  project_id: z.string().describe('ID of the project to open'),
+export const OpenPlanSchema = z.object({
+  plan_id: z.string().describe('ID of the plan to open'),
 })
 
-export const ArchiveProjectSchema = z.object({
-  project_id: z.string().describe('ID of the project to archive'),
+export const ArchivePlanSchema = z.object({
+  plan_id: z.string().describe('ID of the plan to archive'),
 })
 
 export const CreateTaskSchema = z.object({

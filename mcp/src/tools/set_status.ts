@@ -1,20 +1,20 @@
-import { getProject, getTask, getChildren, updateTask, touchProject } from '../db.js'
-import { getOpenProject } from '../session.js'
+import { getPlan, getTask, getChildren, updateTask, touchPlan } from '../db.js'
+import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { SetStatusSchema } from '../schema.js'
 
 export async function set_status(args: unknown) {
   const input = SetStatusSchema.parse(args)
 
-  const projectId = getOpenProject()
-  if (!projectId) throw new Error('No project is open. Use open_project or create_project first.')
+  const planId = getOpenPlan()
+  if (!planId) throw new Error('No plan is open. Use open_plan or create_plan first.')
 
-  const project = getProject(projectId)!
+  const project = getPlan(planId)!
   const focusTaskId = project.focus_task_id
   if (!focusTaskId) throw new Error('No focus task. Use create_task to add the first task.')
 
   const targetId = input.task_id ?? focusTaskId
-  const task = getTask(projectId, targetId)
+  const task = getTask(planId, targetId)
   if (!task) throw new Error(`Task ${targetId} not found.`)
 
   let warning: string | undefined
@@ -26,7 +26,7 @@ export async function set_status(args: unknown) {
   if (input.status === 'active') {
     if (task.depends_on && task.depends_on.length > 0) {
       const blockers = task.depends_on.filter(depId => {
-        const dep = getTask(projectId, depId)
+        const dep = getTask(planId, depId)
         return dep?.status !== 'completed'
       })
       if (blockers.length > 0) {
@@ -36,7 +36,7 @@ export async function set_status(args: unknown) {
   }
 
   if (input.status === 'completed') {
-    const children = getChildren(projectId, targetId)
+    const children = getChildren(planId, targetId)
     const unfinished = children.filter(c => c.status !== 'completed' && c.status !== 'abandoned')
     if (unfinished.length > 0) {
       warning = `Warning: ${unfinished.length} child task(s) are not yet completed or abandoned: ${unfinished.map(c => c.id).join(', ')}`
@@ -48,10 +48,10 @@ export async function set_status(args: unknown) {
   if (input.status === 'abandoned') fields.abandon_reason = input.reason!
   if (input.result !== undefined) fields.result = input.result
 
-  updateTask(projectId, targetId, fields as Parameters<typeof updateTask>[2])
-  touchProject(projectId)
+  updateTask(planId, targetId, fields as Parameters<typeof updateTask>[2])
+  touchPlan(planId)
 
-  const context = buildContext(projectId, focusTaskId)
+  const context = buildContext(planId, focusTaskId)
   if (warning) {
     return { ...context, warning }
   }

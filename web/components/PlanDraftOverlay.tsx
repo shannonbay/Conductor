@@ -5,13 +5,13 @@ import type { ProposedTask } from '@/lib/planning'
 
 interface Props {
   proposed: ProposedTask[]
-  projectId: string
+  planId: string
   parentTaskId: string
   onClose: () => void
   onAccepted: () => void
 }
 
-export function PlanDraftOverlay({ proposed, projectId, parentTaskId, onClose, onAccepted }: Props) {
+export function PlanDraftOverlay({ proposed, planId, parentTaskId, onClose, onAccepted }: Props) {
   const [tasks, setTasks] = useState<(ProposedTask & { accepted: boolean })[]>(
     proposed.map((t) => ({ ...t, accepted: true })),
   )
@@ -31,7 +31,7 @@ export function PlanDraftOverlay({ proposed, projectId, parentTaskId, onClose, o
     if (accepted.length === 0) { onClose(); return }
     setLoading(true)
     setError(null)
-    const res = await fetch(`/api/projects/${projectId}/tasks/${parentTaskId}/plan/accept`, {
+    const res = await fetch(`/api/plans/${planId}/tasks/${parentTaskId}/plan/accept`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ tasks: accepted.map(({ goal, suggested_depends_on }) => ({ goal, depends_on: suggested_depends_on })) }),

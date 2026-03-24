@@ -7,9 +7,9 @@ import {
 } from './agent-tools'
 import { nanoid } from 'nanoid'
 import {
-  getProject, getTask, getTreeStats, getChildren, getSiblings,
+  getPlan, getTask, getTreeStats, getChildren, getSiblings,
   createSession, updateSession, getActiveSession, lockSubtree, unlockSubtree,
-  insertTask, updateTask, touchProject, nextChildId,
+  insertTask, updateTask, touchPlan, nextChildId,
 } from './db'
 import { recordEvent } from './event-log'
 import { broadcast } from './ws-broadcaster'
@@ -20,25 +20,25 @@ const abortControllers = new Map<string, AbortController>()
 // ─── Pending human messages (prompt bar injection) ─────────────────────────────
 const pendingMessages = new Map<string, string[]>()
 
-export function enqueueUserMessage(projectId: string, message: string): void {
-  const queue = pendingMessages.get(projectId) ?? []
+export function enqueueUserMessage(planId: string, message: string): void {
+  const queue = pendingMessages.get(planId) ?? []
   queue.push(message)
-  pendingMessages.set(projectId, queue)
+  pendingMessages.set(planId, queue)
 }
 
-function drainUserMessages(projectId: string): string[] {
-  const msgs = pendingMessages.get(projectId) ?? []
-  pendingMessages.delete(projectId)
+function drainUserMessages(planId: string): string[] {
+  const msgs = pendingMessages.get(planId) ?? []
+  pendingMessages.delete(planId)
   return msgs
 }
 
 // ─── Prompt construction ──────────────────────────────────────────────────────
 
-function buildSystemPrompt(projectName: string, rootTaskId: string, workingDir: string | null): string {
-  return `You are an AI agent working within a task tree project management system.
+function buildSystemPrompt(planName: string, rootTaskId: string, workingDir: string | null): string {
+  return `You are an AI agent working within a task tree plan management system.
 You have access to tools for managing your work and for reading/writing files and running commands.
 
-Your current assignment is task ${rootTaskId} in project "${projectName}".${workingDir ? `\nYour working directory is: ${workingDir}` : ''}
+Your current assignment is task ${rootTaskId} in plan "${planName}".${workingDir ? `\nYour working directory is: ${workingDir}` : ''}
 Your autonomy level is: full (proceed without pausing).
 
 Task management rules:
@@ -230,7 +230,7 @@ function getToolDefinitions(projectId: string, rootTaskId: string): Anthropic.To
 
 interface AgentState {
   focusTaskId: string
-  projectId: string
+  planId: string
   rootTaskId: string
   sessionId: string
 }
@@ -241,22 +241,22 @@ async function dispatchTool(
   state: AgentState,
   workingDir: string,
 ): Promise<string> {
-  const { projectId, sessionId } = state
+  const { planId, sessionId } = state
 
   switch (toolName) {
     case 'get_context': {
-      const task = getTask(projectId, state.focusTaskId)
+      const task = getTask(planId, state.focusTaskId)
       if (!task) return JSON.stringify({ error: 'No open task' })
       const parts = task.id.split('.')
       const parentId = parts.length > 1 ? parts.slice(0, -1).join('.') : null
-      const parent = parentId ? getTask(projectId, parentId) : null
+      const parent = parentId ? getTask(planId, parentId) : null
       return JSON.stringify({
-        project: getProject(projectId),
+        plan: getPlan(planId),
         focus: task,
         parent: parent ? { id: parent.id, goal: parent.goal, status: parent.status } : null,
-        children: getChildren(projectId, task.id),
-        siblings: getSiblings(projectId, task.id),
-        tree_stats: getTreeStats(projectId),
+        children: getChildren(planId, task.id),
+        siblings: getSiblings(planId, task.id),
+        tree_stats: getTreeStats(planId),
       })
     }
 
@@ -264,11 +264,11 @@ async function dispatchTool(
       const { goal, status = 'active', depends_on } = toolInput as {
         goal: string; status?: 'active' | 'pending'; depends_on?: string[]
       }
-      const childId = nextChildId(projectId, state.focusTaskId)
+      const childId = nextChildId(planId, state.focusTaskId)
       const now = new Date().toISOString()
       insertTask({
         id: childId,
-        project_id: projectId,
+        plan_id: planId,
         goal,
         status,
         result: null,
@@ -279,26 +279,26 @@ async function dispatchTool(
         created_at: now,
         updated_at: now,
       })
-      touchProject(projectId)
-      recordEvent({ projectId, taskId: childId, eventType: 'task_created', actor: 'agent', sessionId, payload: { goal } })
+      touchPlan(planId)
+      recordEvent({ planId, taskId: childId, eventType: 'task_created', actor: 'agent', sessionId, payload: { goal } })
       state.focusTaskId = childId
-      return JSON.stringify({ created: childId, task: getTask(projectId, childId) })
+      return JSON.stringify({ created: childId, task: getTask(planId, childId) })
     }
 
     case 'update_task': {
       const { result, state_patch } = toolInput as {
         result?: string; state_patch?: Record<string, unknown>
       }
-      const task = getTask(projectId, state.focusTaskId)
+      const task = getTask(planId, state.focusTaskId)
       if (!task) return JSON.stringify({ error: 'No focus task' })
       const now = new Date().toISOString()
       const fields: Record<string, unknown> = { updated_at: now }
       if (result !== undefined) fields['result'] = result
       if (state_patch) fields['state'] = { ...task.state, ...state_patch }
-      updateTask(projectId, state.focusTaskId, fields)
-      touchProject(projectId)
-      recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'task_updated', actor: 'agent', sessionId, payload: { result } })
-      return JSON.stringify({ updated: state.focusTaskId, task: getTask(projectId, state.focusTaskId) })
+      updateTask(planId, state.focusTaskId, fields)
+      touchPlan(planId)
+      recordEvent({ planId, taskId: state.focusTaskId, eventType: 'task_updated', actor: 'agent', sessionId, payload: { result } })
+      return JSON.stringify({ updated: state.focusTaskId, task: getTask(planId, state.focusTaskId) })
     }
 
     case 'set_status': {
@@ -306,21 +306,21 @@ async function dispatchTool(
         target_id?: string; status: 'active' | 'pending' | 'completed' | 'abandoned'; reason?: string; result?: string
       }
       const targetId = target_id ?? state.focusTaskId
-      const task = getTask(projectId, targetId)
+      const task = getTask(planId, targetId)
       if (!task) return JSON.stringify({ error: `Task ${targetId} not found` })
       const now = new Date().toISOString()
       const fields: Record<string, unknown> = { status, updated_at: now }
       if (status === 'abandoned' && reason) fields['abandon_reason'] = reason
       if (result !== undefined) fields['result'] = result
-      updateTask(projectId, targetId, fields)
-      touchProject(projectId)
-      recordEvent({ projectId, taskId: targetId, eventType: 'status_changed', actor: 'agent', sessionId, payload: { to: status, reason } })
-      return JSON.stringify({ updated: targetId, status, task: getTask(projectId, targetId) })
+      updateTask(planId, targetId, fields)
+      touchPlan(planId)
+      recordEvent({ planId, taskId: targetId, eventType: 'status_changed', actor: 'agent', sessionId, payload: { to: status, reason } })
+      return JSON.stringify({ updated: targetId, status, task: getTask(planId, targetId) })
     }
 
     case 'navigate': {
       const { target_id } = toolInput as { target_id: string }
-      const task = getTask(projectId, target_id)
+      const task = getTask(planId, target_id)
       if (!task) return JSON.stringify({ error: `Task ${target_id} not found` })
       state.focusTaskId = target_id
       return JSON.stringify({ focus: target_id, task })
@@ -329,7 +329,7 @@ async function dispatchTool(
     case 'synthesize': {
       const { target_id } = toolInput as { target_id?: string }
       const targetId = target_id ?? state.focusTaskId
-      const children = getChildren(projectId, targetId)
+      const children = getChildren(planId, targetId)
       return JSON.stringify({
         completed: children.filter((c) => c.status === 'completed'),
         abandoned: children.filter((c) => c.status === 'abandoned'),
@@ -380,14 +380,14 @@ async function dispatchTool(
 
 // ─── Agent runner ─────────────────────────────────────────────────────────────
 
-export async function startAgent(projectId: string, rootTaskId: string): Promise<{ sessionId: string }> {
-  const existing = getActiveSession(projectId)
-  if (existing) throw new Error(`An agent session is already active for this project: ${existing.id}`)
+export async function startAgent(planId: string, rootTaskId: string): Promise<{ sessionId: string }> {
+  const existing = getActiveSession(planId)
+  if (existing) throw new Error(`An agent session is already active for this plan: ${existing.id}`)
 
-  const project = getProject(projectId)
-  if (!project) throw new Error(`Project ${projectId} not found`)
+  const plan = getPlan(planId)
+  if (!plan) throw new Error(`Plan ${planId} not found`)
 
-  const task = getTask(projectId, rootTaskId)
+  const task = getTask(planId, rootTaskId)
   if (!task) throw new Error(`Task ${rootTaskId} not found`)
 
   const sessionId = nanoid()
@@ -395,7 +395,7 @@ export async function startAgent(projectId: string, rootTaskId: string): Promise
 
   createSession({
     id: sessionId,
-    project_id: projectId,
+    plan_id: planId,
     root_task_id: rootTaskId,
     nickname: generateNickname(),
     status: 'running',
@@ -404,15 +404,15 @@ export async function startAgent(projectId: string, rootTaskId: string): Promise
     started_at: now,
   })
 
-  lockSubtree(sessionId, projectId, rootTaskId)
-  recordEvent({ projectId, taskId: rootTaskId, eventType: 'agent_started', actor: 'agent', sessionId })
-  broadcast(projectId, { type: 'agent_started', sessionId, rootTaskId })
+  lockSubtree(sessionId, planId, rootTaskId)
+  recordEvent({ planId, taskId: rootTaskId, eventType: 'agent_started', actor: 'agent', sessionId })
+  broadcast(planId, { type: 'agent_started', sessionId, rootTaskId })
 
   const controller = new AbortController()
-  abortControllers.set(projectId, controller)
+  abortControllers.set(planId, controller)
 
   // Run agent asynchronously (non-blocking)
-  runAgentLoop(sessionId, projectId, rootTaskId, project.name, project.working_dir, task, controller).catch((err) => {
+  runAgentLoop(sessionId, planId, rootTaskId, plan.name, plan.working_dir, task, controller).catch((err) => {
     console.error('[AgentRunner] Unhandled error:', err)
   })
 
@@ -448,15 +448,15 @@ async function createMessageWithRetry(
 
 async function runAgentLoop(
   sessionId: string,
-  projectId: string,
+  planId: string,
   rootTaskId: string,
-  projectName: string,
+  planName: string,
   workingDir: string | null,
   rootTask: NonNullable<ReturnType<typeof getTask>>,
   controller: AbortController,
 ): Promise<void> {
   const client = getAnthropicClient()
-  const state: AgentState = { focusTaskId: rootTaskId, projectId, rootTaskId, sessionId }
+  const state: AgentState = { focusTaskId: rootTaskId, planId, rootTaskId, sessionId }
 
   const messages: Anthropic.MessageParam[] = [
     { role: 'user', content: buildInitialMessage(rootTask) },
@@ -470,17 +470,17 @@ async function runAgentLoop(
       if (controller.signal.aborted) break
 
       // Inject any queued human messages before the next API call
-      for (const msg of drainUserMessages(projectId)) {
+      for (const msg of drainUserMessages(planId)) {
         messages.push({ role: 'user', content: msg })
-        recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'human_prompt', actor: 'human', sessionId, payload: { message: msg } })
-        broadcast(projectId, { type: 'human_prompt', sessionId, message: msg })
+        recordEvent({ planId, taskId: state.focusTaskId, eventType: 'human_prompt', actor: 'human', sessionId, payload: { message: msg } })
+        broadcast(planId, { type: 'human_prompt', sessionId, message: msg })
       }
 
       const response = await createMessageWithRetry(client, {
         model: 'claude-sonnet-4-6',
         max_tokens: 4096,
-        system: buildSystemPrompt(projectName, rootTaskId, workingDir),
-        tools: getToolDefinitions(projectId, rootTaskId),
+        system: buildSystemPrompt(planName, rootTaskId, workingDir),
+        tools: getToolDefinitions(planId, rootTaskId),
         messages,
       }, controller)
 
@@ -488,7 +488,7 @@ async function runAgentLoop(
       outputTokens += response.usage.output_tokens
 
       // Broadcast progress
-      broadcast(projectId, {
+      broadcast(planId, {
         type: 'agent_turn',
         sessionId,
         stop_reason: response.stop_reason,
@@ -502,7 +502,7 @@ async function runAgentLoop(
         .join('\n')
         .trim()
       if (textContent) {
-        recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'agent_message', actor: 'agent', sessionId, payload: { text: textContent } })
+        recordEvent({ planId, taskId: state.focusTaskId, eventType: 'agent_message', actor: 'agent', sessionId, payload: { text: textContent } })
       }
 
       messages.push({ role: 'assistant', content: response.content })
@@ -511,12 +511,12 @@ async function runAgentLoop(
         // Drain any pending human messages that arrived while the agent was working.
         // If the prompt bar enqueued a message concurrently with the first API call,
         // it may not have been visible at the top-of-loop drain — give it one more chance.
-        const remaining = drainUserMessages(projectId)
+        const remaining = drainUserMessages(planId)
         if (remaining.length === 0) break
         for (const msg of remaining) {
           messages.push({ role: 'user', content: msg })
-          recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'human_prompt', actor: 'human', sessionId, payload: { message: msg } })
-          broadcast(projectId, { type: 'human_prompt', sessionId, message: msg })
+          recordEvent({ planId, taskId: state.focusTaskId, eventType: 'human_prompt', actor: 'human', sessionId, payload: { message: msg } })
+          broadcast(planId, { type: 'human_prompt', sessionId, message: msg })
         }
         // Don't break — let the agent respond to the injected messages
         continue
@@ -531,7 +531,7 @@ async function runAgentLoop(
 
           const result = await dispatchTool(block.name, block.input as Record<string, unknown>, state, workingDir ?? process.cwd())
           const parsedResult = JSON.parse(result)
-          broadcast(projectId, {
+          broadcast(planId, {
             type: 'tool_call',
             sessionId,
             tool: block.name,
@@ -550,7 +550,7 @@ async function runAgentLoop(
               if ('exit_code' in parsedResult) summary.exit_code = parsedResult.exit_code
               if ('error' in parsedResult) summary.error = parsedResult.error
             }
-            recordEvent({ projectId, taskId: state.focusTaskId, eventType: 'tool_call', actor: 'agent', sessionId, payload: summary })
+            recordEvent({ planId, taskId: state.focusTaskId, eventType: 'tool_call', actor: 'agent', sessionId, payload: summary })
           }
 
           toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result })
@@ -560,32 +560,32 @@ async function runAgentLoop(
       }
 
       // Pause check
-      const session = getActiveSession(projectId)
+      const session = getActiveSession(planId)
       if (!session || session.status === 'paused') {
         // Wait for resume — poll until unpaused or cancelled
-        await waitForResume(projectId, controller)
+        await waitForResume(planId, controller)
         if (controller.signal.aborted) break
       }
     }
 
     if (!controller.signal.aborted) {
       updateSession(sessionId, { status: 'completed', ended_at: new Date().toISOString(), input_tokens: inputTokens, output_tokens: outputTokens })
-      recordEvent({ projectId, taskId: rootTaskId, eventType: 'agent_completed', actor: 'agent', sessionId })
-      broadcast(projectId, { type: 'agent_completed', sessionId, input_tokens: inputTokens, output_tokens: outputTokens })
+      recordEvent({ planId, taskId: rootTaskId, eventType: 'agent_completed', actor: 'agent', sessionId })
+      broadcast(planId, { type: 'agent_completed', sessionId, input_tokens: inputTokens, output_tokens: outputTokens })
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
     updateSession(sessionId, { status: 'failed', ended_at: new Date().toISOString(), error: errMsg, input_tokens: inputTokens, output_tokens: outputTokens })
-    recordEvent({ projectId, taskId: rootTaskId, eventType: 'agent_failed', actor: 'agent', sessionId, payload: { error: errMsg } })
-    broadcast(projectId, { type: 'agent_failed', sessionId, error: errMsg })
+    recordEvent({ planId, taskId: rootTaskId, eventType: 'agent_failed', actor: 'agent', sessionId, payload: { error: errMsg } })
+    broadcast(planId, { type: 'agent_failed', sessionId, error: errMsg })
   } finally {
-    unlockSubtree(sessionId, projectId)
-    abortControllers.delete(projectId)
-    pendingMessages.delete(projectId)
+    unlockSubtree(sessionId, planId)
+    abortControllers.delete(planId)
+    pendingMessages.delete(planId)
   }
 }
 
-async function waitForResume(projectId: string, controller: AbortController): Promise<void> {
+async function waitForResume(planId: string, controller: AbortController): Promise<void> {
   return new Promise((resolve) => {
     const interval = setInterval(() => {
       if (controller.signal.aborted) {
@@ -593,7 +593,7 @@ async function waitForResume(projectId: string, controller: AbortController): Pr
         resolve()
         return
       }
-      const session = getActiveSession(projectId)
+      const session = getActiveSession(planId)
       if (!session || session.status === 'running') {
         clearInterval(interval)
         resolve()
@@ -602,31 +602,31 @@ async function waitForResume(projectId: string, controller: AbortController): Pr
   })
 }
 
-export function pauseAgent(projectId: string): void {
-  const session = getActiveSession(projectId)
+export function pauseAgent(planId: string): void {
+  const session = getActiveSession(planId)
   if (!session || session.status !== 'running') throw new Error('No running agent session')
   updateSession(session.id, { status: 'paused' })
-  recordEvent({ projectId, taskId: session.root_task_id, eventType: 'agent_paused', actor: 'human', sessionId: session.id })
-  broadcast(projectId, { type: 'agent_paused', sessionId: session.id })
+  recordEvent({ planId, taskId: session.root_task_id, eventType: 'agent_paused', actor: 'human', sessionId: session.id })
+  broadcast(planId, { type: 'agent_paused', sessionId: session.id })
 }
 
-export function resumeAgent(projectId: string): void {
-  const session = getActiveSession(projectId)
+export function resumeAgent(planId: string): void {
+  const session = getActiveSession(planId)
   if (!session || session.status !== 'paused') throw new Error('No paused agent session')
   updateSession(session.id, { status: 'running' })
-  recordEvent({ projectId, taskId: session.root_task_id, eventType: 'agent_resumed', actor: 'human', sessionId: session.id })
-  broadcast(projectId, { type: 'agent_resumed', sessionId: session.id })
+  recordEvent({ planId, taskId: session.root_task_id, eventType: 'agent_resumed', actor: 'human', sessionId: session.id })
+  broadcast(planId, { type: 'agent_resumed', sessionId: session.id })
 }
 
-export function cancelAgent(projectId: string): void {
-  const session = getActiveSession(projectId)
+export function cancelAgent(planId: string): void {
+  const session = getActiveSession(planId)
   if (!session) throw new Error('No active agent session')
 
-  const controller = abortControllers.get(projectId)
+  const controller = abortControllers.get(planId)
   if (controller) controller.abort()
 
   updateSession(session.id, { status: 'cancelled', ended_at: new Date().toISOString() })
-  unlockSubtree(session.id, projectId)
-  recordEvent({ projectId, taskId: session.root_task_id, eventType: 'agent_cancelled', actor: 'human', sessionId: session.id })
-  broadcast(projectId, { type: 'agent_cancelled', sessionId: session.id })
+  unlockSubtree(session.id, planId)
+  recordEvent({ planId, taskId: session.root_task_id, eventType: 'agent_cancelled', actor: 'human', sessionId: session.id })
+  broadcast(planId, { type: 'agent_cancelled', sessionId: session.id })
 }

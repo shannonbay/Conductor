@@ -4,10 +4,10 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import { zodToJsonSchema } from 'zod-to-json-schema'
 
 import {
-  CreateProjectSchema,
-  ListProjectsSchema,
-  OpenProjectSchema,
-  ArchiveProjectSchema,
+  CreatePlanSchema,
+  ListPlansSchema,
+  OpenPlanSchema,
+  ArchivePlanSchema,
   CreateTaskSchema,
   UpdateTaskSchema,
   NavigateSchema,
@@ -16,10 +16,10 @@ import {
   GetContextSchema,
 } from './schema.js'
 
-import { create_project } from './tools/create_project.js'
-import { list_projects } from './tools/list_projects.js'
-import { open_project } from './tools/open_project.js'
-import { archive_project } from './tools/archive_project.js'
+import { create_plan } from './tools/create_plan.js'
+import { list_plans } from './tools/list_plans.js'
+import { open_plan } from './tools/open_plan.js'
+import { archive_plan } from './tools/archive_plan.js'
 import { create_task } from './tools/create_task.js'
 import { update_task } from './tools/update_task.js'
 import { navigate } from './tools/navigate.js'
@@ -29,28 +29,28 @@ import { get_context } from './tools/get_context.js'
 
 const TOOLS = [
   {
-    name: 'create_project',
-    description: 'Create a new project and open it as the active context. Use this at the start of any goal that has multiple steps, unknown complexity, or may require backtracking — before doing any work. A project is the container for a persistent task tree that survives across sessions, so create one even if you expect to finish in a single session.',
-    inputSchema: zodToJsonSchema(CreateProjectSchema),
-    handler: create_project,
+    name: 'create_plan',
+    description: 'Create a new plan and open it as the active context. Use this at the start of any goal that has multiple steps, unknown complexity, or may require backtracking — before doing any work. A plan is the container for a persistent task tree that survives across sessions, so create one even if you expect to finish in a single session.',
+    inputSchema: zodToJsonSchema(CreatePlanSchema),
+    handler: create_plan,
   },
   {
-    name: 'list_projects',
-    description: 'List existing projects on the server. Call this at the start of every new session before creating anything — the work you need may already exist with progress recorded. Returns active projects by default; use status="all" to include archived ones.',
-    inputSchema: zodToJsonSchema(ListProjectsSchema),
-    handler: list_projects,
+    name: 'list_plans',
+    description: 'List existing plans on the server. Call this at the start of every new session before creating anything — the work you need may already exist with progress recorded. Returns active plans by default; use status="all" to include archived ones.',
+    inputSchema: zodToJsonSchema(ListPlansSchema),
+    handler: list_plans,
   },
   {
-    name: 'open_project',
-    description: 'Open an existing project and restore its focus cursor to where you left off. Use this at the start of a session when resuming prior work. Opening an archived project automatically restores it to active. All task tools operate on the open project, so you must open one before doing any task work.',
-    inputSchema: zodToJsonSchema(OpenProjectSchema),
-    handler: open_project,
+    name: 'open_plan',
+    description: 'Open an existing plan and restore its focus cursor to where you left off. Use this at the start of a session when resuming prior work. Opening an archived plan automatically restores it to active. All task tools operate on the open plan, so you must open one before doing any task work.',
+    inputSchema: zodToJsonSchema(OpenPlanSchema),
+    handler: open_plan,
   },
   {
-    name: 'archive_project',
-    description: 'Archive a completed or abandoned project, hiding it from default listings while preserving its full task tree. Use this when all root-level work is done or the project is no longer active. Archiving is reversible — open_project restores it. Projects are never deleted; the history of what was tried and why it succeeded or failed is preserved.',
-    inputSchema: zodToJsonSchema(ArchiveProjectSchema),
-    handler: archive_project,
+    name: 'archive_plan',
+    description: 'Archive a completed or abandoned plan, hiding it from default listings while preserving its full task tree. Use this when all root-level work is done or the plan is no longer active. Archiving is reversible — open_plan restores it. Plans are never deleted; the history of what was tried and why it succeeded or failed is preserved.',
+    inputSchema: zodToJsonSchema(ArchivePlanSchema),
+    handler: archive_plan,
   },
   {
     name: 'create_task',
@@ -84,7 +84,7 @@ const TOOLS = [
   },
   {
     name: 'get_context',
-    description: 'Read-only. Returns the context view for the current focus task: the task itself, its parent, siblings, children, and tree-wide stats. Call this at the start of every session before doing any work, to re-orient after a context switch, or any time you are unsure where you are in the tree. If no project is open, it will tell you — use list_projects and open_project first.',
+    description: 'Read-only. Returns the context view for the current focus task: the task itself, its parent, siblings, children, and tree-wide stats. Call this at the start of every session before doing any work, to re-orient after a context switch, or any time you are unsure where you are in the tree. If no plan is open, it will tell you — use list_plans and open_plan first.',
     inputSchema: zodToJsonSchema(GetContextSchema),
     handler: get_context,
   },

@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { NextRequest } from 'next/server'
-import { POST as POSTProject } from '@/app/api/projects/route.js'
-import { GET as GETTasks, POST as POSTTask } from '@/app/api/projects/[id]/tasks/route.js'
-import { GET as GETTask, PATCH as PATCHTask, DELETE as DELETETask } from '@/app/api/projects/[id]/tasks/[taskId]/route.js'
-import { POST as POSTStatus } from '@/app/api/projects/[id]/tasks/[taskId]/status/route.js'
+import { POST as POSTProject } from '@/app/api/plans/route.js'
+import { GET as GETTasks, POST as POSTTask } from '@/app/api/plans/[id]/tasks/route.js'
+import { GET as GETTask, PATCH as PATCHTask, DELETE as DELETETask } from '@/app/api/plans/[id]/tasks/[taskId]/route.js'
+import { POST as POSTStatus } from '@/app/api/plans/[id]/tasks/[taskId]/status/route.js'
 import { getTask } from '@/lib/db.js'
 
 function makeRequest(method: string, url: string, body?: unknown): NextRequest {
@@ -25,13 +25,13 @@ async function createProject(name = 'Test Project') {
 
 async function createTask(projectId: string, body: object) {
   const res = await POSTTask(
-    makeRequest('POST', `http://localhost/api/projects/${projectId}/tasks`, body),
+    makeRequest('POST', `http://localhost/api/plans/${projectId}/tasks`, body),
     { params: Promise.resolve({ id: projectId }) },
   )
   return res
 }
 
-describe('POST /api/projects/:id/tasks', () => {
+describe('POST /api/plans/:id/tasks', () => {
   it('creates root task with ID "1"', async () => {
     const project = await createProject()
     const res = await createTask(project.id, { goal: 'Root task',status: 'active' })
@@ -59,7 +59,7 @@ describe('POST /api/projects/:id/tasks', () => {
     await createTask(project.id, { goal: 'Child 1', parent_id: '1' })
     // Try to create a second root task that depends_on a child — invalid
     const res = await POSTTask(
-      makeRequest('POST', `http://localhost/api/projects/${project.id}/tasks`, {
+      makeRequest('POST', `http://localhost/api/plans/${project.id}/tasks`, {
         goal: 'Root 2',
         plan: ['step'],
         depends_on: ['1.1'], // 1.1 is not a sibling of root level
@@ -76,13 +76,13 @@ describe('POST /api/projects/:id/tasks', () => {
   })
 })
 
-describe('GET /api/projects/:id/tasks', () => {
+describe('GET /api/plans/:id/tasks', () => {
   it('returns full tree structure', async () => {
     const project = await createProject()
     await createTask(project.id, { goal: 'Root' })
     await createTask(project.id, { goal: 'Child', parent_id: '1' })
 
-    const res = await GETTasks(makeRequest('GET', `http://localhost/api/projects/${project.id}/tasks`), { params: Promise.resolve({ id: project.id }) })
+    const res = await GETTasks(makeRequest('GET', `http://localhost/api/plans/${project.id}/tasks`), { params: Promise.resolve({ id: project.id }) })
     const { status, body } = await json(res)
     expect(status).toBe(200)
     expect(body).toHaveLength(1)
@@ -91,7 +91,7 @@ describe('GET /api/projects/:id/tasks', () => {
   })
 })
 
-describe('GET /api/projects/:id/tasks/:taskId', () => {
+describe('GET /api/plans/:id/tasks/:taskId', () => {
   it('returns task with parent, siblings, children, stats', async () => {
     const project = await createProject()
     await createTask(project.id, { goal: 'Root' })
@@ -108,7 +108,7 @@ describe('GET /api/projects/:id/tasks/:taskId', () => {
   })
 })
 
-describe('PATCH /api/projects/:id/tasks/:taskId', () => {
+describe('PATCH /api/plans/:id/tasks/:taskId', () => {
   it('updates goal', async () => {
     const project = await createProject()
     await createTask(project.id, { goal: 'Original' })
@@ -134,7 +134,7 @@ describe('PATCH /api/projects/:id/tasks/:taskId', () => {
   })
 })
 
-describe('DELETE /api/projects/:id/tasks/:taskId', () => {
+describe('DELETE /api/plans/:id/tasks/:taskId', () => {
   it('removes task and all descendants', async () => {
     const project = await createProject()
     await createTask(project.id, { goal: 'Root' })
@@ -151,14 +151,14 @@ describe('DELETE /api/projects/:id/tasks/:taskId', () => {
     await createTask(project.id, { goal: 'Root' })
     // Manually lock the task
     const { getDb } = await import('@/lib/db.js')
-    getDb().prepare("UPDATE tasks SET locked_by = 'sess_x' WHERE id = '1' AND project_id = ?").run(project.id)
+    getDb().prepare("UPDATE tasks SET locked_by = 'sess_x' WHERE id = '1' AND plan_id = ?").run(project.id)
 
     const res = await DELETETask(makeRequest('DELETE', `http://localhost`), { params: Promise.resolve({ id: project.id, taskId: '1' }) })
     expect(res.status).toBe(409)
   })
 })
 
-describe('POST /api/projects/:id/tasks/:taskId/status', () => {
+describe('POST /api/plans/:id/tasks/:taskId/status', () => {
   it('changes status to completed', async () => {
     const project = await createProject()
     await createTask(project.id, { goal: 'Root', status: 'active' })

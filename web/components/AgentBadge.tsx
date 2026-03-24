@@ -6,10 +6,10 @@ import type { AgentSession } from '@/lib/db'
 
 interface Props {
   session: AgentSession | null
-  projectId: string
+  planId: string
 }
 
-export function AgentBadge({ session, projectId }: Props) {
+export function AgentBadge({ session, planId }: Props) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [acting, setActing] = useState(false)
@@ -33,7 +33,7 @@ export function AgentBadge({ session, projectId }: Props) {
 
   async function handlePause() {
     setActing(true)
-    await fetch(`/api/projects/${projectId}/agent/pause`, { method: 'POST' })
+    await fetch(`/api/plans/${planId}/agent/pause`, { method: 'POST' })
     router.refresh()
     setActing(false)
     setOpen(false)
@@ -41,7 +41,7 @@ export function AgentBadge({ session, projectId }: Props) {
 
   async function handleResume() {
     setActing(true)
-    await fetch(`/api/projects/${projectId}/agent/resume`, { method: 'POST' })
+    await fetch(`/api/plans/${planId}/agent/resume`, { method: 'POST' })
     router.refresh()
     setActing(false)
     setOpen(false)
@@ -49,7 +49,7 @@ export function AgentBadge({ session, projectId }: Props) {
 
   async function handleCancel() {
     setActing(true)
-    await fetch(`/api/projects/${projectId}/agent/cancel`, { method: 'POST' })
+    await fetch(`/api/plans/${planId}/agent/cancel`, { method: 'POST' })
     router.refresh()
     setActing(false)
     setOpen(false)

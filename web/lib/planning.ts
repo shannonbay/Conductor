@@ -31,7 +31,7 @@ const ModifyDiffSchema = z.object({
 })
 
 function buildPlanningPrompt(
-  projectName: string,
+  planName: string,
   task: Task,
   parentAndSiblingContext: string,
   instruction?: string,
@@ -39,7 +39,7 @@ function buildPlanningPrompt(
   return `You are a planning assistant helping a human structure their work into a task tree.
 You do NOT execute tasks. You propose task decompositions that the human will review.
 
-Project: "${projectName}"
+Plan: "${planName}"
 Task being planned: ${task.id} — "${task.goal}"
 
 ${parentAndSiblingContext}
@@ -55,13 +55,14 @@ Respond with ONLY a valid JSON array of proposed tasks. No markdown, no explanat
 [
   {
     "goal": "...",
+    "plan": ["Step 1", "Step 2"],
     "suggested_depends_on": []
   }
 ]`
 }
 
 function buildModifyPrompt(
-  projectName: string,
+  planName: string,
   task: Task,
   existingChildren: Task[],
   instruction: string,
@@ -76,7 +77,7 @@ function buildModifyPrompt(
 
   return `You are a planning assistant helping a human restructure an existing task subtree.
 
-Project: "${projectName}"
+Plan: "${planName}"
 Parent task: ${task.id} — "${task.goal}"
 
 Current children:
@@ -96,8 +97,8 @@ Rules for modifications:
 Respond with ONLY a valid JSON object. No markdown, no explanation. Format:
 {
   "unchanged": ["1.1", "1.2"],
-  "modified": [{ "replaces_id": "1.3", "goal": "...", "suggested_depends_on": [] }],
-  "added": [{ "goal": "...", "suggested_depends_on": [] }],
+  "modified": [{ "replaces_id": "1.3", "goal": "...", "plan": ["Step 1"], "suggested_depends_on": [] }],
+  "added": [{ "goal": "...", "plan": ["Step 1"], "suggested_depends_on": [] }],
   "removed": ["1.4"]
 }`
 }
@@ -125,13 +126,13 @@ function extractJson(text: string): string {
 
 export async function generatePlan(
   task: Task,
-  projectName: string,
+  planName: string,
   parentGoal: string | null,
   siblings: Task[],
   instruction?: string,
 ): Promise<ProposedTask[]> {
   const context = formatParentSiblingContext(parentGoal, siblings)
-  const prompt = buildPlanningPrompt(projectName, task, context, instruction)
+  const prompt = buildPlanningPrompt(planName, task, context, instruction)
 
   const response = await getAnthropicClient().messages.create({
     model: 'claude-sonnet-4-6',
@@ -147,11 +148,11 @@ export async function generatePlan(
 
 export async function modifyPlan(
   task: Task,
-  projectName: string,
+  planName: string,
   existingChildren: Task[],
   instruction: string,
 ): Promise<ModifyDiff> {
-  const prompt = buildModifyPrompt(projectName, task, existingChildren, instruction)
+  const prompt = buildModifyPrompt(planName, task, existingChildren, instruction)
 
   const response = await getAnthropicClient().messages.create({
     model: 'claude-sonnet-4-6',
