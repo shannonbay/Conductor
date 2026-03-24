@@ -63,7 +63,7 @@ const TOOLS = [
   },
   {
     name: 'update_task',
-    description: 'Record progress on the current focus task without changing focus. Call this after completing meaningful work, not just at the end — intermediate results are valuable if the session ends or an approach fails. Use result for a human-readable summary of what happened. Use state_patch for structured data (file paths, counts, flags, API responses) that this task or downstream sibling tasks will need programmatically.',
+    description: 'Record progress on the current focus task without changing focus. Call this after completing meaningful work, not just at the end — intermediate results are valuable if the session ends or an approach fails. Use result for a human-readable summary of what happened. Use state_patch for structured data (file paths, counts, flags, API responses) that this task or downstream sibling tasks will need programmatically. Use notes for freeform observations, corrections, or context — unlike result, notes can be updated at any point and cleared by passing null. Use goal to rename the task (pending tasks only).',
     inputSchema: zodToJsonSchema(UpdateTaskSchema),
     handler: update_task,
   },

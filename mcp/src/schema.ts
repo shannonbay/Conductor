@@ -28,6 +28,8 @@ export const CreateTaskSchema = z.object({
 export const UpdateTaskSchema = z.object({
   result: z.string().optional().describe('Human-readable summary of progress or outcome'),
   state_patch: z.record(z.unknown()).optional().describe('Shallow-merge patch applied to state'),
+  notes: z.string().nullable().optional().describe('Freeform text scratchpad — use for mid-task observations, corrections, or context for downstream tasks. Unlike result, notes can be set and updated at any point. Pass null to clear.'),
+  goal: z.string().min(1).optional().describe('Rename the task goal. Only allowed while the task is still pending — throws if the task is active, completed, or abandoned.'),
 })
 
 export const NavigateSchema = z.object({

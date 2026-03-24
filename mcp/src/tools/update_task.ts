@@ -16,11 +16,17 @@ export async function update_task(args: unknown) {
   const task = getTask(planId, focusTaskId)
   if (!task) throw new Error(`Task ${focusTaskId} not found.`)
 
+  if (input.goal !== undefined && task.status !== 'pending') {
+    throw new Error(`Cannot rename task: goal can only be changed while the task is pending (current status: ${task.status})`)
+  }
+
   const newState = { ...task.state, ...(input.state_patch ?? {}) }
 
   const now = new Date().toISOString()
   const fields: Parameters<typeof updateTask>[2] = { state: newState, updated_at: now }
   if (input.result !== undefined) fields.result = input.result
+  if (input.notes !== undefined) fields.notes = input.notes
+  if (input.goal !== undefined) fields.goal = input.goal
 
   updateTask(planId, focusTaskId, fields)
   touchPlan(planId)

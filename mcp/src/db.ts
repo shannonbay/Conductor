@@ -25,6 +25,7 @@ export interface TaskRow {
   abandon_reason: string | null
   state: string      // JSON object
   depends_on: string | null  // JSON string[] | null
+  notes: string | null
   created_at: string
   updated_at: string
 }
@@ -38,6 +39,7 @@ export interface Task {
   abandon_reason: string | null
   state: Record<string, unknown>
   depends_on: string[] | null
+  notes: string | null
   created_at: string
   updated_at: string
 }
@@ -85,6 +87,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   abandon_reason TEXT,
   state          TEXT NOT NULL DEFAULT '{}',
   depends_on     TEXT,
+  notes          TEXT,
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL,
   PRIMARY KEY (id, plan_id)
@@ -103,6 +106,9 @@ for (const col of ['plan', 'step']) {
   try { db.exec(`ALTER TABLE tasks DROP COLUMN ${col}`) } catch { /* already gone */ }
 }
 
+// Add columns introduced after initial schema (idempotent)
+try { db.exec('ALTER TABLE tasks ADD COLUMN notes TEXT') } catch { /* already exists */ }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function parseTask(row: TaskRow): Task {
@@ -110,6 +116,7 @@ function parseTask(row: TaskRow): Task {
     ...row,
     state: JSON.parse(row.state) as Record<string, unknown>,
     depends_on: row.depends_on ? JSON.parse(row.depends_on) as string[] : null,
+    notes: row.notes ?? null,
   }
 }
 
@@ -190,8 +197,8 @@ export function updatePlan(id: string, fields: Partial<Omit<PlanRow, 'id'>>): vo
 
 export function insertTask(task: Task): void {
   db.prepare(`
-    INSERT INTO tasks (id, plan_id, goal, status, result, abandon_reason, state, depends_on, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO tasks (id, plan_id, goal, status, result, abandon_reason, state, depends_on, notes, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     task.id,
     task.plan_id,
@@ -201,6 +208,7 @@ export function insertTask(task: Task): void {
     task.abandon_reason,
     JSON.stringify(task.state),
     task.depends_on ? JSON.stringify(task.depends_on) : null,
+    task.notes ?? null,
     task.created_at,
     task.updated_at,
   )
