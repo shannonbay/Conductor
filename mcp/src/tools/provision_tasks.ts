@@ -96,6 +96,7 @@ export async function provision_tasks(args: unknown) {
         abandon_reason: null,
         state: spec.initial_state ?? {},
         depends_on: spec.depends_on ?? null,
+        notes: null,
         created_at: now,
         updated_at: now,
       }

@@ -60,6 +60,7 @@ export async function create_task(args: unknown) {
     abandon_reason: null,
     state: input.initial_state ?? {},
     depends_on: input.depends_on ?? null,
+    notes: null,
     created_at: now,
     updated_at: now,
   }

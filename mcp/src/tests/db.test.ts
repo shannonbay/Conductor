@@ -43,6 +43,7 @@ function makeTask(projectId: string, id: string, overrides: Partial<Task> = {}):
     abandon_reason: null,
     state: {},
     depends_on: null,
+    notes: null,
     created_at: now,
     updated_at: now,
     ...overrides,
