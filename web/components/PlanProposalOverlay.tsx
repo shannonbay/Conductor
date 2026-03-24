@@ -42,6 +42,11 @@ export function PlanProposalOverlay({ planId, loading, error, proposal, onClose,
   async function handleAccept() {
     if (!proposal) return
     const accepted = children.filter(c => c.accepted)
+    // Re-map suggested_depends_on (original indices) → indices within the accepted subset
+    const originalToAccepted = new Map<number, number>()
+    let ai = 0
+    children.forEach((c, oi) => { if (c.accepted) originalToAccepted.set(oi, ai++) })
+
     setAccepting(true)
     setAcceptError(null)
     try {
@@ -52,7 +57,10 @@ export function PlanProposalOverlay({ planId, loading, error, proposal, onClose,
           root: { goal: rootGoal.trim() || proposal.root.goal },
           children: accepted.map(({ goal, suggested_depends_on }) => ({
             goal,
-            depends_on: suggested_depends_on,
+            depends_on: (suggested_depends_on ?? [])
+              .map(idx => originalToAccepted.get(parseInt(idx)))
+              .filter((i): i is number => i !== undefined)
+              .map(String),
           })),
         }),
       })

@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   try {
     const { id: planId } = await params
     const plan = getPlan(planId)
-    if (!plan) return notFound('Project')
+    if (!plan) return notFound('Plan')
 
     const body = await req.json()
     const parsed = AcceptSchema.safeParse(body)
@@ -45,10 +45,18 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     })
     recordEvent({ planId, taskId: rootId, eventType: 'task_created', actor: 'human', payload: { goal: root.goal, via: 'generate_plan_accept' } })
 
+    // Pre-compute child IDs (rootId was just created with no children, so they are sequential)
+    const childIds = children.map((_, i) => `${rootId}.${i + 1}`)
+
     // Create children under root
     const createdIds: string[] = [rootId]
-    for (const child of children) {
-      const childId = nextChildId(planId, rootId)
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
+      const childId = childIds[i]
+      // Translate 0-based sibling indices → actual task IDs
+      const resolvedDeps = (child.depends_on ?? [])
+        .map(idx => childIds[parseInt(idx)])
+        .filter(Boolean)
       insertTask({
         id: childId,
         plan_id: planId,
@@ -57,7 +65,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         result: null,
         abandon_reason: null,
         state: {},
-        depends_on: child.depends_on ?? null,
+        depends_on: resolvedDeps.length > 0 ? resolvedDeps : null,
         notes: null,
         created_by: 'human',
         created_at: now,
