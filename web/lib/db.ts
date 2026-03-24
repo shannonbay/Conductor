@@ -77,6 +77,16 @@ export interface Event {
   created_at: string
 }
 
+export interface TranscriptMessage {
+  id: string
+  session_id: string
+  plan_id: string
+  role: 'user' | 'assistant'
+  content: unknown[]
+  turn_index: number
+  created_at: string
+}
+
 // ─── DB singleton ─────────────────────────────────────────────────────────────
 
 function getDbPath(): string {
@@ -407,9 +417,38 @@ export function getEvents(planId: string, taskId?: string, limit?: number): Even
   return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload as string) } as Event))
 }
 
+// ─── Transcript messages ──────────────────────────────────────────────────────
+
+export function insertTranscriptMessage(msg: Omit<TranscriptMessage, 'created_at'> & { created_at?: string }): void {
+  const db = getDb()
+  db.prepare(`
+    INSERT INTO transcript_messages (id, session_id, plan_id, role, content, turn_index, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    msg.id,
+    msg.session_id,
+    msg.plan_id,
+    msg.role,
+    JSON.stringify(msg.content),
+    msg.turn_index,
+    msg.created_at ?? new Date().toISOString(),
+  )
+}
+
+export function getTranscriptMessages(sessionId: string): TranscriptMessage[] {
+  const db = getDb()
+  const rows = db.prepare('SELECT * FROM transcript_messages WHERE session_id = ? ORDER BY turn_index ASC').all(sessionId) as Record<string, unknown>[]
+  return rows.map((r) => ({ ...r, content: JSON.parse(r.content as string) } as TranscriptMessage))
+}
+
+export function getSessionsForPlan(planId: string): AgentSession[] {
+  const db = getDb()
+  return db.prepare('SELECT * FROM agent_sessions WHERE plan_id = ? ORDER BY started_at DESC').all(planId) as AgentSession[]
+}
+
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
 export function clearAllData(): void {
   const db = getDb()
-  db.exec('DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
+  db.exec('DELETE FROM transcript_messages; DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
 }

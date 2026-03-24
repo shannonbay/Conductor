@@ -8,6 +8,7 @@ import { usePlanWebSocket } from '@/lib/use-plan-ws'
 import { TreePanel } from '@/components/TreePanel'
 import { DetailPane } from '@/components/DetailPane'
 import { ActivityFeed } from '@/components/ActivityFeed'
+import { TranscriptPanel } from '@/components/TranscriptPanel'
 import { PlanProposalOverlay } from '@/components/PlanProposalOverlay'
 import { SettingsButton } from '@/components/SettingsButton'
 import { AgentBadge } from '@/components/AgentBadge'
@@ -25,6 +26,7 @@ interface Props {
 export function PlanView({ project, tree, stats, events, agentSession }: Props) {
   const router = useRouter()
   const [acting, setActing] = useState(false)
+  const [bottomTab, setBottomTab] = useState<'activity' | 'transcript'>('activity')
   const [genOpen, setGenOpen] = useState(false)
   const [genLoading, setGenLoading] = useState(false)
   const [genError, setGenError] = useState<string | null>(null)
@@ -244,14 +246,29 @@ export function PlanView({ project, tree, stats, events, agentSession }: Props) 
             {promptError && <p className="text-xs text-red-500 mt-1">{promptError}</p>}
           </div>
 
-          {/* Activity feed */}
-          <div className="border-t flex-shrink-0 max-h-48 overflow-y-auto">
-            <div className="px-4 py-2 border-b">
-              <span className="text-xs font-medium text-gray-500 uppercase tracking-wide">Activity</span>
+          {/* Activity / Transcript tabs */}
+          <div className="border-t flex-shrink-0 flex flex-col max-h-56">
+            <div className="px-4 py-1 border-b flex items-center gap-3 flex-shrink-0">
+              <button
+                onClick={() => setBottomTab('activity')}
+                className={`text-xs font-medium py-1 border-b-2 transition-colors ${bottomTab === 'activity' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+              >
+                Activity
+              </button>
+              <button
+                onClick={() => setBottomTab('transcript')}
+                className={`text-xs font-medium py-1 border-b-2 transition-colors ${bottomTab === 'transcript' ? 'border-gray-900 text-gray-900' : 'border-transparent text-gray-400 hover:text-gray-600'}`}
+              >
+                Transcript
+              </button>
             </div>
-            <div className="px-4 py-3">
-              <ActivityFeed />
-            </div>
+            {bottomTab === 'activity' ? (
+              <div className="overflow-y-auto px-4 py-3">
+                <ActivityFeed />
+              </div>
+            ) : (
+              <TranscriptPanel planId={project.id} />
+            )}
           </div>
         </div>
       </div>

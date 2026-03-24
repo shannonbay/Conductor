@@ -145,4 +145,22 @@ export function runMigrations(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_events_plan
       ON events(plan_id, created_at)
   `)
+
+  // Transcript messages table — full API message stream per session
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transcript_messages (
+      id          TEXT PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES agent_sessions(id),
+      plan_id     TEXT NOT NULL REFERENCES plans(id),
+      role        TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content     TEXT NOT NULL,
+      turn_index  INTEGER NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  `)
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_transcript_session
+      ON transcript_messages(session_id, turn_index)
+  `)
 }

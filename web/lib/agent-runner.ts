@@ -9,7 +9,7 @@ import { nanoid } from 'nanoid'
 import {
   getPlan, getTask, getTreeStats, getChildren, getSiblings,
   createSession, updateSession, getActiveSession, lockSubtree, unlockSubtree,
-  insertTask, updateTask, touchPlan, nextChildId,
+  insertTask, updateTask, touchPlan, nextChildId, insertTranscriptMessage,
 } from './db'
 import { recordEvent } from './event-log'
 import { broadcast } from './ws-broadcaster'
@@ -464,6 +464,24 @@ async function runAgentLoop(
 
   let inputTokens = 0
   let outputTokens = 0
+  let turnIndex = 0
+
+  function persistTurn(role: 'user' | 'assistant', content: Anthropic.MessageParam['content']): void {
+    const contentArray: unknown[] = typeof content === 'string'
+      ? [{ type: 'text', text: content }]
+      : content as unknown[]
+    insertTranscriptMessage({
+      id: nanoid(),
+      session_id: sessionId,
+      plan_id: planId,
+      role,
+      content: contentArray,
+      turn_index: turnIndex++,
+    })
+  }
+
+  // Persist the initial user message
+  persistTurn('user', messages[0].content)
 
   try {
     while (true) {
@@ -472,6 +490,7 @@ async function runAgentLoop(
       // Inject any queued human messages before the next API call
       for (const msg of drainUserMessages(planId)) {
         messages.push({ role: 'user', content: msg })
+        persistTurn('user', msg)
         recordEvent({ planId, taskId: state.focusTaskId, eventType: 'human_prompt', actor: 'human', sessionId, payload: { message: msg } })
         broadcast(planId, { type: 'human_prompt', sessionId, message: msg })
       }
@@ -506,6 +525,7 @@ async function runAgentLoop(
       }
 
       messages.push({ role: 'assistant', content: response.content })
+      persistTurn('assistant', response.content)
 
       if (response.stop_reason === 'end_turn') {
         // Drain any pending human messages that arrived while the agent was working.
@@ -515,6 +535,7 @@ async function runAgentLoop(
         if (remaining.length === 0) break
         for (const msg of remaining) {
           messages.push({ role: 'user', content: msg })
+          persistTurn('user', msg)
           recordEvent({ planId, taskId: state.focusTaskId, eventType: 'human_prompt', actor: 'human', sessionId, payload: { message: msg } })
           broadcast(planId, { type: 'human_prompt', sessionId, message: msg })
         }
@@ -557,6 +578,7 @@ async function runAgentLoop(
         }
 
         messages.push({ role: 'user', content: toolResults })
+        persistTurn('user', toolResults)
       }
 
       // Pause check
