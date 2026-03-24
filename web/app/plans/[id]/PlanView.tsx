@@ -38,7 +38,7 @@ export function PlanView({ project, tree, stats, events, agentSession }: Props) 
   const [promptText, setPromptText] = useState('')
   const [promptSending, setPromptSending] = useState(false)
   const [promptError, setPromptError] = useState<string | null>(null)
-  const { setPlan, setTree, setAgentSession, setEvents, expandAll, refreshTree, agentSession: liveSession, selectedTaskId, tree: storeTree, treeStats: liveStats } = useStore()
+  const { setPlan, setTree, setAgentSession, setEvents, expandAll, refreshTree, plan: storePlan, agentSession: liveSession, selectedTaskId, tree: storeTree, treeStats: liveStats } = useStore()
 
   async function handleGenerate() {
     setGenOpen(true)
@@ -183,7 +183,7 @@ export function PlanView({ project, tree, stats, events, agentSession }: Props) 
         <Link href="/" className="text-sm text-gray-500 hover:text-gray-900">← Projects</Link>
         <h1 className="font-semibold text-gray-900 flex-1 min-w-0 truncate">{project.name}</h1>
         <span className="text-xs text-gray-400">{(liveStats ?? stats).completed}/{(liveStats ?? stats).total_tasks} tasks complete</span>
-        {project.status === 'active' ? (
+        {(storePlan?.status ?? project.status) === 'active' ? (
           <button onClick={handleArchive} disabled={acting} className="text-xs px-2 py-1 rounded border text-gray-600 hover:bg-gray-50 disabled:opacity-50">Archive</button>
         ) : (
           <button onClick={handleUnarchive} disabled={acting} className="text-xs px-2 py-1 rounded border text-gray-600 hover:bg-gray-50 disabled:opacity-50">Unarchive</button>

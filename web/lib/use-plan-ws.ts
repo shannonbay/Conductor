@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { useStore } from './store'
-import type { TreeNode, AgentSession, Event } from './db'
+import type { TreeNode, AgentSession, Event, PlanRow, TreeStats } from './db'
 
 const AGENT_LIFECYCLE_TYPES = new Set([
   'agent_started',
@@ -21,12 +21,12 @@ const TREE_MUTATION_TYPES = new Set([
 ])
 
 export function usePlanWebSocket(planId: string) {
-  const { setTree, setAgentSession, setSessionNickname, appendEvent, setEvents } = useStore()
+  const { setTree, setAgentSession, setSessionNickname, appendEvent, setEvents, setPlan } = useStore()
 
   // Keep a stable ref to the latest store actions so the closure inside useEffect
   // always calls the current version without needing them as dependencies.
-  const actionsRef = useRef({ setTree, setAgentSession, setSessionNickname, appendEvent, setEvents })
-  actionsRef.current = { setTree, setAgentSession, setSessionNickname, appendEvent, setEvents }
+  const actionsRef = useRef({ setTree, setAgentSession, setSessionNickname, appendEvent, setEvents, setPlan })
+  actionsRef.current = { setTree, setAgentSession, setSessionNickname, appendEvent, setEvents, setPlan }
 
   useEffect(() => {
     let destroyed = false
@@ -70,6 +70,13 @@ export function usePlanWebSocket(planId: string) {
                   if (session?.id && session.nickname) {
                     actions.setSessionNickname(session.id, session.nickname)
                   }
+                })
+              }
+
+              // Refresh plan metadata on archive/restore events
+              if (event.event_type === 'plan_archived' || event.event_type === 'plan_restored') {
+                fetchPlan(planId).then((result) => {
+                  if (result) actions.setPlan(result.plan, result.stats)
                 })
               }
               break
@@ -118,9 +125,18 @@ export function usePlanWebSocket(planId: string) {
 
     connect()
 
+    // Poll plan metadata every 15s to catch status changes made by MCP tools
+    // (which write directly to SQLite without pushing WebSocket events).
+    const pollInterval = setInterval(() => {
+      fetchPlan(planId).then((result) => {
+        if (result) actionsRef.current.setPlan(result.plan, result.stats)
+      })
+    }, 15_000)
+
     return () => {
       destroyed = true
       if (retryTimeout) clearTimeout(retryTimeout)
+      clearInterval(pollInterval)
       ws?.close()
     }
   }, [planId])
@@ -142,4 +158,11 @@ async function fetchEvents(planId: string): Promise<Event[]> {
   const res = await fetch(`/api/plans/${planId}/events`)
   if (!res.ok) return []
   return res.json()
+}
+
+async function fetchPlan(planId: string): Promise<{ plan: PlanRow; stats: TreeStats } | null> {
+  const res = await fetch(`/api/plans/${planId}`)
+  if (!res.ok) return null
+  const { tree_stats, ...plan } = await res.json()
+  return { plan: plan as PlanRow, stats: tree_stats as TreeStats }
 }
