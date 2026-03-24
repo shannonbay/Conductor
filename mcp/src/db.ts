@@ -226,3 +226,7 @@ export function countAllTasks(planId: string): number {
 export function clearAllData(): void {
   db.exec('DELETE FROM tasks; DELETE FROM plans;')
 }
+
+export function runTransaction<T>(fn: () => T): T {
+  return db.transaction(fn)()
+}

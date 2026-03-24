@@ -14,6 +14,7 @@ import {
   SetStatusSchema,
   SynthesizeSchema,
   GetContextSchema,
+  ProvisionTasksSchema,
 } from './schema.js'
 
 import { create_plan } from './tools/create_plan.js'
@@ -26,6 +27,7 @@ import { navigate } from './tools/navigate.js'
 import { set_status } from './tools/set_status.js'
 import { synthesize } from './tools/synthesize.js'
 import { get_context } from './tools/get_context.js'
+import { provision_tasks } from './tools/provision_tasks.js'
 
 const TOOLS = [
   {
@@ -87,6 +89,12 @@ const TOOLS = [
     description: 'Read-only. Returns the context view for the current focus task: the task itself, its parent, siblings, children, and tree-wide stats. Call this at the start of every session before doing any work, to re-orient after a context switch, or any time you are unsure where you are in the tree. If no plan is open, it will tell you — use list_plans and open_plan first.',
     inputSchema: zodToJsonSchema(GetContextSchema),
     handler: get_context,
+  },
+  {
+    name: 'provision_tasks',
+    description: 'Create multiple tasks in a single call by providing a map of absolute task IDs to task specs. Use this instead of repeated create_task calls when you want to lay out an entire plan or sub-tree at once. IDs are hierarchical addresses ("1", "1.1", "1.2.3"); parent IDs must exist in the DB or be included in the batch. All tasks are inserted atomically — either all succeed or none do. Focus moves to the shallowest, lowest-numbered task created. Duplicate IDs (already in DB) are rejected; use update_task to modify existing tasks.',
+    inputSchema: zodToJsonSchema(ProvisionTasksSchema),
+    handler: provision_tasks,
   },
 ]
 
