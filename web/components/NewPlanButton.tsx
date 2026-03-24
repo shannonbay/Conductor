@@ -17,7 +17,10 @@ export function NewPlanButton({ size = 'default' }: Props) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [workingDir, setWorkingDir] = useState('')
+  const [workingDir, setWorkingDir] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return localStorage.getItem('conductor:lastBrowseDir') ?? ''
+  })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [browseOpen, setBrowseOpen] = useState(false)
@@ -27,8 +30,10 @@ export function NewPlanButton({ size = 'default' }: Props) {
 
   async function openBrowser(path?: string) {
     setBrowseError(null)
+    // If no explicit path, fall back to the last persisted folder
+    const effectivePath = path || (typeof window !== 'undefined' ? (localStorage.getItem('conductor:lastBrowseDir') ?? undefined) : undefined) || undefined
     try {
-      const url = path ? `/api/fs/browse?path=${encodeURIComponent(path)}` : '/api/fs/browse'
+      const url = effectivePath ? `/api/fs/browse?path=${encodeURIComponent(effectivePath)}` : '/api/fs/browse'
       const res = await fetch(url)
       const data = await res.json()
       if (!res.ok) throw new Error(data.error ?? 'Cannot read directory')
@@ -177,7 +182,11 @@ export function NewPlanButton({ size = 'default' }: Props) {
               </button>
               <button
                 type="button"
-                onClick={() => { setWorkingDir(browseData.path); setBrowseOpen(false) }}
+                onClick={() => {
+                  localStorage.setItem('conductor:lastBrowseDir', browseData.path)
+                  setWorkingDir(browseData.path)
+                  setBrowseOpen(false)
+                }}
                 className="px-3 py-1.5 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700"
               >
                 Select this folder
