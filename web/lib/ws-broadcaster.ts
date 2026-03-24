@@ -1,6 +1,11 @@
 import type { WebSocket } from 'ws'
 
-const clients = new Map<string, Set<WebSocket>>()
+// Anchor to globalThis so all module instances (server.ts + Next.js API routes)
+// share the same Map. In dev mode Next.js compiles API routes in isolation from
+// server.ts, which would otherwise give each a separate in-memory singleton.
+const g = globalThis as typeof globalThis & { __conductorWsClients?: Map<string, Set<WebSocket>> }
+if (!g.__conductorWsClients) g.__conductorWsClients = new Map()
+const clients = g.__conductorWsClients
 
 export function registerClient(planId: string, ws: WebSocket): void {
   if (!clients.has(planId)) {

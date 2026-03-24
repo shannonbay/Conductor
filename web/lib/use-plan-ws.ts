@@ -94,8 +94,9 @@ export function usePlanWebSocket(planId: string) {
 
             case 'tool_call':
             case 'mcp_update': {
-              // Re-fetch tree to show agent's changes
+              // Re-fetch tree and events to show agent's changes
               fetchTree(planId).then(actions.setTree)
+              fetchEvents(planId).then(actions.setEvents)
               break
             }
           }
