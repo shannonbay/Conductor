@@ -223,6 +223,11 @@ export function countAllTasks(planId: string): number {
   return row.count
 }
 
+export function getRootTasks(planId: string): Task[] {
+  const rows = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%'").all(planId) as TaskRow[]
+  return rows.map(parseTask)
+}
+
 export function clearAllData(): void {
   db.exec('DELETE FROM tasks; DELETE FROM plans;')
 }

@@ -4,7 +4,7 @@ import { create_plan } from '../../tools/create_plan.js'
 import { create_task } from '../../tools/create_task.js'
 import { archive_plan } from '../../tools/archive_plan.js'
 import { getOpenPlan } from '../../session.js'
-import { getPlan } from '../../db.js'
+import { getPlan, updatePlan } from '../../db.js'
 
 describe('open_plan', () => {
   it('throws for unknown plan id', async () => {
@@ -34,6 +34,20 @@ describe('open_plan', () => {
     const result = await open_plan({ plan_id: p.id })
     expect(result).toHaveProperty('focus')
     expect(result).toHaveProperty('tree_stats')
+  })
+
+  it('auto-focuses root task and persists focus when focus_task_id is null but tasks exist', async () => {
+    const p = await create_plan({ name: 'Null Focus' })
+    await create_task({ goal: 'root' })
+    // Simulate focus_task_id being null (e.g. plan created outside MCP)
+    updatePlan(p.id, { focus_task_id: null })
+    expect(getPlan(p.id)!.focus_task_id).toBeNull()
+
+    const result = await open_plan({ plan_id: p.id })
+    expect(result).toHaveProperty('focus')
+    expect((result as { focus: { id: string } }).focus.id).toBe('1')
+    // Focus should be persisted back to the plan row
+    expect(getPlan(p.id)!.focus_task_id).toBe('1')
   })
 
   it('auto-reactivates archived plans', async () => {
