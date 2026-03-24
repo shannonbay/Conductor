@@ -1,0 +1,141 @@
+# Conductor
+
+A persistent, hierarchical task tree for LLM agents — built as an MCP server with an optional web UI for monitoring and control.
+
+When Claude Code (or any MCP-capable agent) works on anything beyond a single session, it loses the plot. No memory of what it already tried, no structured way to decompose goals, no way to recover from failures without starting over. And when context fills up and gets compacted, it forgets earlier attempts and retries the same failed approaches.
+
+Conductor gives the agent a task tree that lives **outside the context window entirely**. The agent decomposes work into sub-tasks, tracks progress in each, records results and structured state, and handles failures by abandoning dead ends with a reason. When it branches to an alternative approach, it can see exactly why the previous one failed — so it doesn't repeat the same mistake even if the original attempt has long since been compacted away.
+
+## How it works
+
+The agent operates on a **plan** — a named project with a working directory. A plan contains a tree of **tasks**, where each task has:
+
+- A **goal** (what it's trying to do)
+- A **status** (`pending` → `active` → `completed` | `abandoned`)
+- A **result** (human-readable summary when done)
+- A **state** (structured JSON for passing data between tasks)
+- An **abandon_reason** (why this approach failed, visible to sibling alternatives)
+- Optional **depends_on** (blocks activation until dependencies complete)
+
+**Task IDs are tree addresses**, not random identifiers. `"1"` is the root, `"1.2"` is the second child of root, `"1.2.3"` is the third child of `"1.2"`. This makes the tree structure legible in every tool response without needing a separate tree-fetch.
+
+At each turn, the agent sees only its **immediate context**: the current task, its parent, siblings, children, and tree-wide stats. This keeps each API call small regardless of how large the overall plan grows.
+
+## MCP tools
+
+| Tool | Description |
+|---|---|
+| `list_plans` | List active (or all) plans |
+| `create_plan` | Create a new plan with a name and working directory |
+| `open_plan` | Resume an existing plan; restores archived plans automatically |
+| `archive_plan` | Mark a completed plan as archived |
+| `create_task` | Create a child task under the current focus task |
+| `get_context` | Read current task + parent, siblings, children, and tree stats |
+| `update_task` | Record progress: result summary, structured state patch, notes |
+| `set_status` | Transition a task to `active`, `completed`, or `abandoned` |
+| `provision_tasks` | Bulk-create a list of child tasks in one call |
+| `synthesize` | Summarise direct children grouped by completion status |
+
+## Web UI
+
+An optional Next.js app connects to the same SQLite database and provides:
+
+- **Live task tree** — hierarchical view with status indicators, updates in real time via WebSocket
+- **Detail pane** — full task detail, state, result, notes, and inline editing
+- **Activity feed** — event log showing what the agent did and when
+- **Transcript panel** — full conversation history per session, with collapsible tool call inputs and results
+- **Agent controls** — start, pause, resume, cancel; inject messages mid-run via the prompt bar
+- **AI plan generation** — generate or modify a task tree with a single prompt
+
+## Quickstart
+
+### MCP server (Claude Code)
+
+```bash
+git clone https://github.com/shannonbay/Conductor
+cd Conductor
+npm install
+cd mcp && npm run build
+```
+
+Add to your Claude Code MCP config (`~/.claude/claude_desktop_config.json` or project `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "conductor": {
+      "command": "node",
+      "args": ["/path/to/Conductor/mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+Or run without compiling using `tsx`:
+
+```json
+{
+  "mcpServers": {
+    "conductor": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/Conductor/mcp/src/index.ts"]
+    }
+  }
+}
+```
+
+### Web UI
+
+Requires an Anthropic API key for the agent runner and AI plan generation.
+
+```bash
+cd web
+ANTHROPIC_API_KEY=sk-... npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000). The web app and MCP server share the same database (`~/.conductor/tasks.db`) so you can monitor agent runs live.
+
+## Database
+
+Both the MCP server and web app write to `~/.conductor/tasks.db` (SQLite, WAL mode). Override the path with the `CONDUCTOR_DB` environment variable — set it to `:memory:` in tests for an isolated in-memory database.
+
+## Project structure
+
+```
+Conductor/
+  mcp/               MCP server (stdio transport, no HTTP)
+    src/
+      index.ts       Entry point — registers tools and dispatches calls
+      schema.ts      Zod schemas for all tool inputs
+      db.ts          SQLite helpers (minimal, no migrations)
+      session.ts     In-memory open-plan tracking
+      context.ts     Builds the context view returned by every tool
+      tools/         One file per tool handler
+  web/               Next.js monitoring and control UI
+    app/             App Router pages and API routes
+    components/      React UI components
+    lib/             DB layer, agent runner, WebSocket broadcaster, planning
+    __tests__/       Vitest test suites
+    server.ts        Custom HTTP + WebSocket server
+  specs/             Original design specs
+```
+
+## Running tests
+
+```bash
+# MCP server
+cd mcp && npm test
+
+# Web app
+cd web && npm test
+```
+
+Both use Vitest with `CONDUCTOR_DB=:memory:` so tests are isolated and leave no files behind.
+
+## Configuration
+
+| Env var | Default | Description |
+|---|---|---|
+| `CONDUCTOR_DB` | `~/.conductor/tasks.db` | Path to SQLite database; use `:memory:` for tests |
+| `ANTHROPIC_API_KEY` | — | Required for web UI agent runner and plan generation |
+| `BRAVE_SEARCH_API_KEY` | — | Optional; enables `web_search` tool in agent runs |
