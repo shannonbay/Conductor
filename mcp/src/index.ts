@@ -1,6 +1,6 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { CallToolRequestSchema, ListToolsRequestSchema, ListResourcesRequestSchema, ReadResourceRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 
 import {
@@ -28,6 +28,7 @@ import { set_status } from './tools/set_status.js'
 import { synthesize } from './tools/synthesize.js'
 import { get_context } from './tools/get_context.js'
 import { provision_tasks } from './tools/provision_tasks.js'
+import { handleListResources, handleReadResource } from './resources.js'
 
 const TOOLS = [
   {
@@ -100,7 +101,7 @@ const TOOLS = [
 
 const server = new Server(
   { name: 'conductor', version: '1.0.0' },
-  { capabilities: { tools: {} } },
+  { capabilities: { tools: {}, resources: {} } },
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -128,6 +129,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
   }
 })
+
+server.setRequestHandler(ListResourcesRequestSchema, handleListResources)
+server.setRequestHandler(ReadResourceRequestSchema, handleReadResource)
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
