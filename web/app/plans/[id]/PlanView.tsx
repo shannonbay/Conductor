@@ -205,7 +205,7 @@ export function PlanView({ project, tree, stats, events, agentSession }: Props) 
                 title="Generate plan with AI"
                 className="text-gray-400 hover:text-gray-700 text-xs leading-none px-1"
               >
-                ✦✦✦
+                ✨
               </button>
               <button
                 onClick={openNewTask}
