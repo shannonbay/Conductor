@@ -11,12 +11,7 @@ export default defineConfig({
     globals: true,
     include: ['./__tests__/**/*.test.{ts,tsx}'],
     exclude: ['node_modules', '.next'],
-    server: {
-      deps: {
-        // Force @testing-library/react and its React deps through Vite so aliases apply
-        inline: ['@testing-library/react', '@testing-library/dom', '@testing-library/jest-dom'],
-      },
-    },
+
   },
   resolve: {
     alias: {
