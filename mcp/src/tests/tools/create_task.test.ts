@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { create_task } from '../../tools/create_task.js'
 import { create_plan } from '../../tools/create_plan.js'
 import { set_status } from '../../tools/set_status.js'
-import { navigate } from '../../tools/navigate.js'
-import { getPlan } from '../../db.js'
 
 async function setup() {
   return create_plan({ name: 'Test Project' })
@@ -15,47 +13,36 @@ describe('create_task', () => {
   })
 
   it('creates root task with id "1" on empty tree', async () => {
-    const p = await setup()
+    await setup()
     const result = await create_task({ goal: 'root goal' })
     expect(result.focus.id).toBe('1')
     expect(result.focus.goal).toBe('root goal')
   })
 
-  it('throws when trying to create second root task', async () => {
+  it('throws when creating root task on non-empty tree', async () => {
     await setup()
     await create_task({ goal: 'root' })
-    // Focus is now on task 1; navigate back to "empty" is impossible —
-    // manually we need to create child tasks, not root. But the constraint is that
-    // if focus is on task 1 and tree is non-empty, next create_task is a child.
-    // To test "Tree is not empty" error, we need focus_task_id to be null + tasks > 0.
-    // That can't happen in normal flow. So we test the child creation path instead.
-    const result2 = await create_task({ goal: 'child' })
-    expect(result2.focus.id).toBe('1.1')
+    await expect(create_task({ goal: 'another root' })).rejects.toThrow('parent_id is required')
   })
 
-  it('creates child under focus task', async () => {
+  it('creates child under explicit parent_id', async () => {
     await setup()
     await create_task({ goal: 'root' })
-    const child = await create_task({ goal: 'child 1' })
+    const child = await create_task({ goal: 'child 1', parent_id: '1' })
     expect(child.focus.id).toBe('1.1')
   })
 
   it('creates sequential children with incrementing ids', async () => {
     await setup()
     await create_task({ goal: 'root' })
-    await create_task({ goal: 'child 1' })
-    // Navigate back to root to create another child
-    await navigate({ target_id: '1' })
-    const child2 = await create_task({ goal: 'child 2' })
+    await create_task({ goal: 'child 1', parent_id: '1' })
+    const child2 = await create_task({ goal: 'child 2', parent_id: '1' })
     expect(child2.focus.id).toBe('1.2')
   })
 
-  it('focus moves to new task', async () => {
-    const p = await setup()
-    await create_task({ goal: 'root' })
-    expect(getPlan(p.id)!.focus_task_id).toBe('1')
-    await create_task({ goal: 'child' })
-    expect(getPlan(p.id)!.focus_task_id).toBe('1.1')
+  it('throws when parent_id references unknown task', async () => {
+    await setup()
+    await expect(create_task({ goal: 'child', parent_id: '99' })).rejects.toThrow('not found')
   })
 
   it('stores initial_state', async () => {
@@ -70,45 +57,39 @@ describe('create_task', () => {
   it('throws when depends_on references unknown task', async () => {
     await setup()
     await create_task({ goal: 'root' })
-    await navigate({ target_id: '1' })
     await expect(
-      create_task({ goal: 'child', depends_on: ['1.99'] })
+      create_task({ goal: 'child', parent_id: '1', depends_on: ['1.99'] })
     ).rejects.toThrow('unknown task')
   })
 
   it('throws when depends_on references a non-sibling', async () => {
     await setup()
     await create_task({ goal: 'root' })
-    await create_task({ goal: 'child 1' })
-    // Now focus is on 1.1. Create a grandchild 1.1.1
-    const gc = await create_task({ goal: 'grandchild' })
-    expect(gc.focus.id).toBe('1.1.1')
-    // Navigate back to 1.1 and try to create 1.1.2 depending on '1' (not a sibling)
-    await navigate({ target_id: '1.1' })
+    await create_task({ goal: 'child 1', parent_id: '1' })
+    await create_task({ goal: 'grandchild', parent_id: '1.1' })
+    // Try to create 1.1.2 depending on '1' (not a sibling of 1.1.x)
     await expect(
-      create_task({ goal: 'child 2', depends_on: ['1'] })
+      create_task({ goal: 'grandchild 2', parent_id: '1.1', depends_on: ['1'] })
     ).rejects.toThrow('not a sibling')
   })
 
   it('throws when creating active task with incomplete dependency', async () => {
     await setup()
     await create_task({ goal: 'root' })
-    await create_task({ goal: 'child 1' })
-    // child 1 is active (not completed). Navigate back to root and try to create
-    // active child 2 that depends on child 1.
-    await navigate({ target_id: '1' })
+    await create_task({ goal: 'child 1', parent_id: '1' })
+    // child 1 is active (not completed). Try to create active child 2 depending on it.
     await expect(
-      create_task({ goal: 'child 2', status: 'active', depends_on: ['1.1'] })
+      create_task({ goal: 'child 2', parent_id: '1', status: 'active', depends_on: ['1.1'] })
     ).rejects.toThrow('dependencies not completed')
   })
 
   it('succeeds creating pending task with incomplete dependency', async () => {
     await setup()
     await create_task({ goal: 'root' })
-    await create_task({ goal: 'child 1' })
-    await navigate({ target_id: '1' })
+    await create_task({ goal: 'child 1', parent_id: '1' })
     const result = await create_task({
       goal: 'child 2',
+      parent_id: '1',
       status: 'pending',
       depends_on: ['1.1'],
     })
@@ -119,11 +100,11 @@ describe('create_task', () => {
   it('succeeds creating active task when dependency is completed', async () => {
     await setup()
     await create_task({ goal: 'root' })
-    await create_task({ goal: 'child 1' })
-    await set_status({ status: 'completed' })
-    await navigate({ target_id: '1' })
+    await create_task({ goal: 'child 1', parent_id: '1' })
+    await set_status({ task_id: '1.1', status: 'completed' })
     const result = await create_task({
       goal: 'child 2',
+      parent_id: '1',
       status: 'active',
       depends_on: ['1.1'],
     })

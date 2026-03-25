@@ -1,5 +1,5 @@
 import { getOpenPlan } from '../session.js'
-import { getPlan, getTask, insertTask, updatePlan, countAllTasks, runTransaction, Task } from '../db.js'
+import { getPlan, getTask, insertTask, touchPlan, countAllTasks, runTransaction, Task } from '../db.js'
 import { buildContext } from '../context.js'
 import { ProvisionTasksSchema } from '../schema.js'
 
@@ -104,9 +104,9 @@ export async function provision_tasks(args: unknown) {
     }
   })
 
-  // Focus = shallowest and lowest-numbered task created
-  const focusId = sortedIds[0]
-  updatePlan(planId, { focus_task_id: focusId, updated_at: now })
+  touchPlan(planId)
 
-  return buildContext(planId, focusId)
+  // Return context for shallowest/lowest-numbered task created
+  const firstId = sortedIds[0]
+  return buildContext(planId, firstId)
 }

@@ -17,7 +17,6 @@ export async function create_plan(args: unknown) {
     description: input.description ?? null,
     status: 'active',
     working_dir,
-    focus_task_id: null,
     created_at: now,
     updated_at: now,
   })
@@ -30,7 +29,6 @@ export async function create_plan(args: unknown) {
     description: input.description ?? null,
     status: 'active',
     working_dir,
-    focus_task_id: null,
     created_at: now,
     updated_at: now,
     tree_stats: getTreeStats(id),

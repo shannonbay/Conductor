@@ -10,7 +10,6 @@ import {
   ArchivePlanSchema,
   CreateTaskSchema,
   UpdateTaskSchema,
-  NavigateSchema,
   SetStatusSchema,
   SynthesizeSchema,
   GetContextSchema,
@@ -23,7 +22,6 @@ import { open_plan } from './tools/open_plan.js'
 import { archive_plan } from './tools/archive_plan.js'
 import { create_task } from './tools/create_task.js'
 import { update_task } from './tools/update_task.js'
-import { navigate } from './tools/navigate.js'
 import { set_status } from './tools/set_status.js'
 import { synthesize } from './tools/synthesize.js'
 import { get_context } from './tools/get_context.js'
@@ -45,7 +43,7 @@ const TOOLS = [
   },
   {
     name: 'open_plan',
-    description: 'Open an existing plan and restore its focus cursor to where you left off. Use this at the start of a session when resuming prior work. Opening an archived plan automatically restores it to active. All task tools operate on the open plan, so you must open one before doing any task work.',
+    description: 'Open an existing plan. Use this at the start of a session when resuming prior work. Opening an archived plan automatically restores it to active. Returns the list of root tasks so you can pick up where you left off. All task tools operate on the open plan, so you must open one before doing any task work.',
     inputSchema: zodToJsonSchema(OpenPlanSchema),
     handler: open_plan,
   },
@@ -57,37 +55,31 @@ const TOOLS = [
   },
   {
     name: 'create_task',
-    description: 'Create a child task under the current focus, or a root task if the tree is empty. Focus moves to the new task. Decompose work into sub-tasks before starting it — not after problems arise. For sequential work, create all sibling tasks upfront with depends_on and status="pending" so the dependency graph is explicit from the start. Prefer smaller, concrete tasks over large vague ones; a task should have a clear completion condition.',
+    description: 'Create a new task. Pass parent_id to create a child of an existing task. Omit parent_id only when creating the very first root task on an empty tree. Decompose work into sub-tasks before starting it — not after problems arise. For sequential work, create all sibling tasks upfront with depends_on and status="pending" so the dependency graph is explicit from the start. Prefer smaller, concrete tasks over large vague ones; a task should have a clear completion condition.',
     inputSchema: zodToJsonSchema(CreateTaskSchema),
     handler: create_task,
   },
   {
     name: 'update_task',
-    description: 'Record progress on the current focus task without changing focus. Call this after completing meaningful work, not just at the end — intermediate results are valuable if the session ends or an approach fails. Use result for a human-readable summary of what happened. Use state_patch for structured data (file paths, counts, flags, API responses) that this task or downstream sibling tasks will need programmatically. Use notes for freeform observations, corrections, or context — unlike result, notes can be updated at any point and cleared by passing null. Use goal to rename the task (pending tasks only).',
+    description: 'Record progress on a task. Provide task_id explicitly. Call this after completing meaningful work, not just at the end — intermediate results are valuable if the session ends or an approach fails. Use result for a human-readable summary of what happened. Use state_patch for structured data (file paths, counts, flags, API responses) that this task or downstream sibling tasks will need programmatically. Use notes for freeform observations, corrections, or context — unlike result, notes can be updated at any point and cleared by passing null. Use goal to rename the task (pending tasks only).',
     inputSchema: zodToJsonSchema(UpdateTaskSchema),
     handler: update_task,
   },
   {
-    name: 'navigate',
-    description: 'Move focus to any task by ID within the open project. Use this to return to a parent after completing or abandoning a sub-task, to jump to the next sibling, or to drill into a child. Navigation is how you traverse the tree — after completing a leaf task, always navigate back up to the parent to assess what comes next.',
-    inputSchema: zodToJsonSchema(NavigateSchema),
-    handler: navigate,
-  },
-  {
     name: 'set_status',
-    description: 'Change the status of a task. When an approach fails or hits a hard blocker, abandon it with a specific reason before creating an alternative sibling — the reason is visible to sibling tasks and prevents repeating the same mistake. When completing a task, make sure its children are all resolved first. Activating a task with unmet depends_on will return an error; complete the dependencies first.',
+    description: 'Change the status of a task. Provide task_id explicitly. When an approach fails or hits a hard blocker, abandon it with a specific reason before creating an alternative sibling — the reason is visible to sibling tasks and prevents repeating the same mistake. When completing a task, make sure its children are all resolved first. Activating a task with unmet depends_on will return an error; complete the dependencies first.',
     inputSchema: zodToJsonSchema(SetStatusSchema),
     handler: set_status,
   },
   {
     name: 'synthesize',
-    description: 'Collect the results and state from all children of a task into a single consolidated view. Call this before marking a parent task complete — it gives you a full picture of what each sub-task produced, what was abandoned and why, and what is still pending, without navigating each child individually. Do not complete a parent task without synthesizing first.',
+    description: 'Collect the results and state from all children of a task into a single consolidated view. Provide task_id explicitly. Call this before marking a parent task complete — it gives you a full picture of what each sub-task produced, what was abandoned and why, and what is still pending. Do not complete a parent task without synthesizing first.',
     inputSchema: zodToJsonSchema(SynthesizeSchema),
     handler: synthesize,
   },
   {
     name: 'get_context',
-    description: 'Read-only. Returns the context view for the current focus task: the task itself, its parent, siblings, children, and tree-wide stats. Call this at the start of every session before doing any work, to re-orient after a context switch, or any time you are unsure where you are in the tree. If no plan is open, it will tell you — use list_plans and open_plan first.',
+    description: 'Read-only. Returns the context view for a task: the task itself, its parent, siblings, children, and tree-wide stats. Provide task_id explicitly. Call this to inspect any task at any time. If no plan is open, it will tell you — use list_plans and open_plan first.',
     inputSchema: zodToJsonSchema(GetContextSchema),
     handler: get_context,
   },

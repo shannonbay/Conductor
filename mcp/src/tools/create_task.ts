@@ -1,4 +1,4 @@
-import { getPlan, getTask, countAllTasks, nextChildId, insertTask, updatePlan, touchPlan } from '../db.js'
+import { getTask, countAllTasks, nextChildId, insertTask, touchPlan } from '../db.js'
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { CreateTaskSchema } from '../schema.js'
@@ -9,18 +9,17 @@ export async function create_task(args: unknown) {
   const planId = getOpenPlan()
   if (!planId) throw new Error('No plan is open. Use open_plan or create_plan first.')
 
-  const project = getPlan(planId)!
-  const parentId = project.focus_task_id
-
   let newId: string
 
-  if (parentId === null) {
+  if (input.parent_id === undefined || input.parent_id === null) {
     // Creating root task — tree must be empty
     const total = countAllTasks(planId)
-    if (total > 0) throw new Error('Tree is not empty. Navigate to the desired parent task first.')
+    if (total > 0) throw new Error('parent_id is required when the tree is non-empty.')
     newId = '1'
   } else {
-    newId = nextChildId(planId, parentId)
+    const parent = getTask(planId, input.parent_id)
+    if (!parent) throw new Error(`Parent task ${input.parent_id} not found.`)
+    newId = nextChildId(planId, input.parent_id)
   }
 
   // Validate depends_on items exist as siblings and if status=active they're all completed
@@ -66,7 +65,7 @@ export async function create_task(args: unknown) {
   }
 
   insertTask(task)
-  updatePlan(planId, { focus_task_id: newId, updated_at: now })
+  touchPlan(planId)
 
   return buildContext(planId, newId)
 }

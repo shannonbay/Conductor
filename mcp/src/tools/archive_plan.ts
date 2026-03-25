@@ -19,7 +19,6 @@ export async function archive_plan(args: unknown) {
     name: plan.name,
     description: plan.description,
     status: 'archived',
-    focus_task_id: plan.focus_task_id,
     created_at: plan.created_at,
     updated_at: now,
   }

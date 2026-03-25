@@ -1,20 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import type { Task } from '@/lib/db.js'
 
-// Shared mock function — used by ALL instances of MockAnthropic
-const mockCreate = vi.fn()
+// Mock the channel client
+const mockRequireChannel = vi.fn().mockResolvedValue(undefined)
+const mockPlanTasks = vi.fn()
+const mockModifyTasks = vi.fn()
 
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class MockAnthropic {
-    messages = { create: mockCreate }
+vi.mock('@/lib/channel-client.js', () => ({
+  ChannelNotConnectedError: class ChannelNotConnectedError extends Error {
+    constructor() { super('not connected'); this.name = 'ChannelNotConnectedError' }
   },
+  ChannelBusyError: class ChannelBusyError extends Error {
+    constructor() { super('busy'); this.name = 'ChannelBusyError' }
+  },
+  requireChannel: mockRequireChannel,
+  planTasksViaChannel: mockPlanTasks,
+  modifyTasksViaChannel: mockModifyTasks,
 }))
 
 // Import planning AFTER the mock is set up
 const { generatePlan, modifyPlan } = await import('@/lib/planning.js')
 
 beforeEach(() => {
-  mockCreate.mockReset()
+  mockRequireChannel.mockReset().mockResolvedValue(undefined)
+  mockPlanTasks.mockReset()
+  mockModifyTasks.mockReset()
 })
 
 function makeTask(overrides: Partial<Task> = {}): Task {
@@ -42,14 +52,12 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 }
 
 describe('generatePlan', () => {
-  it('returns parsed ProposedTask[] from valid AI response', async () => {
+  it('returns parsed ProposedTask[] from channel response', async () => {
     const proposed = [
-      { goal: 'Subtask A', suggested_depends_on: [] },
-      { goal: 'Subtask B', suggested_depends_on: [] },
+      { goal: 'Subtask A', plan: [], suggested_depends_on: [] },
+      { goal: 'Subtask B', plan: [], suggested_depends_on: [] },
     ]
-    mockCreate.mockResolvedValue({
-      content: [{ type: 'text', text: JSON.stringify(proposed) }],
-    })
+    mockPlanTasks.mockResolvedValue(proposed)
 
     const result = await generatePlan(makeTask(), 'My Project', null, [])
 
@@ -58,39 +66,34 @@ describe('generatePlan', () => {
     expect(result[1].goal).toBe('Subtask B')
   })
 
-  it('throws on malformed AI response', async () => {
-    mockCreate.mockResolvedValue({
-      content: [{ type: 'text', text: 'not valid json at all' }],
-    })
+  it('throws on malformed channel response', async () => {
+    mockPlanTasks.mockResolvedValue({ not_an_array: true })
 
     await expect(generatePlan(makeTask(), 'Project', null, [])).rejects.toThrow()
   })
 
-  it('strips markdown code blocks from response', async () => {
-    const proposed = [{ goal: 'Task', suggested_depends_on: [] }]
-    mockCreate.mockResolvedValue({
-      content: [{ type: 'text', text: '```json\n' + JSON.stringify(proposed) + '\n```' }],
-    })
-
-    const result = await generatePlan(makeTask(), 'Project', null, [])
-    expect(result).toHaveLength(1)
-    expect(result[0].goal).toBe('Task')
-  })
-
-  it('includes parent context and siblings in prompt', async () => {
-    const proposed = [{ goal: 'Task', suggested_depends_on: [] }]
-    mockCreate.mockResolvedValue({
-      content: [{ type: 'text', text: JSON.stringify(proposed) }],
-    })
+  it('passes task context and siblings to channel client', async () => {
+    const proposed = [{ goal: 'Task', plan: [], suggested_depends_on: [] }]
+    mockPlanTasks.mockResolvedValue(proposed)
 
     const sibling = makeTask({ id: '1.1', goal: 'Sibling task', status: 'abandoned', abandon_reason: 'API not available' })
     await generatePlan(makeTask({ id: '1.2' }), 'My Project', 'Parent goal', [sibling])
 
-    const callArgs = mockCreate.mock.calls[0][0]
-    const prompt = callArgs.messages[0].content as string
-    expect(prompt).toContain('Parent goal')
-    expect(prompt).toContain('Sibling task')
-    expect(prompt).toContain('API not available')
+    const callArgs = mockPlanTasks.mock.calls[0][0]
+    expect(callArgs.parentGoal).toBe('Parent goal')
+    expect(callArgs.siblings).toContainEqual(expect.objectContaining({ goal: 'Sibling task' }))
+    expect(callArgs.planName).toBe('My Project')
+  })
+
+  it('passes optional instruction to channel client', async () => {
+    mockPlanTasks.mockResolvedValue([{ goal: 'Task', plan: [], suggested_depends_on: [] }])
+    await generatePlan(makeTask(), 'Project', null, [], 'focus on testing')
+    expect(mockPlanTasks.mock.calls[0][0].instruction).toBe('focus on testing')
+  })
+
+  it('throws ChannelNotConnectedError when not connected', async () => {
+    mockRequireChannel.mockRejectedValue(Object.assign(new Error('not connected'), { name: 'ChannelNotConnectedError' }))
+    await expect(generatePlan(makeTask(), 'Project', null, [])).rejects.toMatchObject({ name: 'ChannelNotConnectedError' })
   })
 })
 
@@ -98,13 +101,11 @@ describe('modifyPlan', () => {
   it('returns a diff with unchanged, modified, added, removed', async () => {
     const diff = {
       unchanged: ['1.1'],
-      modified: [{ replaces_id: '1.2', goal: 'Updated 1.2', suggested_depends_on: [] }],
-      added: [{ goal: 'New task', suggested_depends_on: [] }],
+      modified: [{ replaces_id: '1.2', goal: 'Updated 1.2', plan: [], suggested_depends_on: [] }],
+      added: [{ goal: 'New task', plan: [], suggested_depends_on: [] }],
       removed: ['1.3'],
     }
-    mockCreate.mockResolvedValue({
-      content: [{ type: 'text', text: JSON.stringify(diff) }],
-    })
+    mockModifyTasks.mockResolvedValue(diff)
 
     const task = makeTask({ id: '1' })
     const children: Task[] = [
@@ -123,16 +124,13 @@ describe('modifyPlan', () => {
   })
 
   it('filters out completed/active tasks from removed list', async () => {
-    // AI mistakenly tries to remove a completed task
     const diff = {
       unchanged: [],
       modified: [],
       added: [],
       removed: ['1.1', '1.2'], // 1.1 is completed — should be protected
     }
-    mockCreate.mockResolvedValue({
-      content: [{ type: 'text', text: JSON.stringify(diff) }],
-    })
+    mockModifyTasks.mockResolvedValue(diff)
 
     const task = makeTask({ id: '1' })
     const children: Task[] = [
@@ -148,7 +146,7 @@ describe('modifyPlan', () => {
 
   it('filters out active tasks from removed list', async () => {
     const diff = { unchanged: [], modified: [], added: [], removed: ['1.1'] }
-    mockCreate.mockResolvedValue({ content: [{ type: 'text', text: JSON.stringify(diff) }] })
+    mockModifyTasks.mockResolvedValue(diff)
 
     const task = makeTask({ id: '1' })
     const children: Task[] = [makeTask({ id: '1.1', status: 'active' })]

@@ -2,15 +2,12 @@ import { describe, it, expect } from 'vitest'
 import { handleListResources, handleReadResource } from '../resources.js'
 import { create_plan } from '../tools/create_plan.js'
 import { create_task } from '../tools/create_task.js'
-import { navigate } from '../tools/navigate.js'
 
 async function seedPlan(name: string) {
   const plan = await create_plan({ name })
   await create_task({ goal: 'Root task', status: 'active' })
-  await create_task({ goal: 'Child one', status: 'pending' })
-  // navigate back to root to create second child as sibling
-  await navigate({ target_id: '1' })
-  await create_task({ goal: 'Child two', status: 'pending' })
+  await create_task({ goal: 'Child one', parent_id: '1', status: 'pending' })
+  await create_task({ goal: 'Child two', parent_id: '1', status: 'pending' })
   return plan
 }
 

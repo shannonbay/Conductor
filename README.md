@@ -47,6 +47,8 @@ An optional Next.js app connects to the same SQLite database and provides:
 - **Agent controls** — start, pause, resume, cancel; inject messages mid-run via the prompt bar
 - **AI plan generation** — generate or modify a task tree with a single prompt
 
+AI features (plan generation, task decomposition, agent execution) run through a **Claude Code Channels** session on your machine — using your claude.ai plan subscription rather than a separate API key.
+
 ## Quickstart
 
 ### MCP server (Claude Code)
@@ -86,14 +88,40 @@ Or run without compiling using `tsx`:
 
 ### Web UI
 
-Requires an Anthropic API key for the agent runner and AI plan generation.
+The web UI uses [Claude Code Channels](https://code.claude.com/docs/en/channels) for all AI features. You need Claude Code v2.1.80+ with a claude.ai login (Pro or Max plan).
 
-```bash
-cd web
-ANTHROPIC_API_KEY=sk-... npm run dev
+**1. Add both servers to your `.mcp.json`:**
+
+```json
+{
+  "mcpServers": {
+    "conductor": {
+      "command": "node",
+      "args": ["/path/to/Conductor/mcp/dist/index.js"]
+    },
+    "conductor-channel": {
+      "command": "npx",
+      "args": ["tsx", "/path/to/Conductor/channel/src/server.ts"]
+    }
+  }
+}
 ```
 
-Open [http://localhost:3000](http://localhost:3000). The web app and MCP server share the same database (`~/.conductor/tasks.db`) so you can monitor agent runs live.
+**2. Start the web app:**
+
+```bash
+cd web && npm run dev
+```
+
+**3. Launch Claude Code with the channel enabled:**
+
+```bash
+claude --dangerously-load-development-channels server:conductor-channel
+```
+
+Open [http://localhost:3000](http://localhost:3000). The settings gear (⚙) shows a green dot when Claude Code is connected. The web app, MCP server, and channel server all share the same database (`~/.conductor/tasks.db`).
+
+> **Note:** `--dangerously-load-development-channels` is required during the Channels research preview (Claude Code v2.1.80+). Custom channel plugins are not yet on the approved allowlist.
 
 ## Database
 
@@ -103,6 +131,8 @@ Both the MCP server and web app write to `~/.conductor/tasks.db` (SQLite, WAL mo
 
 ```
 Conductor/
+  channel/           Claude Code channel server (MCP over stdio + HTTP :8789)
+    src/server.ts    Entry point — MCP server + HTTP bridge
   mcp/               MCP server (stdio transport, no HTTP)
     src/
       index.ts       Entry point — registers tools and dispatches calls
@@ -114,7 +144,7 @@ Conductor/
   web/               Next.js monitoring and control UI
     app/             App Router pages and API routes
     components/      React UI components
-    lib/             DB layer, agent runner, WebSocket broadcaster, planning
+    lib/             DB layer, channel client, agent runner, WebSocket broadcaster, planning
     __tests__/       Vitest test suites
     server.ts        Custom HTTP + WebSocket server
   specs/             Original design specs
@@ -137,5 +167,6 @@ Both use Vitest with `CONDUCTOR_DB=:memory:` so tests are isolated and leave no 
 | Env var | Default | Description |
 |---|---|---|
 | `CONDUCTOR_DB` | `~/.conductor/tasks.db` | Path to SQLite database; use `:memory:` for tests |
-| `ANTHROPIC_API_KEY` | — | Required for web UI agent runner and plan generation |
+| `CONDUCTOR_CHANNEL_URL` | `http://127.0.0.1:8789` | URL of the channel server (web app → channel) |
+| `CONDUCTOR_CHANNEL_PORT` | `8789` | Port the channel server listens on |
 | `BRAVE_SEARCH_API_KEY` | — | Optional; enables `web_search` tool in agent runs |

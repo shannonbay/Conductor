@@ -25,7 +25,6 @@ function makeProject(id: string, overrides: Partial<PlanRow> = {}): PlanRow {
     description: null,
     status: 'active',
     working_dir: '/tmp',
-    focus_task_id: null,
     created_at: now,
     updated_at: now,
     ...overrides,

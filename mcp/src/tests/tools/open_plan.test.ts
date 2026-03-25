@@ -4,7 +4,7 @@ import { create_plan } from '../../tools/create_plan.js'
 import { create_task } from '../../tools/create_task.js'
 import { archive_plan } from '../../tools/archive_plan.js'
 import { getOpenPlan } from '../../session.js'
-import { getPlan, updatePlan } from '../../db.js'
+import { getPlan } from '../../db.js'
 
 describe('open_plan', () => {
   it('throws for unknown plan id', async () => {
@@ -28,26 +28,22 @@ describe('open_plan', () => {
     expect((result as { message: string }).message).toContain('empty')
   })
 
-  it('returns context when plan has tasks', async () => {
+  it('returns root_tasks and tree_stats when plan has tasks', async () => {
     const p = await create_plan({ name: 'With Tasks' })
-    await create_task({ goal: 'root' })
+    await create_task({ goal: 'root task' })
     const result = await open_plan({ plan_id: p.id })
-    expect(result).toHaveProperty('focus')
+    expect(result).toHaveProperty('root_tasks')
     expect(result).toHaveProperty('tree_stats')
+    expect((result as { root_tasks: { id: string }[] }).root_tasks[0].id).toBe('1')
   })
 
-  it('auto-focuses root task and persists focus when focus_task_id is null but tasks exist', async () => {
-    const p = await create_plan({ name: 'Null Focus' })
+  it('does not persist focus_task_id', async () => {
+    const p = await create_plan({ name: 'Test' })
     await create_task({ goal: 'root' })
-    // Simulate focus_task_id being null (e.g. plan created outside MCP)
-    updatePlan(p.id, { focus_task_id: null })
-    expect(getPlan(p.id)!.focus_task_id).toBeNull()
-
-    const result = await open_plan({ plan_id: p.id })
-    expect(result).toHaveProperty('focus')
-    expect((result as { focus: { id: string } }).focus.id).toBe('1')
-    // Focus should be persisted back to the plan row
-    expect(getPlan(p.id)!.focus_task_id).toBe('1')
+    await open_plan({ plan_id: p.id })
+    // focus_task_id column should remain null since we no longer persist it
+    const plan = getPlan(p.id)!
+    expect((plan as unknown as Record<string, unknown>).focus_task_id).toBeNull()
   })
 
   it('auto-reactivates archived plans', async () => {

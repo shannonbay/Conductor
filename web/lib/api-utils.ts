@@ -19,5 +19,9 @@ export function conflict(message: string): NextResponse {
 export function serverError(e: unknown): NextResponse {
   const message = e instanceof Error ? e.message : String(e)
   console.error('[API Error]', e)
+  const name = e instanceof Error ? e.name : ''
+  if (name === 'ChannelNotConnectedError' || name === 'ChannelBusyError') {
+    return err(message, 503)
+  }
   return err(message, 500)
 }

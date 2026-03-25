@@ -1,23 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { insertPlan, insertTask as _insertTask, getTask, createSession, getDb } from '@/lib/db.js'
 
-// Shared mock that all Anthropic instances will use
-const mockCreate = vi.fn()
+// Mock the channel client so tests don't need a running Claude Code session
+const mockRequireChannel = vi.fn().mockResolvedValue(undefined)
+const mockStartAgent = vi.fn().mockResolvedValue('req_test_123')
+const mockCancelAgent = vi.fn().mockResolvedValue(undefined)
+const mockSendHumanMessage = vi.fn().mockResolvedValue(undefined)
 
-vi.mock('@anthropic-ai/sdk', () => ({
-  default: class MockAnthropic {
-    messages = { create: mockCreate }
+async function* mockStreamDone() {
+  yield { type: 'done' as const, summary: 'finished' }
+}
+
+const mockStreamEvents = vi.fn().mockImplementation(mockStreamDone)
+
+vi.mock('@/lib/channel-client.js', () => ({
+  ChannelNotConnectedError: class ChannelNotConnectedError extends Error {
+    constructor() { super('not connected'); this.name = 'ChannelNotConnectedError' }
   },
+  ChannelBusyError: class ChannelBusyError extends Error {
+    constructor() { super('busy'); this.name = 'ChannelBusyError' }
+  },
+  requireChannel: mockRequireChannel,
+  startAgentViaChannel: mockStartAgent,
+  streamAgentEvents: mockStreamEvents,
+  cancelAgentViaChannel: mockCancelAgent,
+  sendHumanMessageToAgent: mockSendHumanMessage,
 }))
 
 beforeEach(() => {
-  mockCreate.mockReset()
-  // Default: end immediately so the agent loop finishes fast
-  mockCreate.mockResolvedValue({
-    stop_reason: 'end_turn',
-    usage: { input_tokens: 5, output_tokens: 10 },
-    content: [{ type: 'text', text: 'Done' }],
-  })
+  mockRequireChannel.mockReset().mockResolvedValue(undefined)
+  mockStartAgent.mockReset().mockResolvedValue('req_test_123')
+  mockStreamEvents.mockReset().mockImplementation(mockStreamDone)
+  mockCancelAgent.mockReset().mockResolvedValue(undefined)
+  mockSendHumanMessage.mockReset().mockResolvedValue(undefined)
 })
 
 function insertTestProject(id: string) {
@@ -58,7 +73,7 @@ describe('startAgent', () => {
     await expect(startAgent(planId, '1')).rejects.toThrow('already active')
   })
 
-  it('creates a session row and locks subtree on start, then unlocks on completion', async () => {
+  it('creates a session row on start', async () => {
     const planId = insertTestProject('plan_new_unique')
     insertTestTask(planId, '1')
     insertTestTask(planId, '1.1')
@@ -66,13 +81,9 @@ describe('startAgent', () => {
     const { startAgent } = await import('@/lib/agent-runner.js')
     const { sessionId } = await startAgent(planId, '1')
 
-    // Session was created — check by ID (not getActiveSession which filters by running/paused)
     expect(sessionId).toBeTruthy()
     const sess = getSession(sessionId)
     expect(sess).toBeDefined()
-
-    // Tasks should have been locked (may be unlocked after completion — depends on timing)
-    // The key assertion: the session row exists in the DB
     expect(sess?.id).toBe(sessionId)
   })
 
@@ -85,6 +96,15 @@ describe('startAgent', () => {
     const planId = insertTestProject('plan_notask')
     const { startAgent } = await import('@/lib/agent-runner.js')
     await expect(startAgent(planId, '99')).rejects.toThrow()
+  })
+
+  it('throws ChannelNotConnectedError when channel is not connected', async () => {
+    const planId = insertTestProject('plan_noconn')
+    insertTestTask(planId, '1')
+    mockRequireChannel.mockRejectedValue(Object.assign(new Error('not connected'), { name: 'ChannelNotConnectedError' }))
+
+    const { startAgent } = await import('@/lib/agent-runner.js')
+    await expect(startAgent(planId, '1')).rejects.toMatchObject({ name: 'ChannelNotConnectedError' })
   })
 })
 
@@ -101,12 +121,10 @@ describe('cancelAgent', () => {
       .run('sess_to_cancel', now, '1', planId)
 
     const { cancelAgent } = await import('@/lib/agent-runner.js')
-    cancelAgent(planId)
+    await cancelAgent(planId)
 
-    // Session should be cancelled
     const sess = getSession('sess_to_cancel')
     expect(sess?.status).toBe('cancelled')
-    // Task should be unlocked
     expect(getTask(planId, '1')?.locked_by).toBeNull()
   })
 })

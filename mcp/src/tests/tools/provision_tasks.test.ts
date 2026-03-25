@@ -3,8 +3,7 @@ import { provision_tasks } from '../../tools/provision_tasks.js'
 import { create_plan } from '../../tools/create_plan.js'
 import { create_task } from '../../tools/create_task.js'
 import { set_status } from '../../tools/set_status.js'
-import { navigate } from '../../tools/navigate.js'
-import { getTask, getPlan } from '../../db.js'
+import { getTask } from '../../db.js'
 
 async function setup() {
   return create_plan({ name: 'Test Plan' })
@@ -37,8 +36,8 @@ describe('provision_tasks', () => {
     expect(getTask(plan.id, '1.1.1')?.goal).toBe('Grandchild')
   })
 
-  it('sets focus to the shallowest, lowest-numbered task', async () => {
-    const plan = await setup()
+  it('returns context for the shallowest, lowest-numbered task', async () => {
+    await setup()
     const result = await provision_tasks({
       tasks: {
         '1':   { goal: 'Root', status: 'active' },
@@ -48,7 +47,6 @@ describe('provision_tasks', () => {
     })
 
     expect(result.focus.id).toBe('1')
-    expect(getPlan(plan.id)?.focus_task_id).toBe('1')
   })
 
   it('sets focus to lowest-numbered when all tasks share the same depth', async () => {
@@ -199,9 +197,8 @@ describe('provision_tasks', () => {
   it('allows active task with completed dep already in DB', async () => {
     const plan = await setup()
     await create_task({ goal: 'root' })
-    await create_task({ goal: 'child 1' })
-    await set_status({ status: 'completed', result: 'done' })
-    await navigate({ target_id: '1' })
+    await create_task({ goal: 'child 1', parent_id: '1' })
+    await set_status({ task_id: '1.1', status: 'completed', result: 'done' })
 
     const result = await provision_tasks({
       tasks: {

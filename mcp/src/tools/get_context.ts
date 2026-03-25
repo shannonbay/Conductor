@@ -1,10 +1,9 @@
-import { getPlan } from '../db.js'
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { GetContextSchema } from '../schema.js'
 
 export async function get_context(args: unknown) {
-  GetContextSchema.parse(args)
+  const input = GetContextSchema.parse(args)
 
   const planId = getOpenPlan()
   if (!planId) {
@@ -13,13 +12,5 @@ export async function get_context(args: unknown) {
     }
   }
 
-  const project = getPlan(planId)!
-  if (!project.focus_task_id) {
-    return {
-      plan: { id: project.id, name: project.name },
-      message: 'Plan is open but the task tree is empty. Use create_task to add the first task.',
-    }
-  }
-
-  return buildContext(planId, project.focus_task_id)
+  return buildContext(planId, input.task_id)
 }

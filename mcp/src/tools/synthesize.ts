@@ -1,4 +1,4 @@
-import { getPlan, getTask, getChildren } from '../db.js'
+import { getTask, getChildren } from '../db.js'
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { SynthesizeSchema } from '../schema.js'
@@ -9,15 +9,10 @@ export async function synthesize(args: unknown) {
   const planId = getOpenPlan()
   if (!planId) throw new Error('No plan is open. Use open_plan or create_plan first.')
 
-  const project = getPlan(planId)!
-  const focusTaskId = project.focus_task_id
-  if (!focusTaskId) throw new Error('No focus task. Use create_task to add the first task.')
+  const task = getTask(planId, input.task_id)
+  if (!task) throw new Error(`Task ${input.task_id} not found.`)
 
-  const targetId = input.target_id ?? focusTaskId
-  const task = getTask(planId, targetId)
-  if (!task) throw new Error(`Task ${targetId} not found.`)
-
-  const children = getChildren(planId, targetId)
+  const children = getChildren(planId, input.task_id)
 
   const completed = children
     .filter(c => c.status === 'completed')
@@ -31,7 +26,7 @@ export async function synthesize(args: unknown) {
     .filter(c => c.status !== 'completed' && c.status !== 'abandoned')
     .map(c => ({ id: c.id, goal: c.goal, status: c.status }))
 
-  const context = buildContext(planId, targetId)
+  const context = buildContext(planId, input.task_id)
 
   return {
     ...context,

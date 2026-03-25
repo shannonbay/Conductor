@@ -8,7 +8,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     const { id: planId } = await params
     if (!getPlan(planId)) return notFound('Project')
     try {
-      cancelAgent(planId)
+      await cancelAgent(planId)
       return ok({ status: 'cancelled' })
     } catch (e) {
       return err(e instanceof Error ? e.message : String(e), 409)

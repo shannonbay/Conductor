@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { buildContext } from '../context.js'
-import { insertPlan, insertTask, updatePlan } from '../db.js'
+import { insertPlan, insertTask } from '../db.js'
 import type { PlanRow, Task } from '../db.js'
 
 function makeProject(id: string, overrides: Partial<PlanRow> = {}): PlanRow {
@@ -11,7 +11,6 @@ function makeProject(id: string, overrides: Partial<PlanRow> = {}): PlanRow {
     description: null,
     status: 'active',
     working_dir: '/tmp',
-    focus_task_id: null,
     created_at: now,
     updated_at: now,
     ...overrides,
@@ -49,7 +48,6 @@ describe('buildContext', () => {
   it('returns null parent for root task', () => {
     insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1'))
-    updatePlan('p1', { focus_task_id: '1' })
 
     const ctx = buildContext('p1', '1')
     expect(ctx.parent).toBeNull()
@@ -59,7 +57,6 @@ describe('buildContext', () => {
     insertPlan(makeProject('p1'))
     insertTask(makeTask('p1', '1', { goal: 'root goal' }))
     insertTask(makeTask('p1', '1.1'))
-    updatePlan('p1', { focus_task_id: '1.1' })
 
     const ctx = buildContext('p1', '1.1')
     expect(ctx.parent).not.toBeNull()
@@ -73,7 +70,6 @@ describe('buildContext', () => {
     insertTask(makeTask('p1', '1.1'))
     insertTask(makeTask('p1', '1.2'))
     insertTask(makeTask('p1', '1.3'))
-    updatePlan('p1', { focus_task_id: '1.1' })
 
     const ctx = buildContext('p1', '1.1')
     const siblingIds = ctx.siblings.map(s => s.id)
@@ -87,7 +83,6 @@ describe('buildContext', () => {
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1'))
     insertTask(makeTask('p1', '1.2'))
-    updatePlan('p1', { focus_task_id: '1' })
 
     const ctx = buildContext('p1', '1')
     expect(ctx.children.map(c => c.id)).toContain('1.1')
@@ -99,7 +94,6 @@ describe('buildContext', () => {
     insertTask(makeTask('p1', '1', { status: 'active' }))
     insertTask(makeTask('p1', '1.1', { status: 'completed' }))
     insertTask(makeTask('p1', '1.2', { status: 'abandoned' }))
-    updatePlan('p1', { focus_task_id: '1' })
 
     const ctx = buildContext('p1', '1')
     expect(ctx.tree_stats.total_tasks).toBe(3)
@@ -113,7 +107,6 @@ describe('buildContext', () => {
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1', { result: null, abandon_reason: null, depends_on: null }))
     insertTask(makeTask('p1', '1.2'))
-    updatePlan('p1', { focus_task_id: '1.2' })
 
     const ctx = buildContext('p1', '1.2')
     const sibling = ctx.siblings.find(s => s.id === '1.1')!
@@ -128,7 +121,6 @@ describe('buildContext', () => {
     insertTask(makeTask('p1', '1'))
     insertTask(makeTask('p1', '1.1', { status: 'completed', result: 'done' }))
     insertTask(makeTask('p1', '1.2'))
-    updatePlan('p1', { focus_task_id: '1.2' })
 
     const ctx = buildContext('p1', '1.2')
     const sibling = ctx.siblings.find(s => s.id === '1.1')!

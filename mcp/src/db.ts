@@ -11,7 +11,6 @@ export interface PlanRow {
   description: string | null
   status: string
   working_dir: string
-  focus_task_id: string | null
   created_at: string
   updated_at: string
 }
@@ -182,9 +181,9 @@ export function listPlans(status: 'active' | 'archived' | 'all'): PlanRow[] {
 
 export function insertPlan(plan: PlanRow): void {
   db.prepare(`
-    INSERT INTO plans (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.focus_task_id, plan.created_at, plan.updated_at)
+    INSERT INTO plans (id, name, description, status, working_dir, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.created_at, plan.updated_at)
 }
 
 export function updatePlan(id: string, fields: Partial<Omit<PlanRow, 'id'>>): void {

@@ -7,7 +7,6 @@ describe('create_plan', () => {
     const result = await create_plan({ name: 'My plan' })
     expect(result.name).toBe('My plan')
     expect(result.status).toBe('active')
-    expect(result.focus_task_id).toBeNull()
   })
 
   it('id starts with plan_', async () => {

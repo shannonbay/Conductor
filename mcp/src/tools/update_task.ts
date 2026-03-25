@@ -1,4 +1,4 @@
-import { getPlan, getTask, updateTask, touchPlan } from '../db.js'
+import { getTask, updateTask, touchPlan } from '../db.js'
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { UpdateTaskSchema } from '../schema.js'
@@ -9,12 +9,8 @@ export async function update_task(args: unknown) {
   const planId = getOpenPlan()
   if (!planId) throw new Error('No plan is open. Use open_plan or create_plan first.')
 
-  const project = getPlan(planId)!
-  const focusTaskId = project.focus_task_id
-  if (!focusTaskId) throw new Error('No focus task. Use create_task to add the first task.')
-
-  const task = getTask(planId, focusTaskId)
-  if (!task) throw new Error(`Task ${focusTaskId} not found.`)
+  const task = getTask(planId, input.task_id)
+  if (!task) throw new Error(`Task ${input.task_id} not found.`)
 
   if (input.goal !== undefined && task.status !== 'pending') {
     throw new Error(`Cannot rename task: goal can only be changed while the task is pending (current status: ${task.status})`)
@@ -28,8 +24,8 @@ export async function update_task(args: unknown) {
   if (input.notes !== undefined) fields.notes = input.notes
   if (input.goal !== undefined) fields.goal = input.goal
 
-  updateTask(planId, focusTaskId, fields)
+  updateTask(planId, input.task_id, fields)
   touchPlan(planId)
 
-  return buildContext(planId, focusTaskId)
+  return buildContext(planId, input.task_id)
 }
