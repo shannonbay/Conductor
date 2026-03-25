@@ -73,7 +73,7 @@ Add to your Claude Code MCP config (`~/.claude/claude_desktop_config.json` or pr
 }
 ```
 
-Or run without compiling using `tsx`:
+Or run without compiling using `tsx` (macOS/Linux):
 
 ```json
 {
@@ -86,11 +86,26 @@ Or run without compiling using `tsx`:
 }
 ```
 
+On Windows, use `cmd /c`:
+
+```json
+{
+  "mcpServers": {
+    "conductor": {
+      "command": "cmd",
+      "args": ["/c", "npx", "tsx", "C:/path/to/Conductor/mcp/src/index.ts"]
+    }
+  }
+}
+```
+
 ### Web UI
 
 The web UI uses [Claude Code Channels](https://code.claude.com/docs/en/channels) for all AI features. You need Claude Code v2.1.80+ with a claude.ai login (Pro or Max plan).
 
 **1. Add both servers to your `.mcp.json`:**
+
+**macOS / Linux:**
 
 ```json
 {
@@ -102,6 +117,23 @@ The web UI uses [Claude Code Channels](https://code.claude.com/docs/en/channels)
     "conductor-channel": {
       "command": "npx",
       "args": ["tsx", "/path/to/Conductor/channel/src/server.ts"]
+    }
+  }
+}
+```
+
+**Windows:** `npx` requires a `cmd /c` wrapper:
+
+```json
+{
+  "mcpServers": {
+    "conductor": {
+      "command": "node",
+      "args": ["C:/path/to/Conductor/mcp/dist/index.js"]
+    },
+    "conductor-channel": {
+      "command": "cmd",
+      "args": ["/c", "npx", "tsx", "C:/path/to/Conductor/channel/src/server.ts"]
     }
   }
 }

@@ -3,6 +3,10 @@
     "conductor": {
       "command": "node",
       "args": ["C:/Users/layen/GitHub/Conductor/mcp/dist/index.js"]
+    },
+    "conductor-channel": {
+      "command": "cmd",
+      "args": ["/c", "npx", "tsx", "C:/Users/layen/GitHub/Conductor/channel/src/server.ts"]
     }
   }
 }
