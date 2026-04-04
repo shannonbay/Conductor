@@ -12,5 +12,5 @@ export async function get_context(args: unknown) {
     }
   }
 
-  return buildContext(planId, input.task_id)
+  return buildContext(planId, input.task_id ?? '1')
 }

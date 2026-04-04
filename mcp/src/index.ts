@@ -79,7 +79,7 @@ const TOOLS = [
   },
   {
     name: 'get_context',
-    description: 'Read-only. Returns the context view for a task: the task itself, its parent, siblings, children, and tree-wide stats. Provide task_id explicitly. Call this to inspect any task at any time. If no plan is open, it will tell you — use list_plans and open_plan first.',
+    description: 'Read-only. Returns the context view for a task: the task itself, its parent, siblings, children, and tree-wide stats. Omit task_id to get the root task ("1"). Call this to inspect any task at any time. If no plan is open, it will tell you — use list_plans and open_plan first.',
     inputSchema: zodToJsonSchema(GetContextSchema),
     handler: get_context,
   },

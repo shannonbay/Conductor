@@ -46,7 +46,7 @@ export const SynthesizeSchema = z.object({
 })
 
 export const GetContextSchema = z.object({
-  task_id: z.string().describe('ID of the task to get context for'),
+  task_id: z.string().optional().describe('ID of the task to get context for. Defaults to the root task ("1") if omitted.'),
 })
 
 const TaskSpecSchema = z.object({
