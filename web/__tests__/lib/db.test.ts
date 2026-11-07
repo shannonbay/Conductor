@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   insertPlan, getPlan, insertTask as _insertTask,
   getTask, getFullTree,
-  lockSubtree, unlockSubtree, deleteTaskTree,
+  lockSubtree, unlockSubtree, deleteTaskTree, nextChildId,
   createSession, updateSession, getActiveSession, getDb,
   insertEvent, getEvents,
 } from '@/lib/db.js'
@@ -165,6 +165,40 @@ describe('deleteTaskTree', () => {
     expect(getTask(p.id, '1.2')).toBeDefined()
     expect(getTask(p.id, '1.1')).toBeUndefined()
     expect(getTask(p.id, '1.1.1')).toBeUndefined()
+  })
+})
+
+// ─── nextChildId ──────────────────────────────────────────────────────────────
+
+describe('nextChildId', () => {
+  it('does not reuse an existing ID after a middle child is deleted', () => {
+    const p = makeProject()
+    insertPlan(p)
+    createTestTask(p.id, '1')
+    createTestTask(p.id, '1.1')
+    createTestTask(p.id, '1.2')
+    createTestTask(p.id, '1.3')
+
+    deleteTaskTree(p.id, '1.2')
+
+    expect(nextChildId(p.id, '1')).toBe('1.4')
+  })
+
+  it('handles gaps among root tasks', () => {
+    const p = makeProject()
+    insertPlan(p)
+    createTestTask(p.id, '1')
+    createTestTask(p.id, '3')
+    expect(nextChildId(p.id, null)).toBe('4')
+  })
+
+  it('does not count grandchildren', () => {
+    const p = makeProject()
+    insertPlan(p)
+    createTestTask(p.id, '1')
+    createTestTask(p.id, '1.1')
+    createTestTask(p.id, '1.1.5')
+    expect(nextChildId(p.id, '1')).toBe('1.2')
   })
 })
 

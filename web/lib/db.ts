@@ -210,14 +210,15 @@ export function getTreeStats(planId: string): TreeStats {
 }
 
 export function nextChildId(planId: string, parentId: string | null): string {
+  // Use max index + 1, not count + 1: deleted children leave gaps, and
+  // count + 1 would then collide with an existing ID.
   const db = getDb()
-  if (!parentId) {
-    const row = db.prepare("SELECT COUNT(*) as count FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%'").get(planId) as { count: number }
-    return String(row.count + 1)
-  }
-  const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE plan_id = ? AND id LIKE ? AND id NOT LIKE ?')
-    .get(planId, `${parentId}.%`, `${parentId}.%.%`) as { count: number }
-  return `${parentId}.${row.count + 1}`
+  const rows = parentId
+    ? db.prepare('SELECT id FROM tasks WHERE plan_id = ? AND id LIKE ? AND id NOT LIKE ?')
+        .all(planId, `${parentId}.%`, `${parentId}.%.%`) as { id: string }[]
+    : db.prepare("SELECT id FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%'").all(planId) as { id: string }[]
+  const maxIndex = rows.reduce((max, r) => Math.max(max, Number(r.id.split('.').pop())), 0)
+  return parentId ? `${parentId}.${maxIndex + 1}` : String(maxIndex + 1)
 }
 
 export function countAllTasks(planId: string): number {

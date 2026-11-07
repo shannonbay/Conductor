@@ -162,10 +162,11 @@ export function getTreeStats(planId: string): TreeStats {
 }
 
 export function nextChildId(planId: string, parentId: string): string {
-  const count = (db.prepare("SELECT COUNT(*) as count FROM tasks WHERE plan_id = ? AND id LIKE ?").get(planId, parentId + '.%') as { count: number }).count
-  // Filter to direct children only (one level deeper)
-  const directChildren = getChildren(planId, parentId)
-  return parentId + '.' + (directChildren.length + 1)
+  // Use max index + 1, not count + 1: deleted children leave gaps, and
+  // count + 1 would then collide with an existing ID.
+  const maxIndex = getChildren(planId, parentId)
+    .reduce((max, c) => Math.max(max, Number(c.id.split('.').pop())), 0)
+  return parentId + '.' + (maxIndex + 1)
 }
 
 export function touchPlan(planId: string): void {

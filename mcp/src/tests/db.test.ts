@@ -252,6 +252,14 @@ describe('nextChildId', () => {
     insertTask(makeTask('p1', '1.1.1'))
     expect(nextChildId('p1', '1.1')).toBe('1.1.2')
   })
+
+  it('skips past gaps left by deleted children', () => {
+    insertPlan(makeProject('p1'))
+    insertTask(makeTask('p1', '1'))
+    insertTask(makeTask('p1', '1.1'))
+    insertTask(makeTask('p1', '1.3'))
+    expect(nextChildId('p1', '1')).toBe('1.4')
+  })
 })
 
 // ── Tree stats tests ──────────────────────────────────────────────────────────
