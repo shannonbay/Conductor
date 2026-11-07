@@ -366,9 +366,9 @@ After a few weeks, the approval stats show 40/40 `email.draft_reply` proposals a
 **Phase 3 — Off-machine**
 - **Status: waiting on the platform.** Self-hosting (a VPS, a tunnel, Docker plus auth) would push infrastructure onto users, so phase 3 waits for Anthropic-hosted pieces:
   - Cloud agents on a schedule or trigger (routines exist today).
-  - A **cloud browser**, so the agent can use web apps such as webmail on the user's behalf.
+  - Access to the user's services: **scoped connectors** (OAuth, e.g. Gmail with read and draft but no send) preferred, or a **cloud browser** for services without one. A logged-in cloud browser is riskier: it holds full sessions for many services, it's a high-value target, and an always-on agent reading email is exposed to prompt injection. Scoped tokens keep the blast radius small and can be revoked per service.
   - **Hosted MCP servers with persistent storage**, so Conductor's MCP server and its SQLite file run next to the agent.
-  - Hooks in cloud sessions, so the goal-guard can enforce autonomy there.
+  - Hooks in cloud sessions, so the goal-guard can enforce autonomy there. This matters more off-machine: approval gates enforced outside the model are what a prompt-injected agent can't talk its way past.
   - A way to reach the user for approvals (the goal page, or a push notification).
 - **What changes in Conductor when those exist:** a runner backend beside the channel (`web/lib/goal-runner.ts` already isolates "start a run / stream events / cancel"). The MCP server gains an HTTP transport. The web UI talks to the hosted database instead of a local file. Concurrency comes free, because runs no longer share one interactive session.
 - **Possible bridge, not planned:** a local headless runner (`claude -p --mcp-config … --settings …`) for concurrent runs on the user's machine.
