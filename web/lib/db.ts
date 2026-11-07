@@ -88,7 +88,7 @@ export const setIntervalTrigger = (planId: string, config: core.IntervalConfig |
 export const insertRun = (planId: string, trigger: core.TriggerKind, status?: core.RunStatus, skipReason?: string) => core.insertRun(getDb(), planId, trigger, status, skipReason)
 export const getRun = (runId: string) => core.getRun(getDb(), runId)
 export const updateRun = (runId: string, fields: Parameters<typeof core.updateRun>[2]) => core.updateRun(getDb(), runId, fields)
-export const listRuns = (planId: string, limit?: number) => core.listRuns(getDb(), planId, limit)
+export const listRuns = (planId: string, limit?: number, opts?: { includeSkipped?: boolean }) => core.listRuns(getDb(), planId, limit, opts)
 export const getOpenRun = (planId: string) => core.getOpenRun(getDb(), planId)
 export const queueRun = (planId: string, trigger: core.TriggerKind = 'manual') => core.queueRun(getDb(), planId, trigger)
 export const startRun = (runId: string, sessionId: string | null) => core.startRun(getDb(), runId, sessionId)
@@ -97,7 +97,7 @@ export const decideTick = (planId: string, now?: Date) => core.decideTick(getDb(
 export const nextIntervalRun = (planId: string, from?: Date) => core.nextIntervalRun(getDb(), planId, from)
 export const recordSkip = (planId: string, trigger: core.TriggerKind, reason: string, now?: Date) => core.recordSkip(getDb(), planId, trigger, reason, now)
 export const archiveResolved = (planId: string, now?: Date) => core.archiveResolved(getDb(), planId, now)
-export const listMemory = (planId: string) => core.listMemory(getDb(), planId)
+export const listMemory = (planId: string, opts?: { activeOnly?: boolean }) => core.listMemory(getDb(), planId, opts)
 export type { Schedule, HealthResult, ToolCallRecord } from '@conductor/core'
 export const getSchedule = (planId: string) => core.getSchedule(getDb(), planId)
 export const setSchedule = (planId: string, schedule: core.Schedule | null) => core.setSchedule(getDb(), planId, schedule)

@@ -2,29 +2,14 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import {
   getPlan, updatePlan, getGoal, updateGoal, getIntervalTrigger, listRuns, getOpenRun,
-  listMemory, getGoalItems, getApprovalStats, isProposal, type Task,
+  listMemory, getGoalItems, getApprovalStats,
   getSchedule, setSchedule, nextScheduledRun, getEventTrigger, listHealth, listToolCalls, getAutonomySuggestions,
 } from '@/lib/db'
 import { recordEvent } from '@/lib/event-log'
+import { itemView } from '@/lib/goal-views'
 import { ok, err, notFound, serverError } from '@/lib/api-utils'
 
 type Params = { params: Promise<{ id: string }> }
-
-function itemView(t: Task) {
-  return {
-    id: t.id,
-    goal: t.goal,
-    status: t.status,
-    result: t.result,
-    notes: t.notes,
-    external_ref: t.external_ref,
-    run_id: t.run_id,
-    action: isProposal(t) ? t.state.action : null,
-    awaiting_review: t.review_requested_at !== null,
-    approved_to_execute: isProposal(t) && t.approved_at !== null && t.status === 'active',
-    updated_at: t.updated_at,
-  }
-}
 
 /** GET — everything the goal page shows. */
 export async function GET(_req: NextRequest, { params }: Params) {
