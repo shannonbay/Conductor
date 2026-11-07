@@ -13,6 +13,8 @@ export const REVISION_TRIGGERS = [
   'trg_goal_memory_insert_revision',
   'trg_goal_memory_update_revision',
   'trg_goal_memory_delete_revision',
+  'trg_goal_health_insert_revision',
+  'trg_goal_tool_calls_insert_revision',
 ] as const
 
 /**
@@ -274,6 +276,51 @@ export function runMigrations(db: Database): void {
     BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
     CREATE TRIGGER IF NOT EXISTS trg_goal_memory_delete_revision AFTER DELETE ON goal_memory
     BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
+  `)
+
+  // ── Persistent goals, phase 2: health checks, guard hook, more triggers ────
+  const addedGoalColumns: [string, string][] = [
+    ['tool_map', "TEXT NOT NULL DEFAULT '{}'"],
+    ['health_command', 'TEXT'],
+    ['health_every_minutes', 'INTEGER NOT NULL DEFAULT 60'],
+    ['health_triggers_run', 'INTEGER NOT NULL DEFAULT 1'],
+    ['last_health_at', 'TEXT'],
+  ]
+  for (const [col, def] of addedGoalColumns) {
+    try { db.exec(`ALTER TABLE goals ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
+  }
+  try { db.exec('ALTER TABLE goal_runs ADD COLUMN cc_session_id TEXT') } catch { /* already exists */ }
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS goal_health (
+      id          TEXT PRIMARY KEY,
+      plan_id     TEXT NOT NULL REFERENCES plans(id),
+      passed      INTEGER NOT NULL,
+      exit_code   INTEGER,
+      value       REAL,
+      output      TEXT,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_health_plan ON goal_health(plan_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS goal_tool_calls (
+      id         TEXT PRIMARY KEY,
+      plan_id    TEXT NOT NULL REFERENCES plans(id),
+      run_id     TEXT NOT NULL,
+      tool_name  TEXT NOT NULL,
+      category   TEXT NOT NULL,
+      decision   TEXT NOT NULL CHECK (decision IN ('allow', 'deny')),
+      reason     TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_tool_calls ON goal_tool_calls(plan_id, category, created_at);
+    CREATE INDEX IF NOT EXISTS idx_goal_runs_cc_session ON goal_runs(cc_session_id);
+
+    CREATE TRIGGER IF NOT EXISTS trg_goal_health_insert_revision AFTER INSERT ON goal_health
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_tool_calls_insert_revision AFTER INSERT ON goal_tool_calls
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
   `)
 
   // ── Agent transcripts ───────────────────────────────────────────────────────

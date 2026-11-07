@@ -6,8 +6,10 @@ import type { Database } from 'better-sqlite3'
 import { getPlan, getTask, insertTask, nextChildId, compareTaskIds, deserializeTask } from './queries.js'
 import { isProposal } from './gates.js'
 import {
-  countRunsSince, getGoal, getIntervalTrigger, getOpenRun, getRun, insertRun, listMemory, listRuns, updateMemory, updateRun, updateGoal,
+  countRunsSince, getGoal, getOpenRun, getRun, insertRun, listMemory, listRuns, updateMemory, updateRun, updateGoal,
 } from './goals.js'
+import { getSchedule, nextScheduledRun } from './schedule.js'
+import { listHealth } from './health.js'
 import type { AutonomyMode, Goal, GoalRun, Task, TriggerKind } from './types.js'
 
 export class GoalError extends Error {}
@@ -138,6 +140,8 @@ export interface GoalBrief {
   open_items: ItemSummary[]
   recent_runs: { at: string; summary: string }[]
   counts: { open: number; awaiting_review: number; approved_to_execute: number; resolved_last_24h: number }
+  /** Latest goal health check, if the goal has one. */
+  health: { passed: boolean; value: number | null; at: string; output?: string } | null
 }
 
 /** Everything a fresh agent needs to work on a goal, in one compact object. */
@@ -211,6 +215,10 @@ export function buildBrief(db: Database, planId: string, runId?: string): GoalBr
       approved_to_execute: items.filter((i) => i.approved_to_execute).length,
       resolved_last_24h: resolved24h,
     },
+    health: (() => {
+      const [h] = listHealth(db, planId, 1)
+      return h ? { passed: h.passed, value: h.value, at: h.created_at, ...(!h.passed && h.output && { output: h.output.slice(-500) }) } : null
+    })(),
   }
 }
 
@@ -292,16 +300,16 @@ export function decideTick(db: Database, planId: string, now: Date = new Date())
   const open = getOpenRun(db, planId)
   if (open?.status === 'running') return { action: 'none' }
 
-  const trigger = getIntervalTrigger(db, planId)
+  const schedule = getSchedule(db, planId)
   const queued = open?.status === 'queued' ? open : undefined
-  const intervalDue = Boolean(trigger?.enabled && goal.next_run_at && goal.next_run_at <= now.toISOString())
-  if (!queued && !intervalDue) return { action: 'none' }
+  const scheduleDue = Boolean(schedule && goal.next_run_at && goal.next_run_at <= now.toISOString())
+  if (!queued && !scheduleDue) return { action: 'none' }
 
-  if (!queued && trigger && !withinActiveHours(trigger.config.active_hours, now)) {
-    return { action: 'defer', next_run_at: new Date(now.getTime() + trigger.config.minutes * 60_000).toISOString() }
+  if (!queued && schedule?.kind === 'interval' && !withinActiveHours(schedule.active_hours, now)) {
+    return { action: 'defer', next_run_at: new Date(now.getTime() + schedule.minutes * 60_000).toISOString() }
   }
 
-  const kind: TriggerKind = queued ? queued.trigger : 'interval'
+  const kind: TriggerKind = queued ? queued.trigger : schedule!.kind
   const runsToday = countRunsSince(db, planId, new Date(now.getTime() - 86_400_000).toISOString())
     - (queued ? 1 : 0) // a queued run is counted already
   if (runsToday >= goal.limits.max_runs_per_day) {
@@ -310,10 +318,9 @@ export function decideTick(db: Database, planId: string, now: Date = new Date())
   return { action: 'start', trigger: kind, queuedRunId: queued?.id }
 }
 
-/** next_run_at after a run starts (or is skipped) for an interval goal; null for manual-only goals. */
+/** next_run_at after a run starts (or is skipped), from the goal's interval or cron schedule; null for manual-only goals. */
 export function nextIntervalRun(db: Database, planId: string, from: Date = new Date()): string | null {
-  const trigger = getIntervalTrigger(db, planId)
-  return trigger?.enabled ? new Date(from.getTime() + trigger.config.minutes * 60_000).toISOString() : null
+  return nextScheduledRun(db, planId, from)
 }
 
 /** Records a skipped run, at most once per hour per reason, so the timeline stays readable. */

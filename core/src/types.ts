@@ -134,11 +134,30 @@ export interface Goal {
   item_retention_days: number
   last_run_at: string | null
   next_run_at: string | null
+  /** Tool name pattern ("mcp__gmail__send*") → action category, enforced by the goal-guard hook. */
+  tool_map: Record<string, string>
+  /** Goal-level check: a shell command that exits 0 when the goal is being met; the last number it prints is tracked as a trend. */
+  health_command: string | null
+  health_every_minutes: number
+  /** Queue a run when the health check fails. */
+  health_triggers_run: boolean
+  last_health_at: string | null
 }
 
 export type NewGoal = Pick<Goal, 'plan_id' | 'objective'> & Partial<Omit<Goal, 'plan_id' | 'objective' | 'limits'>> & { limits?: Partial<GoalLimits> }
 
-export type TriggerKind = 'manual' | 'interval' | 'cron' | 'event'
+/** How a run was started. 'health' = a failing health check queued it. */
+export type TriggerKind = 'manual' | 'interval' | 'cron' | 'event' | 'health'
+
+export interface CronConfig {
+  /** Five-field cron expression in local time, e.g. "0 9 * * 1-5". */
+  expr: string
+}
+
+export interface EventConfig {
+  /** sha256 of the webhook secret; the secret itself is shown once. */
+  secret_hash: string
+}
 
 export interface IntervalConfig {
   minutes: number
@@ -150,7 +169,7 @@ export interface GoalTrigger {
   id: string
   plan_id: string
   kind: TriggerKind
-  config: IntervalConfig | Record<string, unknown>
+  config: IntervalConfig | CronConfig | EventConfig | Record<string, unknown>
   enabled: boolean
 }
 
@@ -162,6 +181,8 @@ export interface GoalRun {
   trigger: TriggerKind
   status: RunStatus
   session_id: string | null
+  /** The Claude Code session doing the run (bound by the goal-guard hook). */
+  cc_session_id: string | null
   summary: string | null
   skip_reason: string | null
   items_created: number
@@ -185,6 +206,29 @@ export interface GoalMemory {
   active: boolean
   created_at: string
   last_used_at: string | null
+}
+
+export interface HealthResult {
+  id: string
+  plan_id: string
+  passed: boolean
+  exit_code: number | null
+  /** Last number printed by the command, for the trend. */
+  value: number | null
+  output: string | null
+  duration_ms: number
+  created_at: string
+}
+
+export interface ToolCallRecord {
+  id: string
+  plan_id: string
+  run_id: string
+  tool_name: string
+  category: string
+  decision: 'allow' | 'deny'
+  reason: string | null
+  created_at: string
 }
 
 export interface TreeStats {

@@ -10,6 +10,9 @@ export * from './queries.js'
 export * from './gates.js'
 export * from './goals.js'
 export * from './goal-engine.js'
+export * from './schedule.js'
+export * from './health.js'
+export * from './guard.js'
 export { runMigrations, REVISION_TRIGGERS } from './migrate.js'
 
 /** `CONDUCTOR_DB` if set, otherwise `~/.conductor/tasks.db`. */
