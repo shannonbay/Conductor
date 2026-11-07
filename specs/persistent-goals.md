@@ -364,8 +364,14 @@ After a few weeks, the approval stats show 40/40 `email.draft_reply` proposals a
 *As built:* the guard hook is **opt-in** (`npm run setup-hooks --prefix mcp -- --guard`) because a global PreToolUse hook runs on every tool call (~0.3 s each on Windows). It ties a Claude Code session to its run when the agent calls `get_goal_brief` with a `run_id`, and allows one guarded call per approved proposal. The "promote to auto" threshold is 10 approvals in a row.
 
 **Phase 3 — Off-machine**
-- Execute runs as scheduled cloud agents instead of through the local channel, with Conductor's state reachable from them.
-- Multiple goals running concurrently (requires moving beyond the one-request channel).
+- **Status: waiting on the platform.** Self-hosting (a VPS, a tunnel, Docker plus auth) would push infrastructure onto users, so phase 3 waits for Anthropic-hosted pieces:
+  - Cloud agents on a schedule or trigger (routines exist today).
+  - A **cloud browser**, so the agent can use web apps such as webmail on the user's behalf.
+  - **Hosted MCP servers with persistent storage**, so Conductor's MCP server and its SQLite file run next to the agent.
+  - Hooks in cloud sessions, so the goal-guard can enforce autonomy there.
+  - A way to reach the user for approvals (the goal page, or a push notification).
+- **What changes in Conductor when those exist:** a runner backend beside the channel (`web/lib/goal-runner.ts` already isolates "start a run / stream events / cancel"). The MCP server gains an HTTP transport. The web UI talks to the hosted database instead of a local file. Concurrency comes free, because runs no longer share one interactive session.
+- **Possible bridge, not planned:** a local headless runner (`claude -p --mcp-config … --settings …`) for concurrent runs on the user's machine.
 
 ---
 
