@@ -161,6 +161,13 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **Using gates in this repo:** when you plan work here, give tasks a `verify_command` where one exists (e.g. `npm test --prefix mcp -- src/tests/tools/gates.test.ts`, `npm run typecheck --prefix web`) and acceptance criteria for behaviour you'll need to show. Run `verify_task` before completing.
 
+**Persistent goals** (spec: `specs/persistent-goals.md`; phase 1 built): a goal is a plan with `kind = 'goal'` plus a `goals` row; its work items are ordinary root-level tasks with `run_id`, `external_ref` (unique per goal) and `archived_at`.
+- Storage in `core/src/goals.ts`, behaviour in `core/src/goal-engine.ts` (`addItem`, `buildBrief`, run lifecycle, `archiveResolved`, `decideTick`).
+- Autonomy per action category: `off` refused by `addItem`, `propose` → item with `requires_approval` and `review_requested_at` set at creation, `auto` → recorded as completed. Unlisted categories default to `propose`.
+- Approving a proposal (`state.action`) does **not** complete it — it stays active with `approved_at` set, and the next run carries it out (`next_task` returns `execute`). The web approve route queues a run. Rejecting on a goal adds a `feedback` memory.
+- Runs: `web/lib/goal-scheduler.ts` (30 s tick in `server.ts`) starts due runs via `web/lib/goal-runner.ts` → channel `run_goal` request → agent calls `get_goal_brief(goal_id, run_id)`, works, `end_run`, `agent_done`. A run that ends without `end_run` is marked failed. Scheduler and runner state live on `globalThis` because Next.js API routes load separate module instances from `server.ts`.
+- Goals are hidden from plan lists (`/api/plans`, home page, MCP `list_plans`).
+
 **Change history**: every mutating MCP tool calls `record()` (`mcp/src/history.ts`) to write an `events` row with `actor: 'agent'`, `via: 'mcp'` and, for edits/status changes, old and new values. The web app writes `actor: 'human'` rows via `recordEvent()`. Both show in the activity feed and in the `get_history` tool. A new mutating MCP tool must call `record()` too.
 
 **`next_task`** walks the open plan in tree order and returns `continue` (active leaf), `start` (pending leaf with dependencies met), `complete` (all children resolved) or `none` with blockers.

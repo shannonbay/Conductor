@@ -38,6 +38,12 @@ At each turn, the agent sees only its **immediate context**: the current task, i
 | `next_task` | What to work on next: continue an active task, start a ready one, or complete a finished parent — or why nothing is ready |
 | `get_history` | Recent changes to the plan (by Claude or in the UI), with old and new values |
 | `verify_task` | Run a task's verify command now, without completing it |
+| `list_goals` | List persistent goals with open items and items waiting for review |
+| `get_goal_brief` | Start of a goal run: objective, instructions, memory, your decisions since the last run, open items, recent run summaries |
+| `add_item` | Add a goal work item (deduplicated by `external_ref`); actions are proposed, recorded or refused per the goal's autonomy |
+| `remember` / `forget` | Add a fact, rule or preference to a goal's memory; deactivate one an agent added |
+| `end_run` | Finish a goal run with a summary for the next run |
+| `run_goal` | Queue a goal run now |
 
 ## Verification gates
 
@@ -48,6 +54,18 @@ A task can carry checks that must pass before it can be marked completed:
 - **Human approval** — the task waits for you to Approve or Reject (with feedback) in the web UI.
 
 Agents set gates when they create tasks and can't weaken them once a task has started. In the web UI you can edit gates, run checks, approve or reject, and — if a check is wrong — complete a task anyway with a recorded reason. Every check result is kept as evidence in the task's check history.
+
+## Persistent goals
+
+For work that never finishes — "keep my inbox under control", "triage new issues". A goal wakes an agent on a schedule (or when you click **Run now**); each run starts fresh, reads a one-call brief, handles what's new, and leaves a summary for the next run. Details: [`specs/persistent-goals.md`](specs/persistent-goals.md).
+
+- **Create** one from the home page (**+ New goal**): objective, standing instructions, working directory, optional schedule ("every 30 minutes, 08:00–20:00").
+- **Autonomy per action category** (e.g. `email.archive`, `email.send`): *off*, *propose* (the agent asks you first — the default), or *auto*. The goal page shows how often you approved each category, so you can decide when to let it act alone.
+- **Needs you:** proposals wait on the goal page. Approve and the next run carries the action out; reject with feedback and the feedback becomes **memory** that later runs follow.
+- **Memory:** rules, facts and preferences — written by you, learned by the agent, or taken from your feedback. Pin what must always be included.
+- Work items are deduplicated by an external ID (e.g. an email's ID), and resolved items are hidden after 7 days.
+
+Goals only run while the web app **and** a channel-connected Claude Code session are running; `npm run doctor` warns when they can't. Conductor can't stop an agent from calling other tools directly (e.g. a mail "send" tool), so use Claude Code's permission settings to deny irreversible tools you haven't set to *auto*.
 
 ## Web UI
 
