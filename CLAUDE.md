@@ -42,6 +42,8 @@ Conductor/
     package.json
     tsconfig.json
     vitest.config.ts
+  plugins/conductor-goals/ — Claude Code plugin: Goals pane, alerts, /goal* commands, tools for Claude
+  .claude-plugin/marketplace.json — makes the repo a plugin marketplace ("conductor")
   specs/
 ```
 
@@ -183,6 +185,8 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 **`working_dir` is required on every plan** and is never null. MCP's `create_plan` defaults it to `process.cwd()` (the directory Claude Code was launched from). Web UI requires the user to select one. Agents receive it in their system prompt so they know where to operate on the filesystem.
 
 **One schema, in `core/`**: `mcp/src/db.ts` and `web/lib/db.ts` are thin wrappers that bind `@conductor/core` queries to their own connection. To add a field to plans or tasks, change `core/src/migrate.ts` (CREATE TABLE + ALTER entry) and `core/src/types.ts` only. Put a query in `core/src/queries.ts` if both sides need it; web-only queries stay in `web/lib/db.ts`.
+
+**Claude Code plugin** (`plugins/conductor-goals`, README there): a Goals pane, status line, alerts, `/goal*` commands and tools Claude can call, all over the web app's API (mainly `GET /api/goals/overview`, which answers 304 to a matching ETag). The repo root is a plugin marketplace (`.claude-plugin/marketplace.json`, name `conductor`); installed as `conductor-goals@conductor`, it is read straight from the folder, so `/reload-plugins` picks up edits. Check with `claude plugin validate plugins/conductor-goals` and `claude plugin test plugins/conductor-goals`. Engine rules that bite: functions that take `$` must be top-level and imported by name (no `import * as`), state atoms must be read in the file that declares them (hence `hooks/state.ts` accessors), and every gating hook gets a `.catch`.
 
 **Claude Code hooks**: `mcp/scripts/install-hooks.mjs` runs on `npm install` and installs the Conductor reminder hooks into `~/.claude/settings.json`, updating stale copies in place and removing the obsolete decompose hook. Skip with `CONDUCTOR_SKIP_HOOKS=1`.
 

@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  checkNode, checkBuild, checkMcpConfig, checkHooks, checkChannel, checkDatabase, formatResults,
+  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkChannel, checkDatabase, formatResults,
   type DoctorOptions,
 } from '../doctor.js'
 
@@ -100,6 +100,19 @@ describe('doctor', () => {
     it('passes with current hooks', () => {
       write(join(dir, '.claude/settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: 'mcp__conductor__update_task' }] }] } }))
       expect(checkHooks(o).level).toBe('ok')
+    })
+  })
+
+  describe('checkPlugin', () => {
+    it('warns with install steps when the plugin is not installed', () => {
+      expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude plugin install conductor-goals@conductor') })
+    })
+
+    it('warns when it is disabled, passes when enabled', () => {
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': false } }))
+      expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude plugin enable') })
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': true } }))
+      expect(checkPlugin(o).level).toBe('ok')
     })
   })
 

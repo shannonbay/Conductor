@@ -168,6 +168,23 @@ export function checkHooks(o: DoctorOptions): CheckResult {
   return ok('Claude Code hooks', 'up to date')
 }
 
+const PLUGIN = 'conductor-goals@conductor'
+
+/** The optional Claude Code plugin (plugins/conductor-goals): a Goals pane, alerts and tools beside the chat. */
+export function checkPlugin(o: DoctorOptions): CheckResult {
+  const install = `Run \`claude plugin marketplace add ${o.repoRoot}\` then \`claude plugin install ${PLUGIN} --scope user\`.`
+  const file = join(o.home, '.claude', 'settings.json')
+  let enabled: unknown
+  try {
+    enabled = (JSON.parse(readFileSync(file, 'utf8')) as { enabledPlugins?: Record<string, unknown> }).enabledPlugins?.[PLUGIN]
+  } catch {
+    enabled = undefined // a missing or broken settings file is reported by checkHooks
+  }
+  if (enabled === true) return ok('Claude Code plugin', `${PLUGIN} enabled`)
+  if (enabled === false) return warn('Claude Code plugin', `${PLUGIN} is installed but disabled`, `Run \`claude plugin enable ${PLUGIN}\`.`)
+  return warn('Claude Code plugin', `${PLUGIN} not installed (optional: Goals pane, alerts and goal tools in Claude Code)`, install)
+}
+
 export async function checkChannel(o: DoctorOptions): Promise<CheckResult> {
   const base = o.env.CONDUCTOR_CHANNEL_URL ?? 'http://127.0.0.1:8789'
   const status = await getJson(`${base}/status`, o.fetchTimeoutMs) as { connected?: boolean; busy?: boolean } | null
@@ -229,6 +246,7 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
     checkBuild(o, 'mcp'),
     ...checkMcpConfig(o),
     checkHooks(o),
+    checkPlugin(o),
     channel,
     web,
     ...[await checkGoals(o, channel, web)].filter((r): r is CheckResult => r !== null),
