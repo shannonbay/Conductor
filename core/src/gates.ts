@@ -13,7 +13,8 @@
 import { spawn, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
 import type { Database } from 'better-sqlite3'
-import { getLatestVerification, getTask, insertVerification, updateTask } from './queries.js'
+import { getLatestVerification, getPlan, getTask, insertVerification, updateTask } from './queries.js'
+import { insertMemory } from './goals.js'
 import type { PlanRow, Task, Verification } from './types.js'
 
 export const DEFAULT_VERIFY_TIMEOUT_S = 300
@@ -189,8 +190,8 @@ export async function checkCompletion(db: Database, plan: PlanRow, task: Task, i
     insertVerification(db, { plan_id: plan.id, task_id: task.id, gate: 'criteria', passed: true, actor, evidence: input.evidence! })
   }
 
-  // Approval
-  if (task.requires_approval) {
+  // Approval (already approved — e.g. a goal proposal approved before the agent acted — passes)
+  if (task.requires_approval && !task.approved_at) {
     const now = new Date().toISOString()
     if (actor === 'agent') {
       updateTask(db, plan.id, task.id, { review_requested_at: now, updated_at: now })
@@ -225,13 +226,25 @@ function requireAwaitingReview(task: Task): void {
 
 export class GateError extends Error {}
 
-/** Approves a task waiting for review and completes it. */
+/** A goal work item proposing an action the agent will carry out once approved. */
+export function isProposal(task: Task): boolean {
+  return typeof task.state?.action === 'object' && task.state.action !== null
+}
+
+/**
+ * Approves a task waiting for review. Normally this completes it. A goal
+ * proposal (state.action) stays active instead: approval means "go ahead",
+ * and the next goal run carries out the action and then completes the item.
+ */
 export function approveTask(db: Database, planId: string, taskId: string): Verification {
   const task = mustGet(db, planId, taskId)
   requireAwaitingReview(task)
   const now = new Date().toISOString()
   const v = insertVerification(db, { plan_id: planId, task_id: taskId, gate: 'approval', passed: true, actor: 'human' })
-  updateTask(db, planId, taskId, { status: 'completed', approved_by: 'human', approved_at: now, review_requested_at: null, updated_at: now })
+  updateTask(db, planId, taskId, {
+    ...(isProposal(task) ? {} : { status: 'completed' as const }),
+    approved_by: 'human', approved_at: now, review_requested_at: null, updated_at: now,
+  })
   return v
 }
 
@@ -250,6 +263,10 @@ export function rejectTask(db: Database, planId: string, taskId: string, feedbac
     notes: task.notes ? `${task.notes}\n\n${note}` : note,
     updated_at: now,
   })
+  // On a persistent goal, feedback becomes memory so later runs learn from it
+  if (getPlan(db, planId)?.kind === 'goal') {
+    insertMemory(db, { plan_id: planId, kind: 'preference', text: `Feedback on "${task.goal}": ${feedback.trim()}`, source: 'feedback', source_ref: taskId })
+  }
   return v
 }
 

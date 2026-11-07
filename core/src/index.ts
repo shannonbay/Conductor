@@ -8,6 +8,8 @@ export type { Database } from 'better-sqlite3'
 export * from './types.js'
 export * from './queries.js'
 export * from './gates.js'
+export * from './goals.js'
+export * from './goal-engine.js'
 export { runMigrations, REVISION_TRIGGERS } from './migrate.js'
 
 /** `CONDUCTOR_DB` if set, otherwise `~/.conductor/tasks.db`. */

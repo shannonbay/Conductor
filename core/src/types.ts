@@ -8,14 +8,18 @@ export interface PlanRow {
   status: PlanStatus
   working_dir: string
   focus_task_id: string | null
+  /** 'goal' = a persistent goal: a plan that never finishes (see specs/persistent-goals.md). */
+  kind: PlanKind
   /** Bumped by triggers on every change to the plan or its tasks. */
   revision: number
   created_at: string
   updated_at: string
 }
 
+export type PlanKind = 'plan' | 'goal'
+
 /** Fields needed to insert a plan; the rest have defaults. */
-export type NewPlan = Omit<PlanRow, 'revision' | 'focus_task_id'> & { focus_task_id?: string | null }
+export type NewPlan = Omit<PlanRow, 'revision' | 'focus_task_id' | 'kind'> & { focus_task_id?: string | null; kind?: PlanKind }
 
 export interface Task {
   id: string
@@ -44,6 +48,13 @@ export interface Task {
   verify_timeout_s: number | null
   /** Set when all other gates passed and the task is waiting for human approval. */
   review_requested_at: string | null
+  // Persistent-goal work items
+  /** The goal run that created this item. */
+  run_id: string | null
+  /** Stable ID of the thing the item is about (e.g. "gmail:18c2f…"); unique per plan. */
+  external_ref: string | null
+  /** Set when a resolved item ages out; archived items are hidden but kept. */
+  archived_at: string | null
   created_at: string
   updated_at: string
 }
@@ -55,6 +66,7 @@ type OptionalTaskFields =
   | 'notes' | 'locked_by' | 'locked_at' | 'requires_approval'
   | 'approved_by' | 'approved_at' | 'created_by' | 'assigned_to'
   | 'acceptance_criteria' | 'verify_command' | 'verify_timeout_s' | 'review_requested_at'
+  | 'run_id' | 'external_ref' | 'archived_at'
 
 /** Fields needed to insert a task; UI-layer fields and notes are optional. */
 export type NewTask = Omit<Task, OptionalTaskFields> & Partial<Pick<Task, OptionalTaskFields>>
@@ -96,6 +108,84 @@ export interface Verification {
 
 export type NewVerification = Omit<Verification, 'id' | 'created_at' | 'command' | 'exit_code' | 'output' | 'evidence' | 'duration_ms'>
   & Partial<Pick<Verification, 'command' | 'exit_code' | 'output' | 'evidence' | 'duration_ms' | 'created_at'>>
+
+// ── Persistent goals ──────────────────────────────────────────────────────────
+
+export type GoalStatus = 'active' | 'paused' | 'retired'
+/** off: never; propose: work item needing approval; auto: act and record. */
+export type AutonomyMode = 'off' | 'propose' | 'auto'
+
+export interface GoalLimits {
+  max_run_minutes: number
+  max_items_per_run: number
+  max_runs_per_day: number
+}
+
+export const DEFAULT_GOAL_LIMITS: GoalLimits = { max_run_minutes: 15, max_items_per_run: 50, max_runs_per_day: 48 }
+
+export interface Goal {
+  plan_id: string
+  objective: string
+  instructions: string
+  status: GoalStatus
+  /** Action category → mode. Categories not listed default to 'propose'. */
+  autonomy: Record<string, AutonomyMode>
+  limits: GoalLimits
+  item_retention_days: number
+  last_run_at: string | null
+  next_run_at: string | null
+}
+
+export type NewGoal = Pick<Goal, 'plan_id' | 'objective'> & Partial<Omit<Goal, 'plan_id' | 'objective' | 'limits'>> & { limits?: Partial<GoalLimits> }
+
+export type TriggerKind = 'manual' | 'interval' | 'cron' | 'event'
+
+export interface IntervalConfig {
+  minutes: number
+  /** Local-time window like "08:00-20:00"; runs only inside it. */
+  active_hours?: string
+}
+
+export interface GoalTrigger {
+  id: string
+  plan_id: string
+  kind: TriggerKind
+  config: IntervalConfig | Record<string, unknown>
+  enabled: boolean
+}
+
+export type RunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'timed_out' | 'skipped'
+
+export interface GoalRun {
+  id: string
+  plan_id: string
+  trigger: TriggerKind
+  status: RunStatus
+  session_id: string | null
+  summary: string | null
+  skip_reason: string | null
+  items_created: number
+  items_resolved: number
+  started_at: string
+  ended_at: string | null
+}
+
+export type MemoryKind = 'fact' | 'rule' | 'preference'
+export type MemorySource = 'human' | 'agent' | 'feedback'
+
+export interface GoalMemory {
+  id: string
+  plan_id: string
+  kind: MemoryKind
+  text: string
+  source: MemorySource
+  /** The item or run this came from. */
+  source_ref: string | null
+  pinned: boolean
+  active: boolean
+  created_at: string
+  last_used_at: string | null
+}
 
 export interface TreeStats {
   total_tasks: number

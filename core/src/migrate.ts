@@ -7,6 +7,12 @@ export const REVISION_TRIGGERS = [
   'trg_tasks_delete_revision',
   'trg_plans_update_revision',
   'trg_verifications_insert_revision',
+  'trg_goals_update_revision',
+  'trg_goal_runs_insert_revision',
+  'trg_goal_runs_update_revision',
+  'trg_goal_memory_insert_revision',
+  'trg_goal_memory_update_revision',
+  'trg_goal_memory_delete_revision',
 ] as const
 
 /**
@@ -43,6 +49,7 @@ export function runMigrations(db: Database): void {
       status        TEXT NOT NULL DEFAULT 'active',
       working_dir   TEXT,
       focus_task_id TEXT,
+      kind          TEXT NOT NULL DEFAULT 'plan',
       revision      INTEGER NOT NULL DEFAULT 0,
       created_at    TEXT NOT NULL,
       updated_at    TEXT NOT NULL
@@ -69,6 +76,9 @@ export function runMigrations(db: Database): void {
       verify_command    TEXT,
       verify_timeout_s  INTEGER,
       review_requested_at TEXT,
+      run_id            TEXT,
+      external_ref      TEXT,
+      archived_at       TEXT,
       created_at        TEXT NOT NULL,
       updated_at        TEXT NOT NULL,
       PRIMARY KEY (id, plan_id)
@@ -83,6 +93,7 @@ export function runMigrations(db: Database): void {
     ['working_dir', 'TEXT'],
     ['focus_task_id', 'TEXT'],
     ['revision', 'INTEGER NOT NULL DEFAULT 0'],
+    ['kind', "TEXT NOT NULL DEFAULT 'plan'"],
   ]
   for (const [col, def] of addedPlanColumns) {
     try { db.exec(`ALTER TABLE plans ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
@@ -102,10 +113,15 @@ export function runMigrations(db: Database): void {
     ['verify_command', 'TEXT'],
     ['verify_timeout_s', 'INTEGER'],
     ['review_requested_at', 'TEXT'],
+    ['run_id', 'TEXT'],
+    ['external_ref', 'TEXT'],
+    ['archived_at', 'TEXT'],
   ]
   for (const [col, def] of addedTaskColumns) {
     try { db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
   }
+  // A goal never creates two items for the same external thing (e.g. one email)
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_external_ref ON tasks(plan_id, external_ref) WHERE external_ref IS NOT NULL`)
 
   // Legacy plan/step columns (SQLite 3.35+)
   for (const col of ['plan', 'step']) {
@@ -192,6 +208,72 @@ export function runMigrations(db: Database): void {
 
     CREATE TRIGGER IF NOT EXISTS trg_verifications_insert_revision AFTER INSERT ON verifications
     BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+  `)
+
+  // ── Persistent goals (specs/persistent-goals.md) ───────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS goals (
+      plan_id             TEXT PRIMARY KEY REFERENCES plans(id),
+      objective           TEXT NOT NULL,
+      instructions        TEXT NOT NULL DEFAULT '',
+      status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'retired')),
+      autonomy            TEXT NOT NULL DEFAULT '{}',
+      limits              TEXT NOT NULL DEFAULT '{}',
+      item_retention_days INTEGER NOT NULL DEFAULT 7,
+      last_run_at         TEXT,
+      next_run_at         TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS goal_triggers (
+      id      TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES plans(id),
+      kind    TEXT NOT NULL CHECK (kind IN ('manual', 'interval', 'cron', 'event')),
+      config  TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_triggers_plan ON goal_triggers(plan_id);
+
+    CREATE TABLE IF NOT EXISTS goal_runs (
+      id             TEXT PRIMARY KEY,
+      plan_id        TEXT NOT NULL REFERENCES plans(id),
+      trigger        TEXT NOT NULL,
+      status         TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'timed_out', 'skipped')),
+      session_id     TEXT REFERENCES agent_sessions(id),
+      summary        TEXT,
+      skip_reason    TEXT,
+      items_created  INTEGER NOT NULL DEFAULT 0,
+      items_resolved INTEGER NOT NULL DEFAULT 0,
+      started_at     TEXT NOT NULL,
+      ended_at       TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
+
+    CREATE TABLE IF NOT EXISTS goal_memory (
+      id           TEXT PRIMARY KEY,
+      plan_id      TEXT NOT NULL REFERENCES plans(id),
+      kind         TEXT NOT NULL CHECK (kind IN ('fact', 'rule', 'preference')),
+      text         TEXT NOT NULL,
+      source       TEXT NOT NULL CHECK (source IN ('human', 'agent', 'feedback')),
+      source_ref   TEXT,
+      pinned       INTEGER NOT NULL DEFAULT 0,
+      active       INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT NOT NULL,
+      last_used_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_memory_plan ON goal_memory(plan_id, active);
+
+    CREATE TRIGGER IF NOT EXISTS trg_goals_update_revision AFTER UPDATE ON goals
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_runs_insert_revision AFTER INSERT ON goal_runs
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_runs_update_revision AFTER UPDATE ON goal_runs
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_insert_revision AFTER INSERT ON goal_memory
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_update_revision AFTER UPDATE ON goal_memory
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_delete_revision AFTER DELETE ON goal_memory
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
   `)
 
   // ── Agent transcripts ───────────────────────────────────────────────────────

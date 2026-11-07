@@ -17,6 +17,9 @@ export function deserializeTask(row: Row): Task {
     verify_command: (row.verify_command as string | null | undefined) ?? null,
     verify_timeout_s: (row.verify_timeout_s as number | null | undefined) ?? null,
     review_requested_at: (row.review_requested_at as string | null | undefined) ?? null,
+    run_id: (row.run_id as string | null | undefined) ?? null,
+    external_ref: (row.external_ref as string | null | undefined) ?? null,
+    archived_at: (row.archived_at as string | null | undefined) ?? null,
   } as Task
 }
 
@@ -49,9 +52,9 @@ export function getPlanRevision(db: Database, id: string): number | undefined {
 
 export function insertPlan(db: Database, plan: NewPlan): void {
   db.prepare(`
-    INSERT INTO plans (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.focus_task_id ?? null, plan.created_at, plan.updated_at)
+    INSERT INTO plans (id, name, description, status, working_dir, focus_task_id, kind, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.focus_task_id ?? null, plan.kind ?? 'plan', plan.created_at, plan.updated_at)
 }
 
 export function updatePlan(db: Database, id: string, fields: Partial<Omit<PlanRow, 'id' | 'revision'>>): void {
@@ -142,8 +145,9 @@ export function insertTask(db: Database, task: NewTask): void {
       id, plan_id, goal, status, result, abandon_reason, state, depends_on, notes,
       locked_by, locked_at, requires_approval, approved_by, approved_at, created_by, assigned_to,
       acceptance_criteria, verify_command, verify_timeout_s, review_requested_at,
+      run_id, external_ref, archived_at,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     task.id,
     task.plan_id,
@@ -165,6 +169,9 @@ export function insertTask(db: Database, task: NewTask): void {
     task.verify_command ?? null,
     task.verify_timeout_s ?? null,
     task.review_requested_at ?? null,
+    task.run_id ?? null,
+    task.external_ref ?? null,
+    task.archived_at ?? null,
     task.created_at,
     task.updated_at,
   )
@@ -282,5 +289,5 @@ export function getLatestVerification(db: Database, planId: string, taskId: stri
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 export function clearAllData(db: Database): void {
-  db.exec('DELETE FROM verifications; DELETE FROM transcript_messages; DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
+  db.exec('DELETE FROM goal_memory; DELETE FROM goal_runs; DELETE FROM goal_triggers; DELETE FROM goals; DELETE FROM verifications; DELETE FROM transcript_messages; DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
 }
