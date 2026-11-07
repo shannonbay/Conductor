@@ -28,6 +28,19 @@ export async function set_status(args: unknown) {
         throw new Error(`Cannot activate task: unmet dependencies: ${blockers.join(', ')}`)
       }
     }
+
+    // Opt-in: force agents to break a task into sub-tasks before starting it.
+    if (process.env.CONDUCTOR_REQUIRE_DECOMPOSE === '1'
+        && task.state.atomic !== true
+        && getChildren(planId, input.task_id).length === 0) {
+      throw new Error(
+        `Task ${input.task_id} has no sub-tasks yet. Choose one:\n` +
+        '1. Multi-step work: call provision_tasks to create child tasks, then activate the first child ' +
+        '(leave this parent pending). Repeat on each child until you reach leaf tasks.\n' +
+        '2. Single atomic step (one specific tool call): call update_task with state_patch: {"atomic": true}, ' +
+        'then retry set_status.'
+      )
+    }
   }
 
   if (input.status === 'completed') {

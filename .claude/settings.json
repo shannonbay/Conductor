@@ -1,22 +1,11 @@
 {
   "hooks": {
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/decompose-on-activate.py\"",
-            "timeout": 10
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "printf '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"CONDUCTOR REMINDER: In this repo, use mcp__conductor__* tools to track work — NOT TaskCreate/TaskUpdate. At the start of any multi-step task: call mcp__conductor__list_projects first. Update progress incrementally with mcp__conductor__update_task (not just at the end). Archive when done with mcp__conductor__archive_project.\"}}'",
+            "command": "printf '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"CONDUCTOR REMINDER: In this repo, use mcp__conductor__* tools to track work — NOT TaskCreate/TaskUpdate. At the start of any multi-step task: call mcp__conductor__list_plans first. Update progress incrementally with mcp__conductor__update_task (not just at the end). Archive when done with mcp__conductor__archive_plan.\"}}'",
             "timeout": 5
           }
         ]

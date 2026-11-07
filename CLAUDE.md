@@ -132,6 +132,8 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **`set_status` to `active` is blocked** if `depends_on` lists any sibling not yet `completed`.
 
+**Forced decomposition (opt-in):** with `CONDUCTOR_REQUIRE_DECOMPOSE=1` in the MCP server's env, `set_status` to `active` is also blocked for a task with no children unless its `state.atomic` is `true`. This lives in the server (not a hook) because only the server knows which plan is open.
+
 **`working_dir` is required on every plan** and is never null. MCP's `create_plan` defaults it to `process.cwd()` (the directory Claude Code was launched from). Web UI requires the user to select one. Agents receive it in their system prompt so they know where to operate on the filesystem.
 
 **Two DB layers exist and must stay in sync**: `mcp/src/db.ts` is a minimal standalone layer (no migrations, no UI columns). `web/lib/db.ts` is a superset — it calls `runMigrations()` on startup and adds UI-only columns. When adding a field to `PlanRow` or `TaskRow`, update both files. The MCP `PlanRow` type only needs fields the MCP tools use; the web layer can have more.

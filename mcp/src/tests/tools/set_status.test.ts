@@ -1,9 +1,46 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { set_status } from '../../tools/set_status.js'
+import { update_task } from '../../tools/update_task.js'
 import { create_plan } from '../../tools/create_plan.js'
 import { create_task } from '../../tools/create_task.js'
 import { getTask } from '../../db.js'
 import { getOpenPlan } from '../../session.js'
+
+describe('set_status with CONDUCTOR_REQUIRE_DECOMPOSE=1', () => {
+  beforeEach(() => { process.env.CONDUCTOR_REQUIRE_DECOMPOSE = '1' })
+  afterEach(() => { delete process.env.CONDUCTOR_REQUIRE_DECOMPOSE })
+
+  it('blocks activating a leaf task that is not marked atomic', async () => {
+    await create_plan({ name: 'Test' })
+    await create_task({ goal: 'root', status: 'pending' })
+    await expect(set_status({ task_id: '1', status: 'active' })).rejects.toThrow('has no sub-tasks yet')
+  })
+
+  it('allows activating a task that has children', async () => {
+    await create_plan({ name: 'Test' })
+    await create_task({ goal: 'root', status: 'pending' })
+    await create_task({ goal: 'child', parent_id: '1', status: 'pending' })
+    await set_status({ task_id: '1', status: 'active' })
+    expect(getTask(getOpenPlan()!, '1')!.status).toBe('active')
+  })
+
+  it('allows activating a leaf task marked atomic', async () => {
+    await create_plan({ name: 'Test' })
+    await create_task({ goal: 'root', status: 'pending' })
+    await update_task({ task_id: '1', state_patch: { atomic: true } })
+    await set_status({ task_id: '1', status: 'active' })
+    expect(getTask(getOpenPlan()!, '1')!.status).toBe('active')
+  })
+
+  it('only looks at the open plan, not same-numbered tasks in other plans', async () => {
+    await create_plan({ name: 'Other' })
+    await create_task({ goal: 'root', status: 'pending' })
+    await create_task({ goal: 'child', parent_id: '1', status: 'pending' })
+    await create_plan({ name: 'Test' })
+    await create_task({ goal: 'root', status: 'pending' })
+    await expect(set_status({ task_id: '1', status: 'active' })).rejects.toThrow('has no sub-tasks yet')
+  })
+})
 
 describe('set_status', () => {
   it('throws when no project is open', async () => {
