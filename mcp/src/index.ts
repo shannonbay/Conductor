@@ -14,6 +14,8 @@ import {
   SynthesizeSchema,
   GetContextSchema,
   ProvisionTasksSchema,
+  NextTaskSchema,
+  GetHistorySchema,
 } from './schema.js'
 
 import { create_plan } from './tools/create_plan.js'
@@ -26,6 +28,8 @@ import { set_status } from './tools/set_status.js'
 import { synthesize } from './tools/synthesize.js'
 import { get_context } from './tools/get_context.js'
 import { provision_tasks } from './tools/provision_tasks.js'
+import { next_task } from './tools/next_task.js'
+import { get_history } from './tools/get_history.js'
 import { handleListResources, handleReadResource } from './resources.js'
 
 const TOOLS = [
@@ -88,6 +92,18 @@ const TOOLS = [
     description: 'Create multiple tasks in a single call by providing a map of absolute task IDs to task specs. Use this instead of repeated create_task calls when you want to lay out an entire plan or sub-tree at once. IDs are hierarchical addresses ("1", "1.1", "1.2.3"); parent IDs must exist in the DB or be included in the batch. All tasks are inserted atomically — either all succeed or none do. Focus moves to the shallowest, lowest-numbered task created. Duplicate IDs (already in DB) are rejected; use update_task to modify existing tasks.',
     inputSchema: zodToJsonSchema(ProvisionTasksSchema),
     handler: provision_tasks,
+  },
+  {
+    name: 'next_task',
+    description: 'Read-only. Tells you what to work on next in the open plan, so you don\'t have to walk the tree yourself. Returns action "continue" (an active task already in progress), "start" (a pending task whose dependencies are complete), "complete" (a task whose children are all resolved — synthesize it, then complete it), or "none" with the reason (all done, or which tasks are blocked and on what). Includes the full context view for the chosen task. Call this when resuming a plan or after finishing a task.',
+    inputSchema: zodToJsonSchema(NextTaskSchema),
+    handler: next_task,
+  },
+  {
+    name: 'get_history',
+    description: 'Read-only. Recent changes to the open plan, newest first: who made each change (actor "agent" = Claude, "human" = the web UI), what changed, and old/new values for edits and status changes. Pass task_id to see only that task and its sub-tasks. Use this when resuming a plan to see what happened since you last worked on it, including edits a human made in the UI.',
+    inputSchema: zodToJsonSchema(GetHistorySchema),
+    handler: get_history,
   },
 ]
 

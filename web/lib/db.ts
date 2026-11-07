@@ -4,9 +4,9 @@
  * opened connection and adds the UI-only queries (sessions, events, locks…).
  */
 import * as core from '@conductor/core'
-import { deserializeTask, type NewPlan, type NewTask, type PlanRow, type Task } from '@conductor/core'
+import { deserializeTask, type Event, type NewEvent, type NewPlan, type NewTask, type PlanRow, type Task } from '@conductor/core'
 
-export type { NewPlan, NewTask, PlanRow, Task, TreeStats } from '@conductor/core'
+export type { Event, NewEvent, NewPlan, NewTask, PlanRow, Task, TreeStats } from '@conductor/core'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,17 +28,6 @@ export interface AgentSession {
   error: string | null
   started_at: string
   ended_at: string | null
-}
-
-export interface Event {
-  id: string
-  plan_id: string
-  task_id: string
-  event_type: string
-  actor: 'human' | 'agent'
-  session_id: string | null
-  payload: Record<string, unknown>
-  created_at: string
 }
 
 export interface TranscriptMessage {
@@ -190,34 +179,10 @@ export function getAllActiveSessions(): AgentSession[] {
 
 // ─── Event log ────────────────────────────────────────────────────────────────
 
-export function insertEvent(event: Omit<Event, 'created_at'> & { created_at?: string }): void {
-  const db = getDb()
-  db.prepare(`
-    INSERT INTO events (id, plan_id, task_id, event_type, actor, session_id, payload, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    event.id,
-    event.plan_id,
-    event.task_id,
-    event.event_type,
-    event.actor,
-    event.session_id ?? null,
-    JSON.stringify(event.payload),
-    event.created_at ?? new Date().toISOString(),
-  )
-}
+export const insertEvent = (event: NewEvent) => core.insertEvent(getDb(), event)
 
-export function getEvents(planId: string, taskId?: string, limit?: number): Event[] {
-  const db = getDb()
-  let rows: Record<string, unknown>[]
-  const limitClause = limit && limit > 0 ? ` LIMIT ${Math.floor(limit)}` : ''
-  if (taskId) {
-    rows = db.prepare(`SELECT * FROM events WHERE plan_id = ? AND task_id = ? ORDER BY created_at DESC${limitClause}`).all(planId, taskId) as Record<string, unknown>[]
-  } else {
-    rows = db.prepare(`SELECT * FROM events WHERE plan_id = ? ORDER BY created_at DESC${limitClause}`).all(planId) as Record<string, unknown>[]
-  }
-  return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload as string) } as Event))
-}
+export const getEvents = (planId: string, taskId?: string, limit?: number): Event[] =>
+  core.getEvents(getDb(), planId, { taskId, limit })
 
 // ─── Transcript messages ──────────────────────────────────────────────────────
 

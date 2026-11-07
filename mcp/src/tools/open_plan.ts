@@ -1,5 +1,6 @@
 import { getPlan, updatePlan, getRootTasks, getTreeStats } from '../db.js'
 import { setOpenPlan } from '../session.js'
+import { record } from '../history.js'
 import { OpenPlanSchema } from '../schema.js'
 
 export async function open_plan(args: unknown) {
@@ -12,6 +13,7 @@ export async function open_plan(args: unknown) {
     updatePlan(plan.id, { status: 'active', updated_at: now })
     plan.status = 'active'
     plan.updated_at = now
+    record(plan.id, plan.id, 'plan_restored')
   }
 
   setOpenPlan(plan.id)

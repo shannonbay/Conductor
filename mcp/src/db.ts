@@ -18,6 +18,8 @@ export const touchPlan = (planId: string) => core.touchPlan(db, planId)
 
 export const getTask = (planId: string, taskId: string) => core.getTask(db, planId, taskId)
 export const getRootTasks = (planId: string) => core.getRootTasks(db, planId)
+export const getAllTasks = (planId: string) => core.getAllTasks(db, planId)
+export const compareTaskIds = core.compareTaskIds
 export const getChildren = (planId: string, parentId: string) => core.getChildren(db, planId, parentId)
 export const getSiblings = (planId: string, taskId: string) => core.getSiblings(db, planId, taskId)
 export const getTreeStats = (planId: string) => core.getTreeStats(db, planId)
@@ -26,6 +28,9 @@ export const nextChildId = (planId: string, parentId: string) => core.nextChildI
 export const insertTask = (task: NewTask) => core.insertTask(db, task)
 export const updateTask = (planId: string, taskId: string, fields: Partial<Omit<Task, 'id' | 'plan_id'>>) =>
   core.updateTask(db, planId, taskId, fields)
+
+export const insertEvent = (event: core.NewEvent) => core.insertEvent(db, event)
+export const getEvents = (planId: string, query?: core.EventQuery) => core.getEvents(db, planId, query)
 
 export const clearAllData = () => core.clearAllData(db)
 

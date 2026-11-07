@@ -1,6 +1,7 @@
 import { getPlan, updatePlan } from '../db.js'
 import { getOpenPlan, setOpenPlan } from '../session.js'
 import { ArchivePlanSchema } from '../schema.js'
+import { record } from '../history.js'
 
 export async function archive_plan(args: unknown) {
   const input = ArchivePlanSchema.parse(args)
@@ -9,6 +10,7 @@ export async function archive_plan(args: unknown) {
 
   const now = new Date().toISOString()
   updatePlan(plan.id, { status: 'archived', updated_at: now })
+  record(plan.id, plan.id, 'plan_archived')
 
   if (getOpenPlan() === plan.id) {
     setOpenPlan(null)

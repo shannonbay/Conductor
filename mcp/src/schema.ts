@@ -56,6 +56,13 @@ const TaskSpecSchema = z.object({
   initial_state: z.record(z.unknown()).optional().describe('Freeform starting state (default {})'),
 })
 
+export const NextTaskSchema = z.object({})
+
+export const GetHistorySchema = z.object({
+  task_id: z.string().optional().describe('Only changes to this task and its sub-tasks. Omit for the whole plan.'),
+  limit: z.number().int().min(1).max(200).default(30).describe('Newest N changes (default 30, max 200)'),
+})
+
 export const ProvisionTasksSchema = z.object({
   tasks: z.record(z.string(), TaskSpecSchema).describe(
     'Map of task ID → spec. IDs are absolute hierarchical addresses e.g. "1", "1.1", "1.2.3". ' +

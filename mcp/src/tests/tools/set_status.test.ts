@@ -42,6 +42,31 @@ describe('set_status with CONDUCTOR_REQUIRE_DECOMPOSE=1', () => {
   })
 })
 
+describe('set_status with CONDUCTOR_STRICT_COMPLETE=1', () => {
+  beforeEach(() => { process.env.CONDUCTOR_STRICT_COMPLETE = '1' })
+  afterEach(() => { delete process.env.CONDUCTOR_STRICT_COMPLETE })
+
+  it('blocks completing a parent with unresolved children', async () => {
+    await create_plan({ name: 'Test' })
+    await create_task({ goal: 'root' })
+    await create_task({ goal: 'child', parent_id: '1', status: 'pending' })
+    await expect(set_status({ task_id: '1', status: 'completed' })).rejects.toThrow('not yet completed or abandoned: 1.1')
+    expect(getTask(getOpenPlan()!, '1')!.status).toBe('active')
+  })
+
+  it('allows completion once children are completed or abandoned', async () => {
+    await create_plan({ name: 'Test' })
+    await create_task({ goal: 'root' })
+    await create_task({ goal: 'a', parent_id: '1' })
+    await create_task({ goal: 'b', parent_id: '1' })
+    await set_status({ task_id: '1.1', status: 'completed' })
+    await set_status({ task_id: '1.2', status: 'abandoned', reason: 'not needed' })
+    const result = await set_status({ task_id: '1', status: 'completed' })
+    expect(result).not.toHaveProperty('warning')
+    expect(getTask(getOpenPlan()!, '1')!.status).toBe('completed')
+  })
+})
+
 describe('set_status', () => {
   it('throws when no project is open', async () => {
     await expect(set_status({ task_id: '1', status: 'completed' })).rejects.toThrow('No plan is open')

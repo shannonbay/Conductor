@@ -2,6 +2,7 @@ import { getTask, countAllTasks, nextChildId, insertTask, touchPlan } from '../d
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { CreateTaskSchema } from '../schema.js'
+import { record } from '../history.js'
 
 export async function create_task(args: unknown) {
   const input = CreateTaskSchema.parse(args)
@@ -66,6 +67,7 @@ export async function create_task(args: unknown) {
 
   insertTask(task)
   touchPlan(planId)
+  record(planId, newId, 'task_created', { goal: input.goal, status: input.status })
 
   return buildContext(planId, newId)
 }

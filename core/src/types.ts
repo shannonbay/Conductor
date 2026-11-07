@@ -46,6 +46,20 @@ type OptionalTaskFields =
 /** Fields needed to insert a task; UI-layer fields and notes are optional. */
 export type NewTask = Omit<Task, OptionalTaskFields> & Partial<Pick<Task, OptionalTaskFields>>
 
+/** One row of the immutable activity log. Plan-level events use the plan ID as task_id. */
+export interface Event {
+  id: string
+  plan_id: string
+  task_id: string
+  event_type: string
+  actor: 'human' | 'agent'
+  session_id: string | null
+  payload: Record<string, unknown>
+  created_at: string
+}
+
+export type NewEvent = Omit<Event, 'created_at' | 'session_id'> & { created_at?: string; session_id?: string | null }
+
 export interface TreeStats {
   total_tasks: number
   active: number

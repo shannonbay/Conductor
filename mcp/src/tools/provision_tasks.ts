@@ -2,6 +2,7 @@ import { getOpenPlan } from '../session.js'
 import { getPlan, getTask, insertTask, touchPlan, countAllTasks, runTransaction, type NewTask } from '../db.js'
 import { buildContext } from '../context.js'
 import { ProvisionTasksSchema } from '../schema.js'
+import { record } from '../history.js'
 
 /** Compare task IDs by depth first, then numerically segment-by-segment. */
 function compareTaskIds(a: string, b: string): number {
@@ -101,6 +102,7 @@ export async function provision_tasks(args: unknown) {
         updated_at: now,
       }
       insertTask(task)
+      record(planId, id, 'task_created', { goal: task.goal, status: task.status })
     }
   })
 

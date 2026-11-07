@@ -1,5 +1,5 @@
 import type { Database } from 'better-sqlite3'
-import type { NewPlan, NewTask, PlanRow, Task, TreeStats } from './types.js'
+import type { Event, NewEvent, NewPlan, NewTask, PlanRow, Task, TreeStats } from './types.js'
 
 type Row = Record<string, unknown>
 
@@ -62,6 +62,22 @@ export function touchPlan(db: Database, id: string): void {
 export function getTask(db: Database, planId: string, taskId: string): Task | undefined {
   const row = db.prepare('SELECT * FROM tasks WHERE id = ? AND plan_id = ?').get(taskId, planId) as Row | undefined
   return row ? deserializeTask(row) : undefined
+}
+
+/** Orders task IDs as tree addresses: "1.2" < "1.10", parents before children. */
+export function compareTaskIds(a: string, b: string): number {
+  const pa = a.split('.').map(Number)
+  const pb = b.split('.').map(Number)
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i]
+  }
+  return pa.length - pb.length
+}
+
+/** Every task in a plan, in tree order. */
+export function getAllTasks(db: Database, planId: string): Task[] {
+  const rows = db.prepare('SELECT * FROM tasks WHERE plan_id = ?').all(planId) as Row[]
+  return rows.map(deserializeTask).sort((a, b) => compareTaskIds(a.id, b.id))
 }
 
 export function getRootTasks(db: Database, planId: string): Task[] {
@@ -155,6 +171,51 @@ export function updateTask(db: Database, planId: string, taskId: string, fields:
 /** Deletes a task and all its descendants. */
 export function deleteTaskTree(db: Database, planId: string, taskId: string): void {
   db.prepare('DELETE FROM tasks WHERE plan_id = ? AND (id = ? OR id LIKE ?)').run(planId, taskId, `${taskId}.%`)
+}
+
+// ── Event log ─────────────────────────────────────────────────────────────────
+
+export function insertEvent(db: Database, event: NewEvent): void {
+  db.prepare(`
+    INSERT INTO events (id, plan_id, task_id, event_type, actor, session_id, payload, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    event.id,
+    event.plan_id,
+    event.task_id,
+    event.event_type,
+    event.actor,
+    event.session_id ?? null,
+    JSON.stringify(event.payload),
+    event.created_at ?? new Date().toISOString(),
+  )
+}
+
+export interface EventQuery {
+  /** Only events for this task (plus its descendants when subtree is true). */
+  taskId?: string
+  subtree?: boolean
+  /** Newest N events. */
+  limit?: number
+}
+
+/** Events for a plan, newest first. */
+export function getEvents(db: Database, planId: string, query: EventQuery = {}): Event[] {
+  const where = ['plan_id = ?']
+  const params: unknown[] = [planId]
+  if (query.taskId) {
+    if (query.subtree) {
+      where.push('(task_id = ? OR task_id LIKE ?)')
+      params.push(query.taskId, `${query.taskId}.%`)
+    } else {
+      where.push('task_id = ?')
+      params.push(query.taskId)
+    }
+  }
+  const limit = query.limit && query.limit > 0 ? ` LIMIT ${Math.floor(query.limit)}` : ''
+  const rows = db.prepare(`SELECT * FROM events WHERE ${where.join(' AND ')} ORDER BY created_at DESC, rowid DESC${limit}`)
+    .all(...params) as Row[]
+  return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload as string) } as Event))
 }
 
 // ── Test helpers ──────────────────────────────────────────────────────────────

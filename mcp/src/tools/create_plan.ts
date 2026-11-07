@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid'
 import { insertPlan, getTreeStats } from '../db.js'
 import { setOpenPlan } from '../session.js'
+import { record } from '../history.js'
 import { CreatePlanSchema } from '../schema.js'
 import { z } from 'zod'
 
@@ -22,6 +23,7 @@ export async function create_plan(args: unknown) {
   })
 
   setOpenPlan(id)
+  record(id, id, 'plan_created', { name: input.name })
 
   return {
     id,

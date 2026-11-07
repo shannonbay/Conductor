@@ -2,6 +2,7 @@ import { getTask, getChildren, updateTask, touchPlan } from '../db.js'
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { SetStatusSchema } from '../schema.js'
+import { record } from '../history.js'
 
 export async function set_status(args: unknown) {
   const input = SetStatusSchema.parse(args)
@@ -47,7 +48,15 @@ export async function set_status(args: unknown) {
     const children = getChildren(planId, input.task_id)
     const unfinished = children.filter(c => c.status !== 'completed' && c.status !== 'abandoned')
     if (unfinished.length > 0) {
-      warning = `Warning: ${unfinished.length} child task(s) are not yet completed or abandoned: ${unfinished.map(c => c.id).join(', ')}`
+      const ids = unfinished.map(c => c.id).join(', ')
+      // Opt-in: refuse to complete a parent until every child is resolved.
+      if (process.env.CONDUCTOR_STRICT_COMPLETE === '1') {
+        throw new Error(
+          `Cannot complete task ${input.task_id}: ${unfinished.length} child task(s) are not yet completed or abandoned: ${ids}. ` +
+          'Finish or abandon them (with a reason), call synthesize on this task, then retry.'
+        )
+      }
+      warning = `Warning: ${unfinished.length} child task(s) are not yet completed or abandoned: ${ids}`
     }
   }
 
@@ -58,6 +67,12 @@ export async function set_status(args: unknown) {
 
   updateTask(planId, input.task_id, fields as Parameters<typeof updateTask>[2])
   touchPlan(planId)
+  record(planId, input.task_id, 'status_changed', {
+    from: task.status,
+    to: input.status,
+    ...(input.reason !== undefined && { reason: input.reason }),
+    ...(input.result !== undefined && { result: input.result, previous_result: task.result }),
+  })
 
   const context = buildContext(planId, input.task_id)
   if (warning) {

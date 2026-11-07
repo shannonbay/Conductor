@@ -74,8 +74,14 @@ export function ActivityFeed() {
       {events.map((event) => {
         const payload = event.payload as Record<string, unknown>
         const label = eventLabels[event.event_type] ?? event.event_type
+        // MCP edits list changed fields in `fields`; UI edits use `changes`
+        const changedFields = (payload['fields'] ?? payload['changes']) as unknown
         const detail = event.event_type === 'status_changed'
-          ? `${payload['from']} → ${payload['to']}${payload['reason'] ? `: ${payload['reason']}` : ''}`
+          ? `${event.task_id}: ${payload['from']} → ${payload['to']}${payload['reason'] ? `: ${payload['reason']}` : ''}`
+          : event.event_type === 'task_updated' && Array.isArray(changedFields) && changedFields.length > 0
+          ? `${event.task_id} (${changedFields.join(', ')})`
+          : event.event_type === 'task_created' && payload['goal']
+          ? `${event.task_id}: ${String(payload['goal'])}`
           : event.task_id
 
         return (
