@@ -59,6 +59,51 @@ export const SetStatusSchema = z.object({
     '(e.g. "covered by auth.test.ts: rejects missing token").'),
 })
 
+// ── Persistent goals ──────────────────────────────────────────────────────────
+
+export const ListGoalsSchema = z.object({
+  status: z.enum(['active', 'paused', 'retired', 'all']).default('active').describe('Filter by goal status'),
+})
+
+export const GetGoalBriefSchema = z.object({
+  goal_id: z.string().describe('ID of the goal (its plan ID)'),
+  run_id: z.string().optional().describe('The run you were started for (given in the run request). Items you add are attributed to it.'),
+})
+
+export const AddItemSchema = z.object({
+  goal: z.string().min(1).describe('Short description of the work item, e.g. "Reply to Alice about Thursday"'),
+  external_ref: z.string().min(1).optional().describe(
+    'Stable ID of the thing this is about, e.g. "gmail:18c2f…". If an item with this ref already exists it is returned instead of creating a duplicate.'),
+  action: z.object({
+    category: z.string().min(1).describe('Action category, e.g. "email.send". Its autonomy mode is in the brief.'),
+    summary: z.string().min(1).describe('One line the human will read when approving, e.g. "Send reply confirming Thursday 2pm"'),
+    params: z.record(z.unknown()).optional().describe('Exact details needed to carry the action out later (ids, draft id, labels)'),
+  }).optional().describe(
+    'An action this item is about. "propose" categories create an item that waits for human approval; "auto" categories record an action you already took; "off" categories are refused.'),
+  status: z.enum(['pending', 'active']).optional().describe('For items without an action (default pending)'),
+  result: z.string().optional().describe('For auto actions: what you did'),
+  notes: z.string().optional(),
+})
+
+export const RememberSchema = z.object({
+  kind: z.enum(['fact', 'rule', 'preference']).describe('fact: "Alice is my manager"; rule: "Never archive mail from the bank"; preference: "Keep drafts short"'),
+  text: z.string().min(1).describe('One clear statement'),
+  source_ref: z.string().optional().describe('Item or run this came from'),
+})
+
+export const ForgetSchema = z.object({
+  memory_id: z.string().describe('ID of a memory you (an agent) created'),
+})
+
+export const EndRunSchema = z.object({
+  summary: z.string().min(1).describe('What you did this run, what is waiting for the human, and anything you learned'),
+  run_id: z.string().optional().describe('Defaults to the run from get_goal_brief'),
+})
+
+export const RunGoalSchema = z.object({
+  goal_id: z.string().describe('ID of the goal to run'),
+})
+
 export const VerifyTaskSchema = z.object({
   task_id: z.string().describe('ID of the task whose checks to run'),
 })

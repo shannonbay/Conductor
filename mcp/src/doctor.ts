@@ -187,6 +187,25 @@ export async function checkWeb(o: DoctorOptions): Promise<CheckResult> {
     : warn('Web UI', 'not running', 'Start it with `npm run dev --prefix web`.')
 }
 
+/** Active goals only run while the web app (scheduler) and a channel-connected Claude Code session are up. */
+export async function checkGoals(o: DoctorOptions, channel: CheckResult, web: CheckResult): Promise<CheckResult | null> {
+  let goals: { plan: { name: string } }[]
+  try {
+    const core = await import('@conductor/core')
+    const db = core.openDatabase(o.env.CONDUCTOR_DB ?? join(o.home, '.conductor', 'tasks.db'))
+    try { goals = core.listGoals(db, 'active') } finally { db.close() }
+  } catch {
+    return null // database problems are reported by checkDatabase
+  }
+  if (goals.length === 0) return null
+  const names = goals.map((g) => g.plan.name).join(', ')
+  const missing = [web.level !== 'ok' && 'the web app', channel.level !== 'ok' && 'a channel-connected Claude Code session'].filter(Boolean)
+  return missing.length === 0
+    ? ok('Persistent goals', `${goals.length} active (${names}); scheduler can run them`)
+    : warn('Persistent goals', `${goals.length} active (${names}) but they won't run without ${missing.join(' and ')}`,
+        'Start the web app and Claude Code with the channel (see the Web app and Channel server checks above), or pause the goals.')
+}
+
 // ── Runner ────────────────────────────────────────────────────────────────────
 
 export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<CheckResult[]> {
@@ -201,6 +220,7 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
     checkHooks(o),
     channel,
     web,
+    ...[await checkGoals(o, channel, web)].filter((r): r is CheckResult => r !== null),
   ]
 }
 

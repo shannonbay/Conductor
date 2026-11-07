@@ -3,7 +3,8 @@ import { ListPlansSchema } from '../schema.js'
 
 export async function list_plans(args: unknown) {
   const input = ListPlansSchema.parse(args)
-  const plans = listPlans(input.status)
+  // Persistent goals are listed by list_goals
+  const plans = listPlans(input.status).filter((p) => p.kind !== 'goal')
 
   return {
     plans: plans.map(p => ({

@@ -38,6 +38,26 @@ export const getGateStatus = (task: Task) => core.getGateStatus(db, task)
 export const getLatestVerification = (planId: string, taskId: string, gate: core.GateKind) => core.getLatestVerification(db, planId, taskId, gate)
 export const describeBlockers = core.describeBlockers
 
+// Persistent goals
+export const createGoal = (plan: core.NewPlan, goal: Omit<core.NewGoal, 'plan_id'>, interval?: core.IntervalConfig) => core.createGoal(db, plan, goal, interval)
+/** Human review actions — used by tests to simulate the web UI. */
+export const approveTask = (planId: string, taskId: string) => core.approveTask(db, planId, taskId)
+export const rejectTask = (planId: string, taskId: string, feedback: string) => core.rejectTask(db, planId, taskId, feedback)
+export const listGoals = (status?: core.Goal['status']) => core.listGoals(db, status)
+export const getGoal = (planId: string) => core.getGoal(db, planId)
+export const buildBrief = (planId: string, runId?: string) => core.buildBrief(db, planId, runId)
+export const addItem = (planId: string, runId: string | null, input: core.AddItemInput) => core.addItem(db, planId, runId, input)
+export const insertMemory = (m: Parameters<typeof core.insertMemory>[1]) => core.insertMemory(db, m)
+export const getMemory = (id: string) => core.getMemory(db, id)
+export const updateMemory = (id: string, fields: Parameters<typeof core.updateMemory>[2]) => core.updateMemory(db, id, fields)
+export const getRun = (runId: string) => core.getRun(db, runId)
+export const endRun = (runId: string, summary: string) => core.endRun(db, runId, summary)
+export const queueRun = (planId: string) => core.queueRun(db, planId, 'manual')
+export const getOpenGoalRun = (planId: string) => core.getOpenRun(db, planId)
+export const countItems = (planId: string) => db.prepare(
+  "SELECT SUM(CASE WHEN status IN ('pending','active') THEN 1 ELSE 0 END) AS open, SUM(CASE WHEN review_requested_at IS NOT NULL THEN 1 ELSE 0 END) AS awaiting_review FROM tasks WHERE plan_id = ? AND archived_at IS NULL",
+).get(planId) as { open: number | null; awaiting_review: number | null }
+
 export const clearAllData = () => core.clearAllData(db)
 
 export function runTransaction<T>(fn: () => T): T {

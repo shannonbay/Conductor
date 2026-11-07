@@ -1,10 +1,10 @@
 import { getAllTasks, compareTaskIds, getLatestVerification, type Task } from '../db.js'
-import { hasGates } from '@conductor/core'
+import { hasGates, isProposal } from '@conductor/core'
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { NextTaskSchema } from '../schema.js'
 
-type Action = 'continue' | 'start' | 'complete' | 'fix'
+type Action = 'continue' | 'start' | 'complete' | 'fix' | 'execute'
 
 const isResolved = (t: Task) => t.status === 'completed' || t.status === 'abandoned'
 
@@ -34,7 +34,8 @@ export async function next_task(args: unknown): Promise<NextTaskResult> {
   const planId = getOpenPlan()
   if (!planId) throw new Error('No plan is open. Use list_plans and open_plan first.')
 
-  const tasks = getAllTasks(planId)
+  // Archived goal items are hidden from everything
+  const tasks = getAllTasks(planId).filter((t) => !t.archived_at)
   const byId = new Map(tasks.map((t) => [t.id, t]))
   const childrenOf = new Map<string, Task[]>()
   for (const t of tasks) {
@@ -83,6 +84,12 @@ export async function next_task(args: unknown): Promise<NextTaskResult> {
     return { action: lastCheckFailed(t) ? 'fix' : 'complete', task: t }
   }
 
+  // Goals: an approved proposal is carried out before anything else
+  const approved = tasks.find((t) => t.status === 'active' && t.approved_at && isProposal(t))
+  if (approved) {
+    return { action: 'execute', task_id: approved.id, hint: hintFor('execute', approved), context: buildContext(planId, approved.id) }
+  }
+
   for (const root of (childrenOf.get('') ?? []).sort((a, b) => compareTaskIds(a.id, b.id))) {
     const found = visit(root)
     if (found) {
@@ -123,6 +130,8 @@ function hintFor(action: Action, task: Task): string {
   switch (action) {
     case 'continue':
       return 'This task is already active. Keep working on it, record progress with update_task, then set_status completed.' + gateHint
+    case 'execute':
+      return 'A human approved this proposal. Carry out exactly the action in state.action, then set_status completed with a result saying what you did.'
     case 'fix':
       return 'The last verify command run for this task failed (see gates.last_command). Fix the problem, run verify_task, then set_status completed.' + gateHint
     case 'complete':

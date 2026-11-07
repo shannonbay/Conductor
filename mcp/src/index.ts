@@ -17,6 +17,13 @@ import {
   NextTaskSchema,
   GetHistorySchema,
   VerifyTaskSchema,
+  ListGoalsSchema,
+  GetGoalBriefSchema,
+  AddItemSchema,
+  RememberSchema,
+  ForgetSchema,
+  EndRunSchema,
+  RunGoalSchema,
 } from './schema.js'
 
 import { create_plan } from './tools/create_plan.js'
@@ -32,6 +39,7 @@ import { provision_tasks } from './tools/provision_tasks.js'
 import { next_task } from './tools/next_task.js'
 import { get_history } from './tools/get_history.js'
 import { verify_task } from './tools/verify_task.js'
+import { list_goals, get_goal_brief, add_item, remember, forget, end_run, run_goal } from './tools/goals.js'
 import { handleListResources, handleReadResource } from './resources.js'
 
 const TOOLS = [
@@ -112,6 +120,48 @@ const TOOLS = [
     description: "Runs a task's verify_command now, without completing it, and returns pass/fail with the output, plus the task's gates (acceptance criteria, approval, last check). Use it to check your work before calling set_status completed. The result is saved as evidence.",
     inputSchema: zodToJsonSchema(VerifyTaskSchema),
     handler: verify_task,
+  },
+  {
+    name: 'list_goals',
+    description: 'List persistent goals (standing objectives like "keep my inbox under control" that never finish). Shows open items, items waiting for human review, and last/next run.',
+    inputSchema: zodToJsonSchema(ListGoalsSchema),
+    handler: list_goals,
+  },
+  {
+    name: 'get_goal_brief',
+    description: 'Start of every goal run: returns everything you need in one call — objective, standing instructions, autonomy per action category, memory (rules, facts, preferences), human decisions since the last run (approvals, rejections with feedback), open items (approved ones to carry out first), and recent run summaries. Opens the goal. Pass the run_id you were given.',
+    inputSchema: zodToJsonSchema(GetGoalBriefSchema),
+    handler: get_goal_brief,
+  },
+  {
+    name: 'add_item',
+    description: 'Add a work item to the open goal. Always pass external_ref for things that come from outside (an email, an issue) so the same thing is never added twice — an existing item is returned instead. With an action: "propose" categories create an item that waits for human approval (do not act until approved), "auto" categories record an action you already took, "off" categories are refused.',
+    inputSchema: zodToJsonSchema(AddItemSchema),
+    handler: add_item,
+  },
+  {
+    name: 'remember',
+    description: "Save a fact, rule or preference to the goal's memory so future runs know it. Keep each one short and general.",
+    inputSchema: zodToJsonSchema(RememberSchema),
+    handler: remember,
+  },
+  {
+    name: 'forget',
+    description: 'Deactivate a memory an agent created that turned out wrong or stale. Human-written memories can only be changed by the human.',
+    inputSchema: zodToJsonSchema(ForgetSchema),
+    handler: forget,
+  },
+  {
+    name: 'end_run',
+    description: 'Finish the current goal run with a summary: what you did, what waits for the human, what you learned. Required at the end of every run; the next run reads it.',
+    inputSchema: zodToJsonSchema(EndRunSchema),
+    handler: end_run,
+  },
+  {
+    name: 'run_goal',
+    description: 'Queue a run of a goal now (e.g. after changing its instructions). The Conductor web app starts it shortly.',
+    inputSchema: zodToJsonSchema(RunGoalSchema),
+    handler: run_goal,
   },
 ]
 

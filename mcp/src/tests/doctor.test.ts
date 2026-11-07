@@ -118,3 +118,23 @@ describe('doctor', () => {
     expect(text).toContain('1 problem(s) to fix')
   })
 })
+
+describe('checkGoals', () => {
+  it('is silent without active goals and warns when goals cannot run', async () => {
+    const { checkGoals } = await import('../doctor.js')
+    const okR = { name: 'x', level: 'ok' as const, detail: '' }
+    const warnR = { name: 'x', level: 'warn' as const, detail: '' }
+    const dbFile = join(dir, 'goals.db')
+    const opts = { ...o, env: { CONDUCTOR_DB: dbFile } }
+    expect(await checkGoals(opts, okR, okR)).toBeNull()
+
+    const core = await import('@conductor/core')
+    const db = core.openDatabase(dbFile)
+    const now = new Date().toISOString()
+    core.createGoal(db, { id: 'g', name: 'Inbox', description: null, status: 'active', working_dir: dir, created_at: now, updated_at: now }, { objective: 'x' })
+    db.close()
+
+    expect(await checkGoals(opts, okR, okR)).toMatchObject({ level: 'ok', detail: expect.stringContaining('Inbox') })
+    expect(await checkGoals(opts, warnR, okR)).toMatchObject({ level: 'warn', detail: expect.stringContaining('channel-connected Claude Code') })
+  })
+})
