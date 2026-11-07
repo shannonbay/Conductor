@@ -75,6 +75,57 @@ export const insertTask = (task: NewTask) => core.insertTask(getDb(), task)
 export const updateTask = (planId: string, taskId: string, fields: Partial<Task>) => core.updateTask(getDb(), planId, taskId, fields)
 export const deleteTaskTree = (planId: string, taskId: string) => core.deleteTaskTree(getDb(), planId, taskId)
 
+// ─── Persistent goals (shared with MCP via @conductor/core) ───────────────────
+
+export { GoalError, isProposal, DEFAULT_GOAL_LIMITS } from '@conductor/core'
+export type { Goal, GoalRun, GoalMemory, GoalTrigger, IntervalConfig, AutonomyMode, TickDecision } from '@conductor/core'
+export const createGoal = (plan: NewPlan, goal: Omit<core.NewGoal, 'plan_id'>, interval?: core.IntervalConfig) => core.createGoal(getDb(), plan, goal, interval)
+export const getGoal = (planId: string) => core.getGoal(getDb(), planId)
+export const listGoals = (status?: core.Goal['status']) => core.listGoals(getDb(), status)
+export const updateGoal = (planId: string, fields: Parameters<typeof core.updateGoal>[2]) => core.updateGoal(getDb(), planId, fields)
+export const getIntervalTrigger = (planId: string) => core.getIntervalTrigger(getDb(), planId)
+export const setIntervalTrigger = (planId: string, config: core.IntervalConfig | null) => core.setIntervalTrigger(getDb(), planId, config)
+export const insertRun = (planId: string, trigger: core.TriggerKind, status?: core.RunStatus, skipReason?: string) => core.insertRun(getDb(), planId, trigger, status, skipReason)
+export const getRun = (runId: string) => core.getRun(getDb(), runId)
+export const updateRun = (runId: string, fields: Parameters<typeof core.updateRun>[2]) => core.updateRun(getDb(), runId, fields)
+export const listRuns = (planId: string, limit?: number) => core.listRuns(getDb(), planId, limit)
+export const getOpenRun = (planId: string) => core.getOpenRun(getDb(), planId)
+export const queueRun = (planId: string) => core.queueRun(getDb(), planId, 'manual')
+export const startRun = (runId: string, sessionId: string | null) => core.startRun(getDb(), runId, sessionId)
+export const failRun = (runId: string, status: 'failed' | 'timed_out', reason: string) => core.failRun(getDb(), runId, status, reason)
+export const decideTick = (planId: string, now?: Date) => core.decideTick(getDb(), planId, now)
+export const nextIntervalRun = (planId: string, from?: Date) => core.nextIntervalRun(getDb(), planId, from)
+export const recordSkip = (planId: string, trigger: core.TriggerKind, reason: string, now?: Date) => core.recordSkip(getDb(), planId, trigger, reason, now)
+export const archiveResolved = (planId: string, now?: Date) => core.archiveResolved(getDb(), planId, now)
+export const listMemory = (planId: string) => core.listMemory(getDb(), planId)
+export const getMemory = (id: string) => core.getMemory(getDb(), id)
+export const insertMemory = (m: Parameters<typeof core.insertMemory>[1]) => core.insertMemory(getDb(), m)
+export const updateMemory = (id: string, fields: Parameters<typeof core.updateMemory>[2]) => core.updateMemory(getDb(), id, fields)
+export const deleteMemory = (id: string) => core.deleteMemory(getDb(), id)
+
+/** Work items of a goal that are not archived, in tree order. */
+export function getGoalItems(planId: string): Task[] {
+  const rows = getDb().prepare('SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL').all(planId) as Record<string, unknown>[]
+  return rows.map(deserializeTask).sort((a, b) => core.compareTaskIds(a.id, b.id))
+}
+
+/** Approved/rejected counts per action category — evidence for promoting a category to auto. */
+export function getApprovalStats(planId: string): Record<string, { approved: number; rejected: number }> {
+  const rows = getDb().prepare(`
+    SELECT json_extract(t.state, '$.action.category') AS category, v.passed, COUNT(*) AS n
+    FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
+    WHERE v.plan_id = ? AND v.gate = 'approval' AND json_extract(t.state, '$.action.category') IS NOT NULL
+    GROUP BY category, v.passed
+  `).all(planId) as { category: string; passed: number; n: number }[]
+  const stats: Record<string, { approved: number; rejected: number }> = {}
+  for (const r of rows) {
+    stats[r.category] ??= { approved: 0, rejected: 0 }
+    if (r.passed) stats[r.category].approved += r.n
+    else stats[r.category].rejected += r.n
+  }
+  return stats
+}
+
 // ─── Verification gates (shared with MCP via @conductor/core) ─────────────────
 
 export { GateError } from '@conductor/core'

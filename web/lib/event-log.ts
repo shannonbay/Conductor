@@ -28,6 +28,9 @@ export type EventType =
   | 'verification_failed'
   | 'verification_overridden'
   | 'review_rejected'
+  | 'memory_added'
+  | 'memory_updated'
+  | 'memory_deleted'
 
 interface RecordEventOptions {
   planId: string

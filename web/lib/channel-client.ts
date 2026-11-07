@@ -118,18 +118,14 @@ export async function modifyTasksViaChannel(params: {
 
 // ── Agent runner ──────────────────────────────────────────────────────────────
 
-export async function startAgentViaChannel(params: {
-  planId: string
-  rootTaskId: string
-  planName: string
-  workingDir: string
-}): Promise<string> {
+/** Starts a streaming (SSE) channel request — run_agent or run_goal — and returns its request ID. */
+async function startStreamingRequest(type: 'run_agent' | 'run_goal', payload: object): Promise<string> {
   const requestId = nanoid()
 
   const res = await fetch(`${CHANNEL_URL}/request`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requestId, type: 'run_agent', payload: params }),
+    body: JSON.stringify({ requestId, type, payload }),
   })
 
   if (res.status === 503) {
@@ -139,11 +135,31 @@ export async function startAgentViaChannel(params: {
   }
 
   if (!res.ok) {
-    throw new Error(`Failed to start agent via channel: ${res.status}`)
+    throw new Error(`Failed to start ${type} via channel: ${res.status}`)
   }
 
   const data = (await res.json()) as { requestId: string }
   return data.requestId
+}
+
+export async function startAgentViaChannel(params: {
+  planId: string
+  rootTaskId: string
+  planName: string
+  workingDir: string
+}): Promise<string> {
+  return startStreamingRequest('run_agent', params)
+}
+
+/** Starts one run of a persistent goal in the connected Claude Code session. */
+export async function startGoalRunViaChannel(params: {
+  planId: string
+  runId: string
+  goalName: string
+  workingDir: string
+  maxRunMinutes: number
+}): Promise<string> {
+  return startStreamingRequest('run_goal', params)
 }
 
 export interface AgentEvent {

@@ -1,13 +1,15 @@
 import Link from 'next/link'
-import { listPlans, getTreeStats } from '@/lib/db'
+import { listPlans, getTreeStats, listGoals, getGoalItems, listRuns } from '@/lib/db'
 import { NewPlanButton } from '@/components/NewPlanButton'
+import { NewGoalButton } from '@/components/NewGoalButton'
 import { SettingsButton } from '@/components/SettingsButton'
 
 export const dynamic = 'force-dynamic'
 
 export default function DashboardPage() {
-  const projects = listPlans('active')
-  const archivedProjects = listPlans('archived')
+  // Persistent goals are listed separately
+  const projects = listPlans('active').filter((p) => p.kind !== 'goal')
+  const archivedProjects = listPlans('archived').filter((p) => p.kind !== 'goal')
 
   const withStats = (ps: typeof projects) =>
     ps.map((p) => ({ ...p, stats: getTreeStats(p.id) }))
@@ -15,17 +17,55 @@ export default function DashboardPage() {
   const active = withStats(projects)
   const archived = withStats(archivedProjects)
 
+  const goals = listGoals()
+    .filter(({ goal }) => goal.status !== 'retired')
+    .map(({ plan, goal }) => {
+      const open = getGoalItems(plan.id).filter((t) => t.status === 'pending' || t.status === 'active')
+      return { plan, goal, needsYou: open.filter((t) => t.review_requested_at).length, open: open.length, lastRun: listRuns(plan.id, 1)[0] }
+    })
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b px-6 py-4 flex items-center justify-between">
         <h1 className="text-xl font-semibold text-gray-900">Conductor</h1>
         <div className="flex items-center gap-2">
           <SettingsButton />
+          <NewGoalButton />
           <NewPlanButton />
         </div>
       </header>
 
       <main className="max-w-4xl mx-auto px-6 py-10">
+        {goals.length > 0 && (
+          <section className="mb-10">
+            <h2 className="text-sm font-medium text-gray-500 uppercase tracking-wide mb-4">Goals</h2>
+            <div className="grid gap-3">
+              {goals.map(({ plan, goal, needsYou, open, lastRun }) => (
+                <Link
+                  key={plan.id}
+                  href={`/goals/${plan.id}`}
+                  className="bg-white rounded-lg border border-gray-200 px-5 py-4 hover:border-gray-400 hover:shadow-sm transition-all flex items-center justify-between gap-4"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-gray-900">{plan.name}</p>
+                      {goal.status === 'paused' && <span className="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500">paused</span>}
+                    </div>
+                    <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">{goal.objective}</p>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0 text-sm">
+                    {needsYou > 0 && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 font-medium">{needsYou} need{needsYou === 1 ? 's' : ''} you</span>
+                    )}
+                    <span className="text-gray-400 tabular-nums">{open} open</span>
+                    {lastRun && <span className="text-gray-400">· last run {lastRun.status}</span>}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
         {active.length === 0 && archived.length === 0 ? (
           <div className="text-center py-24">
             <h2 className="text-2xl font-medium text-gray-700 mb-2">What do you want to work on?</h2>

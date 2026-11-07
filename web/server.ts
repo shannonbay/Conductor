@@ -5,6 +5,7 @@ import { WebSocketServer } from 'ws'
 import { registerClient, unregisterClient } from './lib/ws-broadcaster.js'
 import { startWatchingPlan, startPoller } from './lib/mcp-poller.js'
 import { allowedHosts, isAllowedRequest } from './lib/request-guard.js'
+import { startGoalScheduler } from './lib/goal-scheduler.js'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = process.env.HOST ?? 'localhost'
@@ -54,6 +55,7 @@ app.prepare().then(() => {
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`)
     startPoller()
+    startGoalScheduler()
   })
 }).catch((err) => {
   console.error('> Failed to start server:', err)

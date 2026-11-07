@@ -14,7 +14,8 @@ const CreatePlanSchema = z.object({
 export async function GET(req: NextRequest) {
   try {
     const status = (req.nextUrl.searchParams.get('status') ?? 'active') as 'active' | 'archived' | 'all'
-    const plans = listPlans(status)
+    // Persistent goals have their own list (/api/goals)
+    const plans = listPlans(status).filter((p) => p.kind !== 'goal')
     const result = plans.map((p) => ({ ...p, tree_stats: getTreeStats(p.id) }))
     return ok(result)
   } catch (e) {
