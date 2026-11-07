@@ -1,4 +1,4 @@
-import { getPlan, getTask, getChildren, getSiblings, getTreeStats, type Task } from './db.js'
+import { getPlan, getTask, getChildren, getSiblings, getTreeStats, getGateStatus, type Task } from './db.js'
 
 type TaskSummary = {
   id: string
@@ -32,9 +32,13 @@ export function buildContext(planId: string, focusTaskId: string) {
   const children = getChildren(planId, focusTaskId)
   const tree_stats = getTreeStats(planId)
 
+  const gates = getGateStatus(focus)
+
   return {
     plan: { id: project.id, name: project.name, working_dir: project.working_dir },
     focus,
+    // Present only when the task has verification gates: what must pass, and the last check result
+    ...(gates && { gates }),
     parent: parent ? { id: parent.id, goal: parent.goal, status: parent.status } : null,
     siblings: siblings.map(summarize),
     children: children.map(summarize),

@@ -3,6 +3,7 @@ import { getPlan, getTask, insertTask, touchPlan, countAllTasks, runTransaction,
 import { buildContext } from '../context.js'
 import { ProvisionTasksSchema } from '../schema.js'
 import { record } from '../history.js'
+import { gateFieldsFrom, gateSummary } from '../gates.js'
 
 /** Compare task IDs by depth first, then numerically segment-by-segment. */
 function compareTaskIds(a: string, b: string): number {
@@ -97,12 +98,13 @@ export async function provision_tasks(args: unknown) {
         abandon_reason: null,
         state: spec.initial_state ?? {},
         depends_on: spec.depends_on ?? null,
+        ...gateFieldsFrom(spec),
         notes: null,
         created_at: now,
         updated_at: now,
       }
       insertTask(task)
-      record(planId, id, 'task_created', { goal: task.goal, status: task.status })
+      record(planId, id, 'task_created', { goal: task.goal, status: task.status, gates: gateSummary(spec) })
     }
   })
 

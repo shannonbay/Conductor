@@ -16,6 +16,7 @@ import {
   ProvisionTasksSchema,
   NextTaskSchema,
   GetHistorySchema,
+  VerifyTaskSchema,
 } from './schema.js'
 
 import { create_plan } from './tools/create_plan.js'
@@ -30,6 +31,7 @@ import { get_context } from './tools/get_context.js'
 import { provision_tasks } from './tools/provision_tasks.js'
 import { next_task } from './tools/next_task.js'
 import { get_history } from './tools/get_history.js'
+import { verify_task } from './tools/verify_task.js'
 import { handleListResources, handleReadResource } from './resources.js'
 
 const TOOLS = [
@@ -59,7 +61,7 @@ const TOOLS = [
   },
   {
     name: 'create_task',
-    description: 'Create a new task. Pass parent_id to create a child of an existing task. Omit parent_id only when creating the very first root task on an empty tree. Decompose work into sub-tasks before starting it — not after problems arise. For sequential work, create all sibling tasks upfront with depends_on and status="pending" so the dependency graph is explicit from the start. Prefer smaller, concrete tasks over large vague ones; a task should have a clear completion condition.',
+    description: 'Create a new task. Pass parent_id to create a child of an existing task. Omit parent_id only when creating the very first root task on an empty tree. Decompose work into sub-tasks before starting it — not after problems arise. For sequential work, create all sibling tasks upfront with depends_on and status="pending" so the dependency graph is explicit from the start. Prefer smaller, concrete tasks over large vague ones; a task should have a clear completion condition. Make that condition checkable with verification gates: acceptance_criteria (statements you will give evidence for), verify_command (a command that must exit 0, e.g. the relevant tests), and requires_approval for work a human should sign off. Gates can only be changed while the task is pending.',
     inputSchema: zodToJsonSchema(CreateTaskSchema),
     handler: create_task,
   },
@@ -71,7 +73,7 @@ const TOOLS = [
   },
   {
     name: 'set_status',
-    description: 'Change the status of a task. Provide task_id explicitly. When an approach fails or hits a hard blocker, abandon it with a specific reason before creating an alternative sibling — the reason is visible to sibling tasks and prevents repeating the same mistake. When completing a task, make sure its children are all resolved first. Activating a task with unmet depends_on will return an error; complete the dependencies first.',
+    description: 'Change the status of a task. Provide task_id explicitly. When an approach fails or hits a hard blocker, abandon it with a specific reason before creating an alternative sibling — the reason is visible to sibling tasks and prevents repeating the same mistake. When completing a task, make sure its children are all resolved first. Activating a task with unmet depends_on will return an error; complete the dependencies first. If the task has verification gates, completing it runs them: pass evidence (one entry per acceptance criterion, in order); Conductor runs verify_command and refuses completion if it fails (showing the output); if requires_approval is set, the task then waits for a human to approve it in the web UI.',
     inputSchema: zodToJsonSchema(SetStatusSchema),
     handler: set_status,
   },
@@ -95,7 +97,7 @@ const TOOLS = [
   },
   {
     name: 'next_task',
-    description: 'Read-only. Tells you what to work on next in the open plan, so you don\'t have to walk the tree yourself. Returns action "continue" (an active task already in progress), "start" (a pending task whose dependencies are complete), "complete" (a task whose children are all resolved — synthesize it, then complete it), or "none" with the reason (all done, or which tasks are blocked and on what). Includes the full context view for the chosen task. Call this when resuming a plan or after finishing a task.',
+    description: 'Read-only. Tells you what to work on next in the open plan, so you don\'t have to walk the tree yourself. Returns action "continue" (an active task already in progress), "start" (a pending task whose dependencies are complete), "complete" (a task whose children are all resolved — synthesize it, then complete it), "fix" (an active task whose last verify command failed), or "none" with the reason (all done, tasks awaiting human review, or which tasks are blocked and on what). Includes the full context view for the chosen task. Call this when resuming a plan or after finishing a task.',
     inputSchema: zodToJsonSchema(NextTaskSchema),
     handler: next_task,
   },
@@ -104,6 +106,12 @@ const TOOLS = [
     description: 'Read-only. Recent changes to the open plan, newest first: who made each change (actor "agent" = Claude, "human" = the web UI), what changed, and old/new values for edits and status changes. Pass task_id to see only that task and its sub-tasks. Use this when resuming a plan to see what happened since you last worked on it, including edits a human made in the UI.',
     inputSchema: zodToJsonSchema(GetHistorySchema),
     handler: get_history,
+  },
+  {
+    name: 'verify_task',
+    description: "Runs a task's verify_command now, without completing it, and returns pass/fail with the output, plus the task's gates (acceptance criteria, approval, last check). Use it to check your work before calling set_status completed. The result is saved as evidence.",
+    inputSchema: zodToJsonSchema(VerifyTaskSchema),
+    handler: verify_task,
   },
 ]
 

@@ -1,8 +1,9 @@
-import { getTask, getChildren, updateTask, touchPlan } from '../db.js'
+import { getTask, getChildren, updateTask, touchPlan, getPlan, checkCompletion, describeBlockers } from '../db.js'
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { SetStatusSchema } from '../schema.js'
 import { record } from '../history.js'
+import { hasGates } from '@conductor/core'
 
 export async function set_status(args: unknown) {
   const input = SetStatusSchema.parse(args)
@@ -58,12 +59,39 @@ export async function set_status(args: unknown) {
       }
       warning = `Warning: ${unfinished.length} child task(s) are not yet completed or abandoned: ${ids}`
     }
+
+    // Verification gates: criteria evidence, verify command, human approval
+    const outcome = await checkCompletion(getPlan(planId)!, task, { actor: 'agent', evidence: input.evidence })
+    if (outcome.outcome === 'blocked') {
+      record(planId, input.task_id, 'verification_failed', {
+        gates: outcome.blockers.map((b) => b.gate),
+        message: outcome.blockers.map((b) => b.message).join(' '),
+      })
+      throw new Error(`Cannot complete task ${input.task_id}: verification failed.\n\n${describeBlockers(outcome.blockers)}`)
+    }
+    if (outcome.outcome === 'awaiting_review') {
+      if (!task.review_requested_at) {
+        if (input.result !== undefined) {
+          updateTask(planId, input.task_id, { result: input.result, updated_at: new Date().toISOString() })
+        }
+        touchPlan(planId)
+        record(planId, input.task_id, 'approval_requested', input.result !== undefined ? { result: input.result } : {})
+      }
+      return {
+        ...buildContext(planId, input.task_id),
+        awaiting_review: true,
+        message: `All automatic checks passed. Task ${input.task_id} is now waiting for a human to approve it in the web UI — ` +
+          'it stays active until then. Move on to other work (next_task skips it); if it is rejected, the feedback will be added to its notes.',
+      }
+    }
   }
 
   const now = new Date().toISOString()
   const fields: Record<string, unknown> = { status: input.status, updated_at: now }
   if (input.status === 'abandoned') fields.abandon_reason = input.reason!
   if (input.result !== undefined) fields.result = input.result
+  // Leaving the task (e.g. abandoning it) cancels a pending review request
+  if (input.status !== 'completed' && task.review_requested_at) fields.review_requested_at = null
 
   updateTask(planId, input.task_id, fields as Parameters<typeof updateTask>[2])
   touchPlan(planId)
@@ -72,6 +100,7 @@ export async function set_status(args: unknown) {
     to: input.status,
     ...(input.reason !== undefined && { reason: input.reason }),
     ...(input.result !== undefined && { result: input.result, previous_result: task.result }),
+    ...(input.status === 'completed' && hasGates(task) && { verified: true }),
   })
 
   const context = buildContext(planId, input.task_id)

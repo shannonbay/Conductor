@@ -3,6 +3,7 @@ import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { CreateTaskSchema } from '../schema.js'
 import { record } from '../history.js'
+import { gateFieldsFrom, gateSummary } from '../gates.js'
 
 export async function create_task(args: unknown) {
   const input = CreateTaskSchema.parse(args)
@@ -61,13 +62,14 @@ export async function create_task(args: unknown) {
     state: input.initial_state ?? {},
     depends_on: input.depends_on ?? null,
     notes: null,
+    ...gateFieldsFrom(input),
     created_at: now,
     updated_at: now,
   }
 
   insertTask(task)
   touchPlan(planId)
-  record(planId, newId, 'task_created', { goal: input.goal, status: input.status })
+  record(planId, newId, 'task_created', { goal: input.goal, status: input.status, gates: gateSummary(input) })
 
   return buildContext(planId, newId)
 }

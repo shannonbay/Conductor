@@ -32,6 +32,12 @@ export const updateTask = (planId: string, taskId: string, fields: Partial<Omit<
 export const insertEvent = (event: core.NewEvent) => core.insertEvent(db, event)
 export const getEvents = (planId: string, query?: core.EventQuery) => core.getEvents(db, planId, query)
 
+export const checkCompletion = (plan: PlanRow, task: Task, input: core.CompletionInput) => core.checkCompletion(db, plan, task, input)
+export const runChecks = (plan: PlanRow, task: Task) => core.runChecks(db, plan, task, 'agent')
+export const getGateStatus = (task: Task) => core.getGateStatus(db, task)
+export const getLatestVerification = (planId: string, taskId: string, gate: core.GateKind) => core.getLatestVerification(db, planId, taskId, gate)
+export const describeBlockers = core.describeBlockers
+
 export const clearAllData = () => core.clearAllData(db)
 
 export function runTransaction<T>(fn: () => T): T {
