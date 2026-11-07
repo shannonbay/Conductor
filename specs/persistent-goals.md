@@ -1,6 +1,6 @@
 # Persistent Goals — Standing Objectives for Long-Lived Agent Work
 
-**Status:** Draft · **Date:** 2026-11-07 · **Builds on:** `task-tree-mcp.md`, verification gates (`core/src/gates.ts`)
+**Status:** Phases 1–2 built (2026-11-07) · **Date:** 2026-11-07 · **Builds on:** `task-tree-mcp.md`, verification gates (`core/src/gates.ts`)
 
 A persistent goal is an objective that never finishes — "keep my inbox under control", "keep dependencies up to date", "triage new GitHub issues". Instead of one task tree that an agent works through and archives, a goal wakes an agent up on a schedule, gives it a short brief, lets it handle whatever is new, and records what it did for the next run. Work items come and go; the goal, its instructions and what it has learned persist.
 
@@ -360,6 +360,8 @@ After a few weeks, the approval stats show 40/40 `email.draft_reply` proposals a
 - Health checks with trends; failing checks trigger runs.
 - Cron and event triggers (event endpoint behind the request guard plus a per-goal secret).
 - Per-category approval stats driving "promote to auto" suggestions.
+
+*As built:* the guard hook is **opt-in** (`npm run setup-hooks --prefix mcp -- --guard`) because a global PreToolUse hook runs on every tool call (~0.3 s each on Windows). It ties a Claude Code session to its run when the agent calls `get_goal_brief` with a `run_id`, and allows one guarded call per approved proposal. The "promote to auto" threshold is 10 approvals in a row.
 
 **Phase 3 — Off-machine**
 - Execute runs as scheduled cloud agents instead of through the local channel, with Conductor's state reachable from them.

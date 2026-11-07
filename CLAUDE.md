@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Conductor is a **Model Context Protocol (MCP) server** that provides persistent, hierarchical task management for LLM agents, paired with a **Next.js web UI** for visual monitoring and management. Agents decompose goals into a task tree, track progress, handle failures by branching to alternatives, and resume work across sessions — all without holding the full plan in context.
+Conductor runs **persistent goals** for AI agents — standing objectives like "keep my inbox under control" that never finish. A goal's state (instructions, open work items, memory, human decisions, run history) lives in SQLite outside any agent; a scheduler in the web app starts fresh Claude Code runs through the channel, each run reads a one-call brief (`get_goal_brief`) and ends with a summary (`end_run`), and a human approves proposed actions from the goal page. The main use case is goals; **plans** (finite task trees with verification gates) are the underlying building block and still work on their own for long multi-session projects.
+
+Three parts: an **MCP server** (`mcp/`, the tools agents call), a **Next.js web app** (`web/`, goal pages, approvals, scheduler, runner), and a **channel server** (`channel/`, bridges the web app into a running Claude Code session). Shared schema and logic live in `core/`. Design spec: `specs/persistent-goals.md` (phases 1 and 2 built).
 
 ## Repository Structure
 
@@ -161,12 +163,16 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **Using gates in this repo:** when you plan work here, give tasks a `verify_command` where one exists (e.g. `npm test --prefix mcp -- src/tests/tools/gates.test.ts`, `npm run typecheck --prefix web`) and acceptance criteria for behaviour you'll need to show. Run `verify_task` before completing.
 
-**Persistent goals** (spec: `specs/persistent-goals.md`; phase 1 built): a goal is a plan with `kind = 'goal'` plus a `goals` row; its work items are ordinary root-level tasks with `run_id`, `external_ref` (unique per goal) and `archived_at`.
+**Persistent goals** (spec: `specs/persistent-goals.md`; phases 1–2 built): a goal is a plan with `kind = 'goal'` plus a `goals` row; its work items are ordinary root-level tasks with `run_id`, `external_ref` (unique per goal) and `archived_at`.
 - Storage in `core/src/goals.ts`, behaviour in `core/src/goal-engine.ts` (`addItem`, `buildBrief`, run lifecycle, `archiveResolved`, `decideTick`).
 - Autonomy per action category: `off` refused by `addItem`, `propose` → item with `requires_approval` and `review_requested_at` set at creation, `auto` → recorded as completed. Unlisted categories default to `propose`.
 - Approving a proposal (`state.action`) does **not** complete it — it stays active with `approved_at` set, and the next run carries it out (`next_task` returns `execute`). The web approve route queues a run. Rejecting on a goal adds a `feedback` memory.
 - Runs: `web/lib/goal-scheduler.ts` (30 s tick in `server.ts`) starts due runs via `web/lib/goal-runner.ts` → channel `run_goal` request → agent calls `get_goal_brief(goal_id, run_id)`, works, `end_run`, `agent_done`. A run that ends without `end_run` is marked failed. Scheduler and runner state live on `globalThis` because Next.js API routes load separate module instances from `server.ts`.
 - Goals are hidden from plan lists (`/api/plans`, home page, MCP `list_plans`).
+- Schedules (`core/src/schedule.ts`): one per goal, `interval` (+ active hours) or `cron` (5-field, local time, own parser — no dependency); webhooks store only a sha256 of the secret (`/api/goals/:id/trigger`, Bearer or `x-conductor-secret`; repeats coalesce into the open run).
+- Health (`core/src/health.ts`): `health_command` exits 0 while the goal is met; the last number printed is the trend value. The scheduler runs due checks each tick; a failure queues a run with trigger `health` if `health_triggers_run`.
+- Guard (`core/src/guard.ts`, hook `mcp/src/goal-guard.ts`): `tool_map` maps tool-name patterns to categories. The PreToolUse hook binds the Claude Code `session_id` to the run when it sees `get_goal_brief` with a `run_id`, then denies `off` categories and `propose` categories without an unused approved proposal (one allowed call per approved item, counted in `goal_tool_calls`). Outside goal runs it allows everything; it fails open on errors. Opt-in: `npm run setup-hooks --prefix mcp -- --guard`.
+- "Switch to auto" suggestions: a `propose` category whose last 10 decisions were all approvals (`getAutonomySuggestions` in `web/lib/db.ts`).
 
 **Change history**: every mutating MCP tool calls `record()` (`mcp/src/history.ts`) to write an `events` row with `actor: 'agent'`, `via: 'mcp'` and, for edits/status changes, old and new values. The web app writes `actor: 'human'` rows via `recordEvent()`. Both show in the activity feed and in the `get_history` tool. A new mutating MCP tool must call `record()` too.
 

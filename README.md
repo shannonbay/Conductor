@@ -1,75 +1,71 @@
 # Conductor
 
-A persistent, hierarchical task tree for LLM agents — built as an MCP server with an optional web UI for monitoring and control.
+Standing goals for AI agents — "keep my inbox under control", "triage new issues", "keep dependencies current" — run by Claude Code, checked by you.
 
-When Claude Code (or any MCP-capable agent) works on anything beyond a single session, it loses the plot. No memory of what it already tried, no structured way to decompose goals, no way to recover from failures without starting over. And when context fills up and gets compacted, it forgets earlier attempts and retries the same failed approaches.
+An agent session ends; the work doesn't. Conductor keeps everything a long-lived goal needs **outside** the agent: its instructions, what's open, what you approved or rejected, and the rules it has learned. On a schedule (or a webhook, or a failing health check) it starts a fresh Claude Code run, hands it a one-call brief, and records what the run did for the next one. You stay in charge from a web page: approve or reject proposed actions, and let the agent act on its own one category at a time once you trust it.
 
-Conductor gives the agent a task tree that lives **outside the context window entirely**. The agent decomposes work into sub-tasks, tracks progress in each, records results and structured state, and handles failures by abandoning dead ends with a reason. When it branches to an alternative approach, it can see exactly why the previous one failed — so it doesn't repeat the same mistake even if the original attempt has long since been compacted away.
-
-## How it works
-
-The agent operates on a **plan** — a named project with a working directory. A plan contains a tree of **tasks**, where each task has:
-
-- A **goal** (what it's trying to do)
-- A **status** (`pending` → `active` → `completed` | `abandoned`)
-- A **result** (human-readable summary when done)
-- A **state** (structured JSON for passing data between tasks)
-- An **abandon_reason** (why this approach failed, visible to sibling alternatives)
-- Optional **depends_on** (blocks activation until dependencies complete)
-
-**Task IDs are tree addresses**, not random identifiers. `"1"` is the root, `"1.2"` is the second child of root, `"1.2.3"` is the third child of `"1.2"`. This makes the tree structure legible in every tool response without needing a separate tree-fetch.
-
-At each turn, the agent sees only its **immediate context**: the current task, its parent, siblings, children, and tree-wide stats. This keeps each API call small regardless of how large the overall plan grows.
-
-## MCP tools
-
-| Tool | Description |
-|---|---|
-| `list_plans` | List active (or all) plans |
-| `create_plan` | Create a new plan with a name and working directory |
-| `open_plan` | Resume an existing plan; restores archived plans automatically |
-| `archive_plan` | Mark a completed plan as archived |
-| `create_task` | Create a child task under the current focus task |
-| `get_context` | Read current task + parent, siblings, children, and tree stats |
-| `update_task` | Record progress: result summary, structured state patch, notes |
-| `set_status` | Transition a task to `active`, `completed`, or `abandoned` |
-| `provision_tasks` | Bulk-create a list of child tasks in one call |
-| `synthesize` | Summarise direct children grouped by completion status |
-| `next_task` | What to work on next: continue an active task, start a ready one, or complete a finished parent — or why nothing is ready |
-| `get_history` | Recent changes to the plan (by Claude or in the UI), with old and new values |
-| `verify_task` | Run a task's verify command now, without completing it |
-| `list_goals` | List persistent goals with open items and items waiting for review |
-| `get_goal_brief` | Start of a goal run: objective, instructions, memory, your decisions since the last run, open items, recent run summaries |
-| `add_item` | Add a goal work item (deduplicated by `external_ref`); actions are proposed, recorded or refused per the goal's autonomy |
-| `remember` / `forget` | Add a fact, rule or preference to a goal's memory; deactivate one an agent added |
-| `end_run` | Finish a goal run with a summary for the next run |
-| `run_goal` | Queue a goal run now |
-
-## Verification gates
-
-A task can carry checks that must pass before it can be marked completed:
-
-- **Acceptance criteria** — statements the agent must give evidence for when completing (`set_status` with `evidence`, one entry per criterion).
-- **Verify command** — e.g. `npm test -- auth`; Conductor runs it in the plan's working directory and refuses completion unless it exits 0 (default timeout 5 minutes, last 4 KB of output kept).
-- **Human approval** — the task waits for you to Approve or Reject (with feedback) in the web UI.
-
-Agents set gates when they create tasks and can't weaken them once a task has started. In the web UI you can edit gates, run checks, approve or reject, and — if a check is wrong — complete a task anyway with a recorded reason. Every check result is kept as evidence in the task's check history.
+It's an **MCP server** (the tools agents use), a **web app** (the goals page, scheduler and approvals), and a **channel** into a running Claude Code session (where the runs happen). Everything lives in one local SQLite database.
 
 ## Persistent goals
 
-For work that never finishes — "keep my inbox under control", "triage new issues". A goal wakes an agent on a schedule (or when you click **Run now**); each run starts fresh, reads a one-call brief, handles what's new, and leaves a summary for the next run. Details: [`specs/persistent-goals.md`](specs/persistent-goals.md).
+A goal is an objective that never finishes. Create one from the home page (**+ New goal**) with an objective, standing instructions and a working directory.
 
-- **Create** one from the home page (**+ New goal**): objective, standing instructions, working directory, optional schedule ("every 30 minutes, 08:00–20:00").
-- **Autonomy per action category** (e.g. `email.archive`, `email.send`): *off*, *propose* (the agent asks you first — the default), or *auto*. The goal page shows how often you approved each category, so you can decide when to let it act alone.
-- **Needs you:** proposals wait on the goal page. Approve and the next run carries the action out; reject with feedback and the feedback becomes **memory** that later runs follow.
-- **Memory:** rules, facts and preferences — written by you, learned by the agent, or taken from your feedback. Pin what must always be included.
-- Work items are deduplicated by an external ID (e.g. an email's ID), and resolved items are hidden after 7 days.
+- **Runs.** Each run is a fresh Claude Code session. It calls `get_goal_brief` — objective, instructions, memory, your decisions since the last run, open items, recent run summaries, latest health — handles what's new, and ends with `end_run` and a summary for the next run.
+- **Triggers.** Every N minutes (with optional active hours), a cron expression, **Run now**, a **webhook** with a per-goal secret, or a failing **health check**.
+- **Work items.** Each thing the agent handles is an item, deduplicated by an external ID (e.g. an email's ID) so it's never handled twice. Resolved items are hidden after 7 days.
+- **Autonomy per action category** (e.g. `email.archive`, `email.send`): *off*, *propose* (the agent asks first — the default), or *auto*. Proposals wait under **Needs you**; approve and the next run carries the action out; reject with feedback and the feedback becomes **memory** later runs follow. After 10 approvals in a row, the page suggests switching that category to *auto*.
+- **Enforcement.** With tool rules (`mcp__gmail__send*` → `email.send`) and the opt-in **goal-guard** hook, Claude Code itself blocks a tool call that the goal's autonomy doesn't allow — e.g. sending mail without an approved proposal. Install it with `npm run setup-hooks --prefix mcp -- --guard` (it runs on every tool call, ~0.3 s on Windows, which is why it's opt-in).
+- **Health.** A command that exits 0 while the goal is being met; the last number it prints is charted (e.g. unread mail older than a day). A failure can start a run.
+- **Memory.** Rules, facts and preferences — written by you, learned by the agent, or taken from your feedback. Pin what must always be included.
 
-Goals only run while the web app **and** a channel-connected Claude Code session are running; `npm run doctor` warns when they can't. Conductor can't stop an agent from calling other tools directly (e.g. a mail "send" tool), so use Claude Code's permission settings to deny irreversible tools you haven't set to *auto*.
+Goals run while the web app **and** a channel-connected Claude Code session are running; `npm run doctor` tells you when they can't. Design: [`specs/persistent-goals.md`](specs/persistent-goals.md).
+
+## Plans: long work that outlives one session
+
+The same machinery works for finite projects. A **plan** is a task tree that lives outside the context window: the agent decomposes work into sub-tasks, records results and structured state, and abandons dead ends with a reason so the next attempt — or the next session — doesn't repeat them. Goals are built on plans: a goal's work items are a plan's tasks.
+
+Each task has a goal, a status (`pending` → `active` → `completed` | `abandoned`), a result, structured `state`, an `abandon_reason`, and optional `depends_on`. **Task IDs are tree addresses** — `"1.2.3"` is the third child of `"1.2"` — so structure is legible in every response. Each tool call returns only the immediate context (task, parent, siblings, children, stats), so calls stay small however big the tree grows.
+
+### Verification gates
+
+A task (or goal item) can carry checks that must pass before it's completed:
+
+- **Acceptance criteria** — the agent gives evidence for each one (`set_status` with `evidence`).
+- **Verify command** — e.g. `npm test -- auth`; Conductor runs it in the working directory and refuses completion unless it exits 0 (default timeout 5 minutes, last 4 KB of output kept).
+- **Human approval** — the task waits for you to approve or reject in the web UI.
+
+Agents can't weaken gates once a task has started. You can edit them, run checks, approve or reject, or complete a task anyway with a recorded reason. Every check result is kept as evidence.
+
+## MCP tools
+
+**Goals**
+
+| Tool | Description |
+|---|---|
+| `list_goals` | Persistent goals with open items and items waiting for review |
+| `get_goal_brief` | Start of a run: everything a fresh agent needs, in one call |
+| `add_item` | Add a work item (deduplicated by `external_ref`); actions are proposed, recorded or refused per the goal's autonomy |
+| `remember` / `forget` | Add a fact, rule or preference to the goal's memory; deactivate one an agent added |
+| `end_run` | Finish a run with a summary for the next one |
+| `run_goal` | Queue a run now |
+
+**Plans and tasks** (also used on goal items)
+
+| Tool | Description |
+|---|---|
+| `list_plans` / `create_plan` / `open_plan` / `archive_plan` | Manage plans |
+| `create_task` / `provision_tasks` | Add one task, or a whole sub-tree in one call |
+| `get_context` | Current task with parent, siblings, children and stats |
+| `update_task` | Record progress: result, structured state patch, notes |
+| `set_status` | `active`, `completed` (runs gates) or `abandoned` (with a reason) |
+| `next_task` | What to do next: continue, start, complete, fix a failed check, or carry out an approved proposal |
+| `synthesize` | Summarise a task's children before completing it |
+| `verify_task` | Run a task's verify command without completing it |
+| `get_history` | Recent changes, by agents or in the UI, with old and new values |
 
 ## Web UI
 
-An optional Next.js app connects to the same SQLite database and provides:
+The Next.js app shares the SQLite database. Besides the goals pages, it provides:
 
 - **Live task tree** — hierarchical view with status indicators, updates in real time via WebSocket
 - **Detail pane** — full task detail, state, result, notes, and inline editing
@@ -185,6 +181,14 @@ claude --dangerously-load-development-channels server:conductor-channel
 Open [http://localhost:3000](http://localhost:3000). The settings gear (⚙) shows a green dot when Claude Code is connected. The web app, MCP server, and channel server all share the same database (`~/.conductor/tasks.db`).
 
 > **Note:** `--dangerously-load-development-channels` is required during the Channels research preview (Claude Code v2.1.80+). Custom channel plugins are not yet on the approved allowlist.
+
+### Your first goal
+
+1. Give that Claude Code session the tools the goal needs (e.g. a mail MCP server for an inbox goal).
+2. In the web app, click **+ New goal**: objective, standing instructions, working directory, and a schedule — or leave it manual and use **Run now**.
+3. In the goal's **Settings**, set each action category to *off*, *propose* or *auto*. Keep anything irreversible at *propose* or *off* to start.
+4. Optional: add **tool rules** (tool name → category) and install the guard (`npm run setup-hooks --prefix mcp -- --guard`) so Claude Code blocks actions the goal doesn't allow; add a **health check** command to chart how the goal is doing.
+5. Approve or reject what lands under **Needs you**. Your rejections become memory, so the agent improves run by run.
 
 ## Checking your setup
 
