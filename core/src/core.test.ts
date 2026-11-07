@@ -3,6 +3,7 @@ import Database from 'better-sqlite3'
 import {
   openDatabase, runMigrations, insertPlan, insertTask, updateTask, updatePlan, touchPlan,
   deleteTaskTree, getPlanRevision, getTask, getChildren, getSiblings, nextChildId,
+  insertVerification, getVerifications, getLatestVerification, REVISION_TRIGGERS,
   type NewTask,
 } from './index.js'
 
@@ -81,6 +82,40 @@ describe('plan revision triggers', () => {
     insertPlan(db, plan('p2'))
     insertTask(db, task('1', 'p2'))
     expect(getPlanRevision(db, 'p1')).toBe(0)
+  })
+})
+
+describe('gate fields and verifications', () => {
+  beforeEach(() => insertPlan(db, plan()))
+
+  it('round-trips gate fields on a task', () => {
+    insertTask(db, { ...task('1'), acceptance_criteria: ['a', 'b'], verify_command: 'npm test', verify_timeout_s: 60, requires_approval: true })
+    const t = getTask(db, 'p1', '1')!
+    expect(t).toMatchObject({ acceptance_criteria: ['a', 'b'], verify_command: 'npm test', verify_timeout_s: 60, requires_approval: true, review_requested_at: null })
+    updateTask(db, 'p1', '1', { acceptance_criteria: [], verify_command: null })
+    expect(getTask(db, 'p1', '1')).toMatchObject({ acceptance_criteria: null, verify_command: null })
+  })
+
+  it('defaults gate fields to empty', () => {
+    insertTask(db, task('1'))
+    expect(getTask(db, 'p1', '1')).toMatchObject({ acceptance_criteria: null, verify_command: null, verify_timeout_s: null, requires_approval: false })
+  })
+
+  it('stores verifications newest first and bumps the plan revision', () => {
+    insertTask(db, task('1'))
+    const before = getPlanRevision(db, 'p1')!
+    insertVerification(db, { plan_id: 'p1', task_id: '1', gate: 'command', passed: false, actor: 'agent', command: 'x', exit_code: 1, output: 'boom', created_at: '2026-01-01T00:00:01Z' })
+    insertVerification(db, { plan_id: 'p1', task_id: '1', gate: 'criteria', passed: true, actor: 'agent', evidence: ['e1'], created_at: '2026-01-01T00:00:02Z' })
+    expect(getPlanRevision(db, 'p1')!).toBeGreaterThan(before)
+    const all = getVerifications(db, 'p1', '1')
+    expect(all.map((v) => v.gate)).toEqual(['criteria', 'command'])
+    expect(all[0]).toMatchObject({ passed: true, evidence: ['e1'] })
+    expect(getLatestVerification(db, 'p1', '1', 'command')).toMatchObject({ passed: false, exit_code: 1, output: 'boom' })
+  })
+
+  it('creates every revision trigger', () => {
+    const names = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all() as { name: string }[]).map((r) => r.name)
+    for (const t of REVISION_TRIGGERS) expect(names).toContain(t)
   })
 })
 

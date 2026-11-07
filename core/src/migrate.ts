@@ -1,5 +1,14 @@
 import type { Database } from 'better-sqlite3'
 
+/** Triggers that keep plans.revision current; `conductor doctor` checks they all exist. */
+export const REVISION_TRIGGERS = [
+  'trg_tasks_insert_revision',
+  'trg_tasks_update_revision',
+  'trg_tasks_delete_revision',
+  'trg_plans_update_revision',
+  'trg_verifications_insert_revision',
+] as const
+
 /**
  * The single source of truth for the Conductor schema. Both the MCP server
  * and the web app call this on startup, so whichever opens the database first
@@ -56,6 +65,10 @@ export function runMigrations(db: Database): void {
       approved_at       TEXT,
       created_by        TEXT DEFAULT 'human',
       assigned_to       TEXT,
+      acceptance_criteria TEXT,
+      verify_command    TEXT,
+      verify_timeout_s  INTEGER,
+      review_requested_at TEXT,
       created_at        TEXT NOT NULL,
       updated_at        TEXT NOT NULL,
       PRIMARY KEY (id, plan_id)
@@ -85,6 +98,10 @@ export function runMigrations(db: Database): void {
     ['approved_at', 'TEXT'],
     ['created_by', "TEXT DEFAULT 'human'"],
     ['assigned_to', 'TEXT'],
+    ['acceptance_criteria', 'TEXT'],
+    ['verify_command', 'TEXT'],
+    ['verify_timeout_s', 'INTEGER'],
+    ['review_requested_at', 'TEXT'],
   ]
   for (const [col, def] of addedTaskColumns) {
     try { db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
@@ -153,6 +170,28 @@ export function runMigrations(db: Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_events_task ON events(plan_id, task_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_events_plan ON events(plan_id, created_at);
+  `)
+
+  // ── Verification results (gate evidence) ────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS verifications (
+      id          TEXT PRIMARY KEY,
+      plan_id     TEXT NOT NULL REFERENCES plans(id),
+      task_id     TEXT NOT NULL,
+      gate        TEXT NOT NULL CHECK (gate IN ('criteria', 'command', 'approval', 'override')),
+      passed      INTEGER NOT NULL,
+      actor       TEXT NOT NULL CHECK (actor IN ('human', 'agent')),
+      command     TEXT,
+      exit_code   INTEGER,
+      output      TEXT,
+      evidence    TEXT,
+      duration_ms INTEGER,
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_verifications_task ON verifications(plan_id, task_id, created_at);
+
+    CREATE TRIGGER IF NOT EXISTS trg_verifications_insert_revision AFTER INSERT ON verifications
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
   `)
 
   // ── Agent transcripts ───────────────────────────────────────────────────────

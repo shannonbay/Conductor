@@ -73,15 +73,16 @@ export async function checkDatabase(o: DoctorOptions): Promise<CheckResult[]> {
     try {
       const plans = (db.prepare('SELECT COUNT(*) n FROM plans').get() as { n: number }).n
       const tasks = (db.prepare('SELECT COUNT(*) n FROM tasks').get() as { n: number }).n
-      const triggers = (db.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type = 'trigger' AND name LIKE 'trg_%revision'").get() as { n: number }).n
+      const present = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all() as { name: string }[]).map((r) => r.name))
+      const missing = core.REVISION_TRIGGERS.filter((t) => !present.has(t))
       const mode = String(db.pragma('journal_mode', { simple: true }))
       const results = [
         ok('SQLite native module', 'better-sqlite3 loads'),
         ok('Database', `${path} — ${plans} plans, ${tasks} tasks`),
       ]
-      results.push(triggers === 4
+      results.push(missing.length === 0
         ? ok('Schema', 'up to date (revision triggers present)')
-        : fail('Schema', `expected 4 revision triggers, found ${triggers}`, 'Rebuild core (`npm run build --prefix core`) and rerun.'))
+        : fail('Schema', `missing triggers: ${missing.join(', ')}`, 'Rebuild core (`npm run build --prefix core`) and rerun.'))
       if (path !== ':memory:' && mode !== 'wal') {
         results.push(warn('Journal mode', `${mode} (expected wal)`, 'Close other programs using the database and rerun.'))
       }

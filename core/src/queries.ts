@@ -1,5 +1,8 @@
 import type { Database } from 'better-sqlite3'
-import type { Event, NewEvent, NewPlan, NewTask, PlanRow, Task, TreeStats } from './types.js'
+import { randomUUID } from 'crypto'
+import type {
+  Event, GateKind, NewEvent, NewPlan, NewTask, NewVerification, PlanRow, Task, TreeStats, Verification,
+} from './types.js'
 
 type Row = Record<string, unknown>
 
@@ -10,6 +13,10 @@ export function deserializeTask(row: Row): Task {
     depends_on: row.depends_on ? JSON.parse(row.depends_on as string) : null,
     notes: (row.notes as string | null | undefined) ?? null,
     requires_approval: Boolean(row.requires_approval),
+    acceptance_criteria: row.acceptance_criteria ? JSON.parse(row.acceptance_criteria as string) : null,
+    verify_command: (row.verify_command as string | null | undefined) ?? null,
+    verify_timeout_s: (row.verify_timeout_s as number | null | undefined) ?? null,
+    review_requested_at: (row.review_requested_at as string | null | undefined) ?? null,
   } as Task
 }
 
@@ -134,8 +141,9 @@ export function insertTask(db: Database, task: NewTask): void {
     INSERT INTO tasks (
       id, plan_id, goal, status, result, abandon_reason, state, depends_on, notes,
       locked_by, locked_at, requires_approval, approved_by, approved_at, created_by, assigned_to,
+      acceptance_criteria, verify_command, verify_timeout_s, review_requested_at,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     task.id,
     task.plan_id,
@@ -153,6 +161,10 @@ export function insertTask(db: Database, task: NewTask): void {
     task.approved_at ?? null,
     task.created_by ?? 'human',
     task.assigned_to ?? null,
+    task.acceptance_criteria?.length ? JSON.stringify(task.acceptance_criteria) : null,
+    task.verify_command ?? null,
+    task.verify_timeout_s ?? null,
+    task.review_requested_at ?? null,
     task.created_at,
     task.updated_at,
   )
@@ -163,6 +175,9 @@ export function updateTask(db: Database, planId: string, taskId: string, fields:
   if ('state' in fields) serialized.state = JSON.stringify(fields.state)
   if ('depends_on' in fields) serialized.depends_on = fields.depends_on ? JSON.stringify(fields.depends_on) : null
   if ('requires_approval' in fields) serialized.requires_approval = fields.requires_approval ? 1 : 0
+  if ('acceptance_criteria' in fields) {
+    serialized.acceptance_criteria = fields.acceptance_criteria?.length ? JSON.stringify(fields.acceptance_criteria) : null
+  }
   const { sql, values } = setClause(serialized)
   if (!sql) return
   db.prepare(`UPDATE tasks SET ${sql} WHERE id = ? AND plan_id = ?`).run(...values, taskId, planId)
@@ -218,8 +233,54 @@ export function getEvents(db: Database, planId: string, query: EventQuery = {}):
   return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload as string) } as Event))
 }
 
+// ── Verifications (gate evidence) ─────────────────────────────────────────────
+
+export function insertVerification(db: Database, v: NewVerification): Verification {
+  const row: Verification = {
+    id: randomUUID(),
+    command: null,
+    exit_code: null,
+    output: null,
+    evidence: null,
+    duration_ms: null,
+    created_at: new Date().toISOString(),
+    ...v,
+  }
+  db.prepare(`
+    INSERT INTO verifications (id, plan_id, task_id, gate, passed, actor, command, exit_code, output, evidence, duration_ms, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    row.id, row.plan_id, row.task_id, row.gate, row.passed ? 1 : 0, row.actor,
+    row.command, row.exit_code, row.output, row.evidence ? JSON.stringify(row.evidence) : null,
+    row.duration_ms, row.created_at,
+  )
+  return row
+}
+
+function deserializeVerification(r: Row): Verification {
+  return {
+    ...r,
+    passed: Boolean(r.passed),
+    evidence: r.evidence ? JSON.parse(r.evidence as string) : null,
+  } as Verification
+}
+
+/** A task's check results, newest first. */
+export function getVerifications(db: Database, planId: string, taskId: string, limit = 50): Verification[] {
+  const rows = db.prepare('SELECT * FROM verifications WHERE plan_id = ? AND task_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?')
+    .all(planId, taskId, limit) as Row[]
+  return rows.map(deserializeVerification)
+}
+
+/** The most recent result for one gate of a task. */
+export function getLatestVerification(db: Database, planId: string, taskId: string, gate: GateKind): Verification | undefined {
+  const row = db.prepare('SELECT * FROM verifications WHERE plan_id = ? AND task_id = ? AND gate = ? ORDER BY created_at DESC, rowid DESC LIMIT 1')
+    .get(planId, taskId, gate) as Row | undefined
+  return row ? deserializeVerification(row) : undefined
+}
+
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 export function clearAllData(db: Database): void {
-  db.exec('DELETE FROM transcript_messages; DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
+  db.exec('DELETE FROM verifications; DELETE FROM transcript_messages; DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
 }
