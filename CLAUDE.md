@@ -153,6 +153,14 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **Strict completion (opt-in):** with `CONDUCTOR_STRICT_COMPLETE=1`, `set_status` to `completed` throws while any child is not completed/abandoned (otherwise it's a warning in the response).
 
+**Verification gates** (`core/src/gates.ts`): a task can carry `acceptance_criteria`, a `verify_command` and `requires_approval`. Completion runs them through `checkCompletion()`, shared by the MCP `set_status` and the web status route:
+- Agents must pass `evidence` (one entry per criterion), the command must exit 0 (run in the plan's `working_dir`, default timeout 300s, last 4 KB of output kept), and approval tasks then wait with `review_requested_at` set (status stays `active`).
+- A human completing in the UI skips the criteria evidence and counts as the approval, but the command must still pass unless they override with a reason (`/override` route). Agents can't override.
+- Agents can only change gate fields while a task is pending (except turning approval on); humans can edit them any time via PATCH.
+- Every check result is a `verifications` row (the evidence); the web shows them in `GatesPanel`.
+
+**Using gates in this repo:** when you plan work here, give tasks a `verify_command` where one exists (e.g. `npm test --prefix mcp -- src/tests/tools/gates.test.ts`, `npm run typecheck --prefix web`) and acceptance criteria for behaviour you'll need to show. Run `verify_task` before completing.
+
 **Change history**: every mutating MCP tool calls `record()` (`mcp/src/history.ts`) to write an `events` row with `actor: 'agent'`, `via: 'mcp'` and, for edits/status changes, old and new values. The web app writes `actor: 'human'` rows via `recordEvent()`. Both show in the activity feed and in the `get_history` tool. A new mutating MCP tool must call `record()` too.
 
 **`next_task`** walks the open plan in tree order and returns `continue` (active leaf), `start` (pending leaf with dependencies met), `complete` (all children resolved) or `none` with blockers.

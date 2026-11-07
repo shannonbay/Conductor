@@ -37,6 +37,17 @@ At each turn, the agent sees only its **immediate context**: the current task, i
 | `synthesize` | Summarise direct children grouped by completion status |
 | `next_task` | What to work on next: continue an active task, start a ready one, or complete a finished parent — or why nothing is ready |
 | `get_history` | Recent changes to the plan (by Claude or in the UI), with old and new values |
+| `verify_task` | Run a task's verify command now, without completing it |
+
+## Verification gates
+
+A task can carry checks that must pass before it can be marked completed:
+
+- **Acceptance criteria** — statements the agent must give evidence for when completing (`set_status` with `evidence`, one entry per criterion).
+- **Verify command** — e.g. `npm test -- auth`; Conductor runs it in the plan's working directory and refuses completion unless it exits 0 (default timeout 5 minutes, last 4 KB of output kept).
+- **Human approval** — the task waits for you to Approve or Reject (with feedback) in the web UI.
+
+Agents set gates when they create tasks and can't weaken them once a task has started. In the web UI you can edit gates, run checks, approve or reject, and — if a check is wrong — complete a task anyway with a recorded reason. Every check result is kept as evidence in the task's check history.
 
 ## Web UI
 

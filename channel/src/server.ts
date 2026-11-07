@@ -80,7 +80,7 @@ function buildChannelContent(requestId: string, type: string, payload: RequestPa
   switch (type) {
     case 'run_agent': {
       const p = payload as RunAgentPayload
-      return `Work on plan "${p.planName}" (plan ID: ${p.planId}), starting from task ${p.rootTaskId}. Working directory: ${p.workingDir}. Use the conductor MCP server tools to manage the task tree (create_task, update_task, set_status, get_context, etc.). Call agent_update periodically to report progress. Call agent_done when you have finished all work on the task tree.`
+      return `Work on plan "${p.planName}" (plan ID: ${p.planId}), starting from task ${p.rootTaskId}. Working directory: ${p.workingDir}. Use the conductor MCP server tools to manage the task tree (create_task, update_task, set_status, get_context, etc.); call next_task to find what to do next. When you create tasks, give them verification gates where it makes sense: acceptance_criteria you can show evidence for, and a verify_command (e.g. the relevant tests) that must pass. Completing a gated task runs its checks: pass evidence for each criterion, and if a check fails, fix the problem rather than working around it. Tasks that need human approval wait for review; move on to other work. Call agent_update periodically to report progress. Call agent_done when you have finished all work on the task tree (tasks still waiting for review count as finished for you).`
     }
     case 'generate_plan': {
       const p = payload as GeneratePlanPayload
