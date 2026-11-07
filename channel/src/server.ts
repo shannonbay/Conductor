@@ -47,6 +47,14 @@ interface RunAgentPayload {
   workingDir: string
 }
 
+interface RunGoalPayload {
+  planId: string
+  runId: string
+  goalName: string
+  workingDir: string
+  maxRunMinutes: number
+}
+
 interface GeneratePlanPayload {
   planId: string
   planName: string
@@ -72,7 +80,7 @@ interface ModifyTasksPayload {
   instruction: string
 }
 
-type RequestPayload = RunAgentPayload | GeneratePlanPayload | PlanTasksPayload | ModifyTasksPayload
+type RequestPayload = RunAgentPayload | RunGoalPayload | GeneratePlanPayload | PlanTasksPayload | ModifyTasksPayload
 
 // ── Channel content builders ──────────────────────────────────────────────────
 
@@ -81,6 +89,10 @@ function buildChannelContent(requestId: string, type: string, payload: RequestPa
     case 'run_agent': {
       const p = payload as RunAgentPayload
       return `Work on plan "${p.planName}" (plan ID: ${p.planId}), starting from task ${p.rootTaskId}. Working directory: ${p.workingDir}. Use the conductor MCP server tools to manage the task tree (create_task, update_task, set_status, get_context, etc.); call next_task to find what to do next. When you create tasks, give them verification gates where it makes sense: acceptance_criteria you can show evidence for, and a verify_command (e.g. the relevant tests) that must pass. Completing a gated task runs its checks: pass evidence for each criterion, and if a check fails, fix the problem rather than working around it. Tasks that need human approval wait for review; move on to other work. Call agent_update periodically to report progress. Call agent_done when you have finished all work on the task tree (tasks still waiting for review count as finished for you).`
+    }
+    case 'run_goal': {
+      const p = payload as RunGoalPayload
+      return `Run persistent goal "${p.goalName}" (goal ID: ${p.planId}, run ID: ${p.runId}). Working directory: ${p.workingDir}. You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.planId}" and run_id "${p.runId}" first — it has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries. Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal's state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category's autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). Save anything future runs should know with remember. You have about ${p.maxRunMinutes} minutes; leave the rest for the next run. Finish with end_run (a short summary), then call agent_done. Call agent_update now and then so the human can follow along.`
     }
     case 'generate_plan': {
       const p = payload as GeneratePlanPayload
@@ -133,6 +145,7 @@ const mcp = new Server(
 
 For each request type, call the corresponding reply tool with the exact request_id echoed back:
 - run_agent: work on the task tree using the conductor MCP server tools. Call agent_update to report progress. Call agent_done when finished.
+- run_goal: one run of a persistent goal. Call get_goal_brief first, do the work, finish with end_run, then agent_done.
 - generate_plan: explore the working_dir with your file tools, then call plan_proposal with a structured task tree.
 - plan_tasks: propose child task decompositions, then call tasks_proposal with a JSON array.
 - modify_tasks: propose task tree modifications, then call tasks_diff with a diff object.
@@ -457,7 +470,7 @@ const httpServer = createServer(async (req: IncomingMessage, res: ServerResponse
       currentRequestId = requestId
       const content = buildChannelContent(requestId, type, payload)
 
-      if (type === 'run_agent') {
+      if (type === 'run_agent' || type === 'run_goal') {
         // Non-blocking: return 202, agent events come over SSE
         await mcp.notification({
           method: 'notifications/claude/channel',
