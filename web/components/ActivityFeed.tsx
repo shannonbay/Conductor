@@ -23,6 +23,12 @@ const eventLabels: Record<string, string> = {
   plan_archived: 'archived plan',
   plan_restored: 'restored plan',
   task_deleted: 'deleted task',
+  verification_run: 'ran checks on',
+  verification_failed: 'verification failed for',
+  verification_overridden: 'overrode verification for',
+  approval_requested: 'requested review of',
+  approval_granted: 'approved',
+  review_rejected: 'sent back',
 }
 
 function formatTime(iso: string): string {

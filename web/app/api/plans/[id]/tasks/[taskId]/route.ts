@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { getPlan, getTask, getChildren, getSiblings, getTreeStats, updateTask, deleteTaskTree, touchPlan } from '@/lib/db'
+import { getPlan, getTask, getChildren, getSiblings, getTreeStats, updateTask, deleteTaskTree, touchPlan, getGateStatus, getVerifications } from '@/lib/db'
 import { recordEvent } from '@/lib/event-log'
 import { ok, err, notFound, conflict, serverError } from '@/lib/api-utils'
 
@@ -10,6 +10,11 @@ const UpdateTaskSchema = z.object({
   result: z.string().nullable().optional(),
   assigned_to: z.enum(['human', 'agent']).nullable().optional(),
   state_patch: z.record(z.unknown()).optional(),
+  // Verification gates — humans can edit these at any time (agents only while pending)
+  acceptance_criteria: z.array(z.string().min(1)).max(20).optional(),
+  verify_command: z.string().min(1).nullable().optional(),
+  verify_timeout_s: z.number().int().min(1).max(3600).nullable().optional(),
+  requires_approval: z.boolean().optional(),
 })
 
 type Params = { params: Promise<{ id: string; taskId: string }> }
@@ -35,6 +40,8 @@ export async function GET(_req: NextRequest, { params }: Params) {
       siblings: siblings.map((s) => ({ id: s.id, goal: s.goal, status: s.status, result: s.result, abandon_reason: s.abandon_reason })),
       children: children.map((c) => ({ id: c.id, goal: c.goal, status: c.status, result: c.result, abandon_reason: c.abandon_reason })),
       tree_stats: getTreeStats(planId),
+      gates: getGateStatus(task),
+      verifications: getVerifications(planId, taskId, 20),
     })
   } catch (e) {
     return serverError(e)
@@ -53,7 +60,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     const parsed = UpdateTaskSchema.safeParse(body)
     if (!parsed.success) return err(parsed.error.message)
 
-    const { goal, notes, result, assigned_to, state_patch } = parsed.data
+    const { goal, notes, result, assigned_to, state_patch, acceptance_criteria, verify_command, verify_timeout_s, requires_approval } = parsed.data
     const now = new Date().toISOString()
     const fields: Record<string, unknown> = { updated_at: now }
 
@@ -63,6 +70,14 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (assigned_to !== undefined) fields['assigned_to'] = assigned_to
     if (state_patch) {
       fields['state'] = { ...task.state, ...state_patch }
+    }
+    if (acceptance_criteria !== undefined) fields['acceptance_criteria'] = acceptance_criteria
+    if (verify_command !== undefined) fields['verify_command'] = verify_command
+    if (verify_timeout_s !== undefined) fields['verify_timeout_s'] = verify_timeout_s
+    if (requires_approval !== undefined) {
+      fields['requires_approval'] = requires_approval
+      // Turning approval off releases a task that was waiting for review
+      if (!requires_approval) fields['review_requested_at'] = null
     }
 
     updateTask(planId, taskId, fields)

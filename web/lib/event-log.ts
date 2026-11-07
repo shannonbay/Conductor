@@ -24,6 +24,10 @@ export type EventType =
   | 'plan_archived'
   | 'plan_restored'
   | 'task_deleted'
+  | 'verification_run'
+  | 'verification_failed'
+  | 'verification_overridden'
+  | 'review_rejected'
 
 interface RecordEventOptions {
   planId: string

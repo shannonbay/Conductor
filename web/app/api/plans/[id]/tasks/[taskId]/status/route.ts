@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { getPlan, getTask, getChildren, getSiblings, updateTask, touchPlan } from '@/lib/db'
+import { getPlan, getTask, getChildren, getSiblings, updateTask, touchPlan, checkHumanCompletion } from '@/lib/db'
 import { recordEvent } from '@/lib/event-log'
 import { ok, err, notFound, serverError } from '@/lib/api-utils'
 
@@ -41,10 +41,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       }
     }
 
-    const now = new Date().toISOString()
-    const fields: Record<string, unknown> = { status, updated_at: now }
-    if (status === 'abandoned') fields['abandon_reason'] = reason
-
     // Check for unresolved children when completing
     let warning: string | undefined
     if (status === 'completed') {
@@ -53,7 +49,28 @@ export async function POST(req: NextRequest, { params }: Params) {
       if (unresolved.length > 0) {
         warning = `${unresolved.length} child task(s) are not yet resolved`
       }
+
+      // Verification gates (same rules as the MCP server, as a human: criteria
+      // waived and completing counts as approval, but the command must pass)
+      const outcome = await checkHumanCompletion(plan, task)
+      if (outcome.outcome === 'blocked') {
+        recordEvent({
+          planId, taskId, eventType: 'verification_failed', actor: 'human',
+          payload: { gates: outcome.blockers.map((b) => b.gate), message: outcome.blockers.map((b) => b.message).join(' ') },
+        })
+        return ok({
+          error: 'Verification failed — the task was not completed.',
+          blockers: outcome.blockers,
+          can_override: true,
+        }, 409)
+      }
     }
+
+    const now = new Date().toISOString()
+    const fields: Record<string, unknown> = { status, updated_at: now }
+    if (status === 'abandoned') fields['abandon_reason'] = reason
+    // Leaving the task cancels a pending review request
+    if (status !== 'completed' && task.review_requested_at) fields['review_requested_at'] = null
 
     updateTask(planId, taskId, fields)
     touchPlan(planId)

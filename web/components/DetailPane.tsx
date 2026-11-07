@@ -4,7 +4,8 @@ import { useState, useCallback } from 'react'
 import { useStore } from '@/lib/store'
 import { StatusBadge } from './StatusBadge'
 import { PlanDraftOverlay } from './PlanDraftOverlay'
-import type { Task } from '@/lib/db'
+import { GatesPanel } from './GatesPanel'
+import type { Blocker, Task } from '@/lib/db'
 import type { ProposedTask } from '@/lib/planning'
 
 interface Props {
@@ -23,6 +24,17 @@ export function DetailPane({ planId }: Props) {
   const [showInstructionInput, setShowInstructionInput] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [statusLoading, setStatusLoading] = useState(false)
+  // Set when "Mark Complete" was refused by a verification gate
+  const [blockers, setBlockers] = useState<Blocker[] | null>(null)
+  const [overrideReason, setOverrideReason] = useState('')
+
+  // Clear a previous task's refusal when switching tasks
+  const [shownFor, setShownFor] = useState(selectedTaskId)
+  if (shownFor !== selectedTaskId) {
+    setShownFor(selectedTaskId)
+    setBlockers(null)
+    setOverrideReason('')
+  }
 
   if (!task) {
     return (
@@ -52,8 +64,33 @@ export function DetailPane({ planId }: Props) {
       body: JSON.stringify({ status, reason }),
     })
     const data = await res.json()
+    if (res.status === 409 && data.blockers) {
+      setBlockers(data.blockers)
+    } else if (!res.ok) {
+      setError(data.error)
+    } else {
+      setBlockers(null)
+      refreshTree(planId)
+    }
+    setStatusLoading(false)
+  }
+
+  async function handleOverride() {
+    if (!task || !overrideReason.trim()) return
+    setStatusLoading(true)
+    setError(null)
+    const res = await fetch(`/api/plans/${planId}/tasks/${task.id}/override`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: overrideReason }),
+    })
+    const data = await res.json()
     if (!res.ok) setError(data.error)
-    else refreshTree(planId)
+    else {
+      setBlockers(null)
+      setOverrideReason('')
+      refreshTree(planId)
+    }
     setStatusLoading(false)
   }
 
@@ -161,6 +198,9 @@ export function DetailPane({ planId }: Props) {
         </details>
       )}
 
+      {/* Verification gates */}
+      <GatesPanel planId={planId} task={task} />
+
       {/* Notes */}
       <div>
         <p className="text-xs font-medium text-gray-500 mb-1">Human Notes</p>
@@ -177,6 +217,39 @@ export function DetailPane({ planId }: Props) {
 
       {/* Error */}
       {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>}
+
+      {/* Completion refused by a verification gate */}
+      {blockers && task.status === 'active' && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-2">
+          <p className="text-sm font-medium text-red-800">Not completed — verification failed</p>
+          {blockers.map((b, i) => (
+            <div key={i} className="space-y-1">
+              <p className="text-xs text-red-700">{b.message}</p>
+              {b.output && (
+                <pre className="max-h-40 overflow-auto bg-white border border-red-100 rounded p-2 text-[11px] text-gray-700 whitespace-pre-wrap">{b.output}</pre>
+              )}
+            </div>
+          ))}
+          <div className="pt-1 space-y-2">
+            <input
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+              placeholder="Reason to complete anyway (kept as evidence)"
+              className="w-full border border-red-200 rounded-md px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-1 focus:ring-red-300"
+            />
+            <div className="flex gap-2">
+              <button
+                onClick={handleOverride}
+                disabled={statusLoading || !overrideReason.trim()}
+                className="flex-1 px-3 py-1.5 text-sm border border-red-300 text-red-700 rounded-md bg-white hover:bg-red-100 disabled:opacity-50"
+              >
+                Complete anyway
+              </button>
+              <button onClick={() => setBlockers(null)} className="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900">Dismiss</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Actions */}
       <div className="space-y-2">
@@ -249,13 +322,13 @@ export function DetailPane({ planId }: Props) {
         )}
 
         {/* Status actions */}
-        {task.status === 'active' && (
+        {task.status === 'active' && !task.review_requested_at && (
           <button
             onClick={() => handleStatusChange('completed')}
             disabled={statusLoading}
             className="w-full px-3 py-2 text-sm border border-green-200 text-green-700 rounded-lg hover:bg-green-50"
           >
-            Mark Complete
+            {statusLoading ? (task.verify_command ? 'Running checks…' : 'Completing…') : 'Mark Complete'}
           </button>
         )}
         {task.status === 'pending' && (

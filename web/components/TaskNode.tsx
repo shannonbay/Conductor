@@ -5,7 +5,7 @@ import { StatusIcon } from './StatusIcon'
 import type { Task } from '@/lib/db'
 
 interface Props {
-  task: Task & { children?: { id: string }[] }
+  task: Task & { children?: { id: string }[]; last_check_passed?: boolean | null }
   depth: number
   isSelected: boolean
   isExpanded: boolean
@@ -46,6 +46,22 @@ export function TaskNode({ task, depth, isSelected, isExpanded, hasChildren, isA
 
       {/* Goal */}
       <span className="truncate flex-1 min-w-0">{task.goal}</span>
+
+      {/* Verification badges */}
+      {task.review_requested_at && (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 flex-shrink-0" title="Waiting for your review">
+          review
+        </span>
+      )}
+      {task.status === 'active' && task.last_check_passed === false && (
+        <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-red-100 text-red-700 flex-shrink-0" title="Last verify command failed">
+          check failed
+        </span>
+      )}
+      {task.status !== 'completed' && task.status !== 'abandoned' && !task.review_requested_at && task.last_check_passed !== false
+        && (task.verify_command || task.acceptance_criteria?.length || task.requires_approval) && (
+        <span className="text-xs text-gray-400 flex-shrink-0" title="Has verification gates">⛨</span>
+      )}
 
       {/* Agent indicator */}
       {isAgentWorking && (
