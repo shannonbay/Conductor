@@ -1,7 +1,36 @@
 {
   "name": "conductor-goals",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "license": "Apache-2.0",
-  "description": "Conductor goals beside the chat: proposals to approve or reject, run status and health",
-  "types": "./types/index.d.ts"
+  "description": "Conductor goals beside the chat: approve or reject proposals, run, pause and inspect goals, and let Claude check on them",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "url": {
+      "type": "string",
+      "title": "Conductor web app address",
+      "description": "Where the Conductor web app runs.",
+      "default": "http://localhost:3000"
+    },
+    "poll_seconds": {
+      "type": "number",
+      "title": "Poll every (seconds)",
+      "description": "How often to check for changes. Runs in progress are checked every 5 seconds; offline checks back off to a minute.",
+      "default": 15,
+      "min": 5,
+      "max": 600
+    },
+    "alerts": {
+      "type": "string",
+      "title": "Alerts",
+      "description": "Which events raise a toast and notification.",
+      "options": ["all", "proposals", "failures", "off"],
+      "default": "all"
+    },
+    "os_notifications": {
+      "type": "boolean",
+      "title": "System notifications",
+      "description": "Also send alerts through your notification channel, so you hear about them while working elsewhere.",
+      "default": true
+    }
+  }
 }

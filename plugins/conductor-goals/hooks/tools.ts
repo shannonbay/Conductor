@@ -1,0 +1,170 @@
+/**
+ * Tools Claude can call (listed as mcp__conductor-goals__<name>) and the
+ * slash commands. Reading is free; anything that changes a goal on Claude's
+ * behalf asks the person first.
+ */
+import type { EngineInterface } from 'claude-code'
+
+import type { GoalCard } from '../types'
+import { approve, baseUrl, createGoal, reject, runNow, setGoalStatus } from './api'
+import { describe, findGoal, noMatch, summarize } from './model'
+import { act, refresh } from './sync'
+
+type $ = EngineInterface
+
+const GOAL = { type: 'string', description: 'Goal name (or a unique part of it) or goal id.' }
+const ITEM = { type: 'string', description: 'The item id, as goals_status lists it.' }
+
+export const TOOLS = [
+  {
+    name: 'goals_status',
+    description: "Lists the person's Conductor goals (persistent objectives run by scheduled agents): what waits for their approval (with item ids), whether a run is going, the last run and health. Read-only.",
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'goal_detail',
+    description: "One Conductor goal in detail: objective, proposals, open items, recent runs with summaries, and its memory. Read-only.",
+    inputSchema: { type: 'object', properties: { goal: GOAL }, required: ['goal'] },
+  },
+  {
+    name: 'approve_item',
+    description: 'Approves a Conductor proposal so the goal\'s next run carries it out. The person is asked to confirm first.',
+    inputSchema: { type: 'object', properties: { goal: GOAL, item_id: ITEM }, required: ['goal', 'item_id'] },
+  },
+  {
+    name: 'reject_item',
+    description: "Rejects a Conductor proposal with feedback; the feedback is saved to the goal's memory so later runs learn from it. The person is asked to confirm first.",
+    inputSchema: { type: 'object', properties: { goal: GOAL, item_id: ITEM, feedback: { type: 'string', description: 'What should change.' } }, required: ['goal', 'item_id', 'feedback'] },
+  },
+  {
+    name: 'run_goal',
+    description: 'Queues a run of a Conductor goal now. The person is asked to confirm first.',
+    inputSchema: { type: 'object', properties: { goal: GOAL }, required: ['goal'] },
+  },
+] as const
+
+export type ToolName = (typeof TOOLS)[number]['name']
+
+export async function registerTools($: $): Promise<void> {
+  for (const tool of TOOLS) {
+    try {
+      await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })
+    } catch {
+      // The session isn't bound yet; the next start tries again.
+    }
+  }
+}
+
+type Resolved = { goal: GoalCard } | { error: string }
+
+async function resolveGoal($: $, query: unknown): Promise<Resolved> {
+  const s = await refresh($)
+  if (!s.reachable) return { error: `Conductor isn't reachable at ${await baseUrl($)}${s.error ? ` (${s.error})` : ''}.` }
+  const found = findGoal(s.goals, typeof query === 'string' ? query : '')
+  return 'goal' in found ? found : { error: noMatch(s.goals, String(query ?? ''), found.matches) }
+}
+
+/** Asks the person; a dismissed dialog counts as no. */
+async function confirmWith($: $, question: string, yes: string): Promise<boolean> {
+  try {
+    return (await $.ui.ask(question, [yes, 'Cancel'])) === yes
+  } catch {
+    return false
+  }
+}
+
+/** The text a tool call answers with. */
+export async function runTool($: $, name: ToolName, input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
+  const now = await $.clock.now()
+  const fail = (text: string) => ({ text, isError: true })
+
+  if (name === 'goals_status') {
+    const s = await refresh($)
+    if (!s.reachable) return fail(`Conductor isn't reachable at ${await baseUrl($)}.`)
+    return { text: summarize(s.goals, now), isError: false }
+  }
+
+  const found = await resolveGoal($, input.goal)
+  if ('error' in found) return fail(found.error)
+  const { goal } = found
+
+  if (name === 'goal_detail') return { text: describe(goal, now), isError: false }
+
+  if (name === 'run_goal') {
+    if (goal.openRun) return fail(`${goal.name} already has a run ${goal.openRun.status}.`)
+    if (!(await confirmWith($, `Start a run of the goal "${goal.name}" now?`, 'Run it'))) return fail('The person declined; nothing was started.')
+    return (await act($, `run:${goal.id}`, 'start the run', () => runNow($, goal.id)))
+      ? { text: `Queued a run of ${goal.name}.`, isError: false }
+      : fail(`The run didn't start.`)
+  }
+
+  const item = goal.needsYou.find((i) => i.id === String(input.item_id ?? ''))
+  if (!item) {
+    const waiting = goal.needsYou.map((i) => `${i.id} (${i.title})`).join(', ')
+    return fail(`No proposal ${String(input.item_id)} waits in ${goal.name}.${waiting ? ` Waiting: ${waiting}.` : ' Nothing is waiting.'}`)
+  }
+  const key = `${goal.id}/${item.id}`
+
+  if (name === 'approve_item') {
+    const what = `"${item.title}"${item.summary ? ` (${item.summary})` : ''}`
+    if (!(await confirmWith($, `Approve ${what} for the goal "${goal.name}"?`, 'Approve'))) return fail('The person declined; nothing was approved.')
+    return (await act($, `approve:${key}`, 'approve', () => approve($, goal.id, item.id)))
+      ? { text: `Approved "${item.title}". ${goal.name}'s next run will carry it out.`, isError: false }
+      : fail('The approval failed; see the Goals pane.')
+  }
+
+  const feedback = String(input.feedback ?? '').trim()
+  if (!feedback) return fail('Feedback is required to reject a proposal.')
+  if (!(await confirmWith($, `Reject "${item.title}" for "${goal.name}" with this feedback: "${feedback}"?`, 'Reject'))) return fail('The person declined; nothing was rejected.')
+  return (await act($, `reject:${key}`, 'reject', () => reject($, goal.id, item.id, feedback)))
+    ? { text: `Rejected "${item.title}"; the feedback is saved to ${goal.name}'s memory.`, isError: false }
+    : fail('The rejection failed; see the Goals pane.')
+}
+
+export const COMMANDS = [
+  { name: 'goals', description: 'Show Conductor goals in a pane' },
+  { name: 'goal-run', description: 'Run a Conductor goal now', argumentHint: '<goal>' },
+  { name: 'goal-new', description: 'Create a Conductor goal in this directory', argumentHint: '<name>: <objective>' },
+  { name: 'goal-pause', description: 'Pause a Conductor goal', argumentHint: '<goal>' },
+  { name: 'goal-resume', description: 'Resume a paused Conductor goal', argumentHint: '<goal>' },
+] as const
+
+export async function registerCommands($: $): Promise<void> {
+  for (const c of COMMANDS) await $.command.register(c)
+}
+
+/** /goal-run, /goal-pause, /goal-resume: the person typed it, so no confirm. */
+export async function goalCommand($: $, command: 'goal-run' | 'goal-pause' | 'goal-resume', args: string): Promise<string> {
+  if (!args.trim()) {
+    const s = await refresh($)
+    return `Usage: /${command} <goal>. Goals: ${s.goals.map((g) => g.name).join(', ') || 'none'}.`
+  }
+  const found = await resolveGoal($, args)
+  if ('error' in found) return found.error
+  const { goal } = found
+  const ok = (done: boolean, text: string) => (done ? text : `That didn't work; see the Goals pane.`)
+
+  if (command === 'goal-run') {
+    if (goal.openRun) return `${goal.name} already has a run ${goal.openRun.status}.`
+    return ok(await act($, `run:${goal.id}`, 'start the run', () => runNow($, goal.id)), `Queued a run of ${goal.name}.`)
+  }
+  const status = command === 'goal-pause' ? 'paused' : 'active'
+  if (goal.status === status) return `${goal.name} is already ${status}.`
+  return ok(await act($, `${command}:${goal.id}`, `${command === 'goal-pause' ? 'pause' : 'resume'} the goal`, () => setGoalStatus($, goal.id, status)), `${goal.name} is ${status === 'paused' ? 'paused' : 'active again'}.`)
+}
+
+/** /goal-new <name>: <objective> */
+export async function newGoal($: $, args: string): Promise<string> {
+  const at = args.indexOf(':')
+  const name = (at === -1 ? args : args.slice(0, at)).trim()
+  const objective = at === -1 ? '' : args.slice(at + 1).trim()
+  if (!name || !objective) return 'Usage: /goal-new <name>: <objective>, e.g. /goal-new Inbox: keep my inbox under 20 unread'
+  const cwd = await $.session.cwd()
+  try {
+    await createGoal($, { name, objective, working_dir: cwd })
+  } catch (err) {
+    return `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}`
+  }
+  await refresh($)
+  return `Created the goal "${name}" in ${cwd}. It runs on demand until you give it a schedule on its goal page.`
+}
