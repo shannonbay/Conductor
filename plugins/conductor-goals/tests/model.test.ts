@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, diffAlerts, EMPTY, findGoal, spark, statusText, toCard } from '../hooks/model'
+import { ago, clip, diffAlerts, EMPTY, findGoal, spark, statusText, toCard } from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -32,6 +32,12 @@ test('statusText counts what needs you and what is running', async () => {
   ] }
   expect(statusText(s)).toBe('Conductor: 2 need you · Invoices running')
   expect(statusText({ ...s, goals: [] })).toBeUndefined()
+})
+
+test('clip keeps short text and ends cut text with …', async () => {
+  expect(clip('short', 10)).toBe('short')
+  expect(clip('a long line of text', 10)).toBe('a long li…')
+  expect([...clip('x'.repeat(50), 20)].length).toBe(20)
 })
 
 test('spark and ago format for a narrow pane', async () => {

@@ -10,7 +10,7 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 
 import type { Confirm, GoalCard } from '../types'
 import { approve, baseUrl, cancelRun, deleteMemory, reject, runNow, setGoalStatus } from './api'
-import { ago, isFailed, lastRun, spark } from './model'
+import { ago, clip, isFailed, lastRun, spark } from './model'
 import { getBusy, getConfirm, getExpanded, getNotice, getRejecting, getSnapshot, setConfirm, setRejecting, toggleExpanded } from './state'
 import { act, refresh } from './sync'
 
@@ -20,6 +20,8 @@ type E = RenderInput<'Pane'>
 /** What every part of the pane reads, gathered once per draw. */
 type View = {
   now: number
+  /** The pane body's width, for clipping one-line text. */
+  columns: number
   base: string
   doing: string | null
   open: string | null
@@ -54,6 +56,7 @@ export async function renderPane($: $, e: E) {
   const firstWithProposal = s.goals.find((g) => g.needsYou.length > 0)
   const view: View = {
     now: await $.clock.now(),
+    columns: e.props.bodyColumns,
     base: await baseUrl($),
     doing: await getBusy($),
     open: await getRejecting($),
@@ -95,6 +98,7 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
         <Text dimColor> {g.status}</Text>
         {g.openRun && <Text color="cyan"> · run {g.openRun.status}</Text>}
       </Box>
+      {activityLine($, e, view, g)}
       <Text dimColor>
         {run ? <Text color={isFailed(run.status) ? 'red' : undefined}>last run {run.status} {ago(run.endedAt ?? run.startedAt, view.now)}</Text> : 'no runs yet'}
         {g.status === 'active' && g.nextRunAt && !g.openRun ? ` · next ${ago(g.nextRunAt, view.now)}` : ''}
@@ -119,6 +123,23 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
       )}
     </Box>
   )
+}
+
+/** One line: what the goal's agent is doing now, or what happens next. */
+function activityLine($: $, e: E, view: View, g: GoalCard) {
+  const { Text } = $.ui.resolve(e)
+  const { state, text, at } = g.activity
+  if (!text) return null
+  if (state === 'running') {
+    const age = at ? ` · ${ago(at, view.now)}` : ''
+    return (
+      <Text key={`activity-${g.id}`}>
+        <Text color="cyan">● {clip(text, Math.max(view.columns - 2 - age.length, 10))}</Text>
+        <Text dimColor>{age}</Text>
+      </Text>
+    )
+  }
+  return <Text key={`activity-${g.id}`} dimColor>{state === 'queued' ? '◌ ' : ''}{clip(text, Math.max(view.columns - 2, 10))}</Text>
 }
 
 function proposalRow($: $, e: E, view: View, g: GoalCard, item: GoalCard['needsYou'][number]) {

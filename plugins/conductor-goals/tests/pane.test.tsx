@@ -28,6 +28,31 @@ test('the pane shows a proposal with hotkeys, and Approve posts to the web app',
   await ui.unmount()
 })
 
+test("each goal shows a line of what its agent is doing, clipped to the pane", async ($, on) => {
+  engine(on)
+  fakeConductor(on, [
+    goal({
+      id: 'g1',
+      name: 'Inbox',
+      open_run: { id: 'r1', status: 'running' },
+      activity: { state: 'running', text: 'Drafting a reply to Alice', at: '2026-11-07T07:57:00Z' },
+    }),
+    goal({ id: 'g2', name: 'Invoices', activity: { state: 'idle', text: `Last run: ${'filed invoices '.repeat(10)}`, at: null } }),
+  ])
+  await $.session.start(START)
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const running = await ui.find({ type: 'Text', text: /^● Drafting/ })
+    expect(running?.text).toBe('● Drafting a reply to Alice · 3m ago')
+    const idle = await ui.find({ type: 'Text', text: /^Last run: filed/ })
+    expect(idle?.text.startsWith('Last run: filed invoices')).toBe(true)
+    expect(idle?.text.endsWith('…')).toBe(true)
+    expect([...idle!.text].length).toBeLessThanOrEqual(PANE.props.bodyColumns)
+    await ui.unmount()
+  }
+})
+
 test('Reject opens a feedback box and shows the web app error', async ($, on) => {
   engine(on)
   const { requests } = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox', needs_you: [proposal('11', 'Reply to Alice')] })], {

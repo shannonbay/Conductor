@@ -37,6 +37,7 @@ type FakeGoal = {
   status: string
   next_run_at: string | null
   open_run: { id: string; status: string } | null
+  activity: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
   runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null }[]
   needs_you: Item[]
   open_items: Item[]
@@ -51,6 +52,7 @@ export function goal(over: Partial<FakeGoal> & { id: string; name: string }): Fa
     status: 'active',
     next_run_at: '2026-11-07T09:00:00Z',
     open_run: null,
+    activity: { state: 'idle', text: 'Waiting for its first run', at: null },
     runs: [],
     needs_you: [],
     open_items: [],

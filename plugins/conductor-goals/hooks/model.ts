@@ -12,6 +12,7 @@ export type OverviewGoal = {
   status: string
   next_run_at: string | null
   open_run: { id: string; status: string } | null
+  activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
   runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null }[]
   needs_you: OverviewItem[]
   open_items: OverviewItem[]
@@ -36,6 +37,8 @@ export function toCard(g: OverviewGoal): GoalCard {
     name: g.name,
     objective: g.objective,
     status: g.status,
+    // An older web app sends no activity: say nothing rather than guess.
+    activity: g.activity ?? { state: g.status === 'paused' ? 'paused' : 'idle', text: '', at: null },
     needsYou: g.needs_you.map(toItem),
     openItems: g.open_items.map(toItem),
     openItemCount: g.open_item_count,
@@ -128,6 +131,7 @@ export function summarize(goals: GoalCard[], now: number): string {
     const lines = [
       `## ${g.name} (id ${g.id}, ${g.status})`,
       `Objective: ${g.objective}`,
+      g.activity.text ? `Now: ${g.activity.text}` : null,
       g.openRun ? `Run ${g.openRun.status} now.` : `Last run: ${run ? `${run.status} ${ago(run.endedAt ?? run.startedAt, now)}${run.summary ? ` — ${run.summary}` : ''}` : 'none'}.`,
       g.health ? `Health: ${g.health.passed ? 'passing' : 'failing'}${g.health.value !== null ? ` (${g.health.value})` : ''}.` : null,
       `Open items: ${g.openItemCount}.`,
@@ -151,6 +155,13 @@ export function describe(g: GoalCard, now: number): string {
       : null,
     g.memory.length > 0 ? `Memory:\n${g.memory.map((m) => `- [${m.kind}] ${m.text}`).join('\n')}` : null,
   ].filter(Boolean).join('\n\n')
+}
+
+/** `text` cut to `columns` characters, ending in … when cut. */
+export function clip(text: string, columns: number): string {
+  const chars = [...text]
+  if (chars.length <= columns) return text
+  return columns <= 1 ? '…'.slice(0, columns) : `${chars.slice(0, columns - 1).join('').trimEnd()}…`
 }
 
 const BARS = '▁▂▃▄▅▆▇█'

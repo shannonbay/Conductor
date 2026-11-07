@@ -14,6 +14,14 @@ export type Run = {
 /** One memory entry the goal's runs read. */
 export type Memory = { id: string; kind: string; text: string; pinned: boolean }
 
+/** What a goal's agent is doing now, or what it does next, in one line. */
+export type Activity = {
+  state: 'running' | 'queued' | 'paused' | 'idle'
+  text: string
+  /** When a running agent took its latest step. */
+  at: string | null
+}
+
 /** One goal as the pane shows it. */
 export type GoalCard = {
   id: string
@@ -21,6 +29,7 @@ export type GoalCard = {
   objective: string
   /** active | paused */
   status: string
+  activity: Activity
   needsYou: Item[]
   /** The first open items (not awaiting review); `openItemCount` has the total. */
   openItems: Item[]

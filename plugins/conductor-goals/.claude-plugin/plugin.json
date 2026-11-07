@@ -1,6 +1,6 @@
 {
   "name": "conductor-goals",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "license": "Apache-2.0",
   "description": "Conductor goals beside the chat: approve or reject proposals, run, pause and inspect goals, and let Claude check on them",
   "types": "./types/index.d.ts",

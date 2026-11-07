@@ -17,6 +17,7 @@ test('goals_status summarises every goal for Claude, with item ids', async ($, o
   expect(text).toContain('## Inbox (id g1, active)')
   expect(text).toContain('- item 11: Reply to Alice [email.send]')
   expect(text).toContain('## Invoices')
+  expect(text).toContain('Now: Waiting for its first run')
 })
 
 test('approve_item asks first and does nothing when declined', async ($, on) => {

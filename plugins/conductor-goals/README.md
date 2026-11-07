@@ -21,6 +21,7 @@ Open it with `/goals`. It opens on its own at start-up when something is waiting
 
 ```
 ▸ Inbox active · run running
+● Drafting a reply to Alice · 1m ago
 last run completed 12m ago · 3 open
 failing 18 ▁▃▅█
 ● Reply to Alice about Thursday
@@ -31,6 +32,7 @@ Cancel run  Pause
 Updated just now  Refresh
 ```
 
+- Under each goal's name is one line saying what its agent is doing. While a run is going, that's the agent's latest step: a progress update, an item it added or finished, or a note it saved. Otherwise it says the run is queued, the goal is paused, what the next run will carry out, or the last run's summary. Claude's `goals_status` tool reports the same line.
 - **Approve** or **Reject…** each proposal. Rejecting asks what should change, and your answer is saved to the goal's memory.
 - **Run now**, **Cancel run** (asks you to confirm), **Pause** and **Resume**.
 - **▸ name** expands a goal to show its objective, open items, last five runs with summaries, and memory. Each memory entry can be deleted (asks you to confirm).
