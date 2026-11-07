@@ -1,5 +1,5 @@
 import { getOpenPlan } from '../session.js'
-import { getPlan, getTask, insertTask, touchPlan, countAllTasks, runTransaction, Task } from '../db.js'
+import { getPlan, getTask, insertTask, touchPlan, countAllTasks, runTransaction, type NewTask } from '../db.js'
 import { buildContext } from '../context.js'
 import { ProvisionTasksSchema } from '../schema.js'
 
@@ -87,7 +87,7 @@ export async function provision_tasks(args: unknown) {
   runTransaction(() => {
     for (const id of sortedIds) {
       const spec = input.tasks[id]
-      const task: Task = {
+      const task: NewTask = {
         id,
         plan_id: planId,
         goal: spec.goal,

@@ -10,7 +10,12 @@ Conductor is a **Model Context Protocol (MCP) server** that provides persistent,
 
 ```
 Conductor/
-  package.json        — monorepo root (npm workspaces: ["channel", "mcp", "web"])
+  package.json        — monorepo root (npm workspaces: ["core", "channel", "mcp", "web"])
+  core/               — @conductor/core: the one schema, migrations and shared plan/task queries
+    src/migrate.ts    — runMigrations(): every table, column and trigger lives here
+    src/queries.ts    — db-first query functions used by both mcp/ and web/
+    src/types.ts      — PlanRow, Task, NewPlan, NewTask, TreeStats
+    src/index.ts      — openDatabase() / defaultDbPath()
   channel/            — Claude Code channel server (bridges Conductor UI ↔ Claude Code session)
     src/server.ts     — MCP server (stdio to Claude Code) + HTTP API (port 8789 to web app)
     package.json
@@ -19,7 +24,7 @@ Conductor/
     src/
       index.ts        — MCP entry point; registers all tools and dispatches calls
       schema.ts       — Zod schemas for every tool's input parameters
-      db.ts           — SQLite layer via better-sqlite3
+      db.ts           — Binds @conductor/core queries to one connection
       session.ts      — In-memory open-plan ID
       context.ts      — Builds context view objects
       tools/          — One file per MCP tool handler
@@ -42,6 +47,15 @@ Both `mcp/` and `web/` connect to the same `~/.conductor/tasks.db` (SQLite WAL m
 
 ## Commands
 
+**`core/` must be built before `mcp/` or `web/` run or typecheck.** Their `prebuild`, `predev` and `pretypecheck` scripts do it automatically (`npm run build --prefix ../core`). Tests don't need it: both `vitest.config.ts` files alias `@conductor/core` to `core/src`. After changing `core/`, rebuild `mcp/` and reconnect the `conductor` server (`/mcp`) so Claude Code picks it up.
+
+### Core (`cd core`)
+
+```bash
+npm run build       # Compile to dist/ (what mcp/ and web/ import at runtime)
+npm test            # Schema, migration and revision-trigger tests
+```
+
 ### MCP Server (`cd mcp`)
 
 ```bash
@@ -60,11 +74,10 @@ To run a single test file: `npm test -- src/tests/tools/create_plan.test.ts`
 ### Web App (`cd web`)
 
 ```bash
-npm run dev         # Start Next.js dev server (port 3000)
+npm run dev         # Start custom HTTP + WebSocket server with Next.js (tsx server.ts, port 3000)
 npm run build       # Production build
 npm run typecheck   # Type-check without emitting
 npm test            # Run all tests (vitest)
-node server.ts      # Start custom HTTP + WebSocket server
 ```
 
 Tests live in `web/__tests__/`. `vitest.config.ts` sets `CONDUCTOR_DB=:memory:`. Each test gets a clean slate via `beforeEach` in `__tests__/setup.ts` which calls `clearAllData()` and `resetDb()`.
@@ -96,11 +109,13 @@ npm install         # Install all workspace dependencies
 
 ## Web App Architecture
 
-**Database layer** (`web/lib/db.ts`): Superset of `mcp/src/db.ts`. Adds `getFullTree()`, `lockSubtree()`, `unlockSubtree()`, `deleteTaskTree()`, session CRUD, and event log. Runs migrations on startup via `web/lib/migrate.ts`.
+**Database layer** (`web/lib/db.ts`): Shared plan/task queries come from `@conductor/core` via a lazy `getDb()`. Adds web-only queries: `getFullTree()`, `lockSubtree()`, `unlockSubtree()`, `deletePlan()`, session CRUD, event log, transcripts.
 
-**Migrations** (`web/lib/migrate.ts`): Creates base `plans`/`tasks` tables (idempotent), adds UI-layer columns (`locked_by`, `requires_approval`, `created_by`, `assigned_to`, `notes`), creates `agent_sessions` and `events` tables. Adding a column uses try/catch around `ALTER TABLE` (SQLite lacks `IF NOT EXISTS` for ALTER). New columns added to the base CREATE TABLE must also get an ALTER TABLE block for existing databases, plus an UPDATE to backfill any NOT NULL semantics.
+**Migrations** (`core/src/migrate.ts`, re-exported by `web/lib/migrate.ts`): The only place the schema is defined; both processes run it on open. Adding a column uses try/catch around `ALTER TABLE` (SQLite lacks `IF NOT EXISTS` for ALTER). New columns added to a CREATE TABLE must also get an ALTER TABLE entry for existing databases, plus an UPDATE to backfill any NOT NULL semantics.
 
-**Real-time updates**: `web/lib/ws-broadcaster.ts` pushes events to connected browsers. Custom server (`web/server.ts`) routes WebSocket upgrades for `/api/plans/:id/ws`.
+**Real-time updates**: SQLite triggers bump `plans.revision` on every task insert/update/delete and plan update, from any process. `web/lib/mcp-poller.ts` checks each watched plan's revision once a second and broadcasts `mcp_update` through `web/lib/ws-broadcaster.ts` when it changes. Custom server (`web/server.ts`) routes WebSocket upgrades for `/api/plans/:id/ws`.
+
+**Request guard** (`web/lib/request-guard.ts`): `server.ts` rejects HTTP requests (403) and WebSocket upgrades whose `Host` isn't localhost/127.0.0.1/[::1] at the server's port, or whose `Origin` is present but foreign. This stops other websites from driving the local API (which can start agents). Allow extra hosts with `CONDUCTOR_ALLOWED_HOSTS=host:port,...`.
 
 **AI backend — Claude Code Channels**: All AI inference (planning, plan generation, agent execution) routes through a running Claude Code session via the channel server, not a direct Anthropic API call. The web app never holds an API key.
 
@@ -136,7 +151,9 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **`working_dir` is required on every plan** and is never null. MCP's `create_plan` defaults it to `process.cwd()` (the directory Claude Code was launched from). Web UI requires the user to select one. Agents receive it in their system prompt so they know where to operate on the filesystem.
 
-**Two DB layers exist and must stay in sync**: `mcp/src/db.ts` is a minimal standalone layer (no migrations, no UI columns). `web/lib/db.ts` is a superset — it calls `runMigrations()` on startup and adds UI-only columns. When adding a field to `PlanRow` or `TaskRow`, update both files. The MCP `PlanRow` type only needs fields the MCP tools use; the web layer can have more.
+**One schema, in `core/`**: `mcp/src/db.ts` and `web/lib/db.ts` are thin wrappers that bind `@conductor/core` queries to their own connection. To add a field to plans or tasks, change `core/src/migrate.ts` (CREATE TABLE + ALTER entry) and `core/src/types.ts` only. Put a query in `core/src/queries.ts` if both sides need it; web-only queries stay in `web/lib/db.ts`.
+
+**Claude Code hooks**: `mcp/scripts/install-hooks.mjs` runs on `npm install` and installs the Conductor reminder hooks into `~/.claude/settings.json`, updating stale copies in place and removing the obsolete decompose hook. Skip with `CONDUCTOR_SKIP_HOOKS=1`.
 
 **Channel is one-request-at-a-time**: The channel server rejects new requests with 503 while one is active. The web app surfaces this as `ChannelBusyError`. Agent pause is a soft signal (DB-only); Claude Code keeps running until it calls `agent_done` or `agent_cancelled`.
 

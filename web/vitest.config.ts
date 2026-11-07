@@ -16,6 +16,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '.'),
+      // Test against core's source so tests never run on a stale core/dist build
+      '@conductor/core': path.resolve(__dirname, '../core/src/index.ts'),
       // Ensure tests use the same React version as the app (React 19 in web/node_modules)
       'react': path.resolve(__dirname, 'node_modules/react'),
       'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),

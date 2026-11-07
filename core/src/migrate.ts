@@ -1,0 +1,171 @@
+import type { Database } from 'better-sqlite3'
+
+/**
+ * The single source of truth for the Conductor schema. Both the MCP server
+ * and the web app call this on startup, so whichever opens the database first
+ * produces the same schema.
+ *
+ * Safe to call repeatedly — every step is idempotent. SQLite has no
+ * `ADD COLUMN IF NOT EXISTS`, so column additions are wrapped in try/catch.
+ * New columns added to a CREATE TABLE below must also get an ALTER TABLE
+ * entry for databases created before the column existed.
+ */
+export function runMigrations(db: Database): void {
+  // Legacy renames: projects → plans (idempotent via try/catch)
+  try { db.exec('ALTER TABLE projects RENAME TO plans') } catch { /* already renamed or never existed */ }
+  try { db.exec('ALTER TABLE tasks RENAME COLUMN project_id TO plan_id') } catch { /* already renamed */ }
+  try { db.exec('ALTER TABLE agent_sessions RENAME COLUMN project_id TO plan_id') } catch { /* already renamed */ }
+  try { db.exec('ALTER TABLE events RENAME COLUMN project_id TO plan_id') } catch { /* already renamed */ }
+
+  db.exec(`
+    DROP INDEX IF EXISTS idx_tasks_project;
+    DROP INDEX IF EXISTS idx_projects_status;
+    DROP INDEX IF EXISTS idx_projects_updated;
+    DROP INDEX IF EXISTS idx_sessions_project;
+    DROP INDEX IF EXISTS idx_events_project;
+  `)
+
+  // ── Plans and tasks ─────────────────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS plans (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      description   TEXT,
+      status        TEXT NOT NULL DEFAULT 'active',
+      working_dir   TEXT,
+      focus_task_id TEXT,
+      revision      INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tasks (
+      id                TEXT NOT NULL,
+      plan_id           TEXT NOT NULL REFERENCES plans(id),
+      goal              TEXT NOT NULL,
+      status            TEXT NOT NULL DEFAULT 'active',
+      result            TEXT,
+      abandon_reason    TEXT,
+      state             TEXT NOT NULL DEFAULT '{}',
+      depends_on        TEXT,
+      notes             TEXT,
+      locked_by         TEXT,
+      locked_at         TEXT,
+      requires_approval INTEGER DEFAULT 0,
+      approved_by       TEXT,
+      approved_at       TEXT,
+      created_by        TEXT DEFAULT 'human',
+      assigned_to       TEXT,
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT NOT NULL,
+      PRIMARY KEY (id, plan_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_plan    ON tasks(plan_id);
+    CREATE INDEX IF NOT EXISTS idx_plans_status  ON plans(status);
+    CREATE INDEX IF NOT EXISTS idx_plans_updated ON plans(updated_at DESC);
+  `)
+
+  const addedPlanColumns: [string, string][] = [
+    ['working_dir', 'TEXT'],
+    ['focus_task_id', 'TEXT'],
+    ['revision', 'INTEGER NOT NULL DEFAULT 0'],
+  ]
+  for (const [col, def] of addedPlanColumns) {
+    try { db.exec(`ALTER TABLE plans ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
+  }
+  db.exec(`UPDATE plans SET working_dir = '(unknown)' WHERE working_dir IS NULL`)
+
+  const addedTaskColumns: [string, string][] = [
+    ['notes', 'TEXT'],
+    ['locked_by', 'TEXT'],
+    ['locked_at', 'TEXT'],
+    ['requires_approval', 'INTEGER DEFAULT 0'],
+    ['approved_by', 'TEXT'],
+    ['approved_at', 'TEXT'],
+    ['created_by', "TEXT DEFAULT 'human'"],
+    ['assigned_to', 'TEXT'],
+  ]
+  for (const [col, def] of addedTaskColumns) {
+    try { db.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
+  }
+
+  // Legacy plan/step columns (SQLite 3.35+)
+  for (const col of ['plan', 'step']) {
+    try { db.exec(`ALTER TABLE tasks DROP COLUMN ${col}`) } catch { /* already gone */ }
+  }
+
+  // ── Revision triggers ───────────────────────────────────────────────────────
+  // Any insert/update/delete of a task, from any process, bumps its plan's
+  // revision. The web app polls this number to push live updates, which also
+  // catches deletions (a timestamp column can't). The plans trigger skips
+  // updates that already changed revision, so it never loops.
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_tasks_insert_revision AFTER INSERT ON tasks
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_tasks_update_revision AFTER UPDATE ON tasks
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_tasks_delete_revision AFTER DELETE ON tasks
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_plans_update_revision AFTER UPDATE ON plans
+    WHEN NEW.revision = OLD.revision
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.id; END;
+  `)
+
+  // ── Agent sessions ──────────────────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS agent_sessions (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES plans(id),
+      root_task_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled')),
+      autonomy_level TEXT NOT NULL DEFAULT 'full'
+        CHECK (autonomy_level IN ('full', 'approve_decompositions', 'approve_steps', 'manual')),
+      model TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_cost REAL NOT NULL DEFAULT 0.0,
+      error TEXT,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      ended_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_plan ON agent_sessions(plan_id, status);
+  `)
+  try {
+    db.exec(`ALTER TABLE agent_sessions ADD COLUMN nickname TEXT NOT NULL DEFAULT ''`)
+  } catch { /* already exists */ }
+
+  // ── Event log (immutable) ───────────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES plans(id),
+      task_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      actor TEXT NOT NULL CHECK (actor IN ('human', 'agent')),
+      session_id TEXT REFERENCES agent_sessions(id),
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_task ON events(plan_id, task_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_events_plan ON events(plan_id, created_at);
+  `)
+
+  // ── Agent transcripts ───────────────────────────────────────────────────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS transcript_messages (
+      id          TEXT PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES agent_sessions(id),
+      plan_id     TEXT NOT NULL REFERENCES plans(id),
+      role        TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content     TEXT NOT NULL,
+      turn_index  INTEGER NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript_messages(session_id, turn_index);
+  `)
+}

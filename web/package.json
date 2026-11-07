@@ -4,15 +4,19 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "predev": "npm run build --prefix ../core",
     "dev": "tsx server.ts",
+    "prebuild": "npm run build --prefix ../core",
     "build": "next build",
     "start": "NODE_ENV=production node server.js",
+    "pretypecheck": "npm run build --prefix ../core",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui"
   },
   "dependencies": {
+    "@conductor/core": "*",
     "@radix-ui/react-collapsible": "^1.1.0",
     "@radix-ui/react-dialog": "^1.1.0",
     "@radix-ui/react-dropdown-menu": "^2.1.0",

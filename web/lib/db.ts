@@ -1,50 +1,14 @@
-import Database from 'better-sqlite3'
-import { mkdirSync } from 'fs'
-import { homedir } from 'os'
-import { join } from 'path'
-import { runMigrations } from './migrate'
+/**
+ * Web database layer. Schema, migrations and the task/plan queries shared with
+ * the MCP server live in @conductor/core; this file binds them to a lazily
+ * opened connection and adds the UI-only queries (sessions, events, locks…).
+ */
+import * as core from '@conductor/core'
+import { deserializeTask, type NewPlan, type NewTask, type PlanRow, type Task } from '@conductor/core'
+
+export type { NewPlan, NewTask, PlanRow, Task, TreeStats } from '@conductor/core'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-export interface PlanRow {
-  id: string
-  name: string
-  description: string | null
-  status: 'active' | 'archived'
-  working_dir: string
-  focus_task_id: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface Task {
-  id: string
-  plan_id: string
-  goal: string
-  status: 'active' | 'pending' | 'completed' | 'abandoned'
-  result: string | null
-  abandon_reason: string | null
-  state: Record<string, unknown>
-  depends_on: string[] | null
-  locked_by: string | null
-  locked_at: string | null
-  requires_approval: boolean
-  approved_by: string | null
-  approved_at: string | null
-  created_by: 'human' | 'agent'
-  assigned_to: 'human' | 'agent' | null
-  notes: string | null
-  created_at: string
-  updated_at: string
-}
-
-export interface TreeStats {
-  total_tasks: number
-  active: number
-  completed: number
-  pending: number
-  abandoned: number
-}
 
 export interface TreeNode extends Task {
   children: TreeNode[]
@@ -89,25 +53,10 @@ export interface TranscriptMessage {
 
 // ─── DB singleton ─────────────────────────────────────────────────────────────
 
-function getDbPath(): string {
-  const envPath = process.env.CONDUCTOR_DB
-  if (envPath) return envPath
-  return join(homedir(), '.conductor', 'tasks.db')
-}
+let _db: core.Database | null = null
 
-let _db: ReturnType<typeof Database> | null = null
-
-export function getDb(): ReturnType<typeof Database> {
-  if (!_db) {
-    const dbPath = getDbPath()
-    if (dbPath !== ':memory:') {
-      mkdirSync(join(dbPath, '..'), { recursive: true })
-    }
-    _db = new Database(dbPath)
-    _db.pragma('journal_mode = WAL')
-    _db.pragma('foreign_keys = ON')
-    runMigrations(_db)
-  }
+export function getDb(): core.Database {
+  if (!_db) _db = core.openDatabase()
   return _db
 }
 
@@ -116,164 +65,24 @@ export function resetDb(): void {
   _db = null
 }
 
-// ─── Serialization helpers ────────────────────────────────────────────────────
+// ─── Plans and tasks (shared with MCP via @conductor/core) ────────────────────
 
-function deserializeTask(row: Record<string, unknown>): Task {
-  return {
-    ...row,
-    state: JSON.parse(row.state as string),
-    depends_on: row.depends_on ? JSON.parse(row.depends_on as string) : null,
-    requires_approval: Boolean(row.requires_approval),
-  } as Task
-}
+export const listPlans = (status: 'active' | 'archived' | 'all' = 'active') => core.listPlans(getDb(), status)
+export const getPlan = (id: string) => core.getPlan(getDb(), id)
+export const getPlanRevision = (id: string) => core.getPlanRevision(getDb(), id)
+export const insertPlan = (plan: NewPlan) => core.insertPlan(getDb(), plan)
+export const updatePlan = (id: string, fields: Partial<Omit<PlanRow, 'id' | 'revision'>>) => core.updatePlan(getDb(), id, fields)
+export const touchPlan = (id: string) => core.touchPlan(getDb(), id)
 
-// ─── Plans ────────────────────────────────────────────────────────────────────
-
-export function listPlans(status: 'active' | 'archived' | 'all' = 'active'): PlanRow[] {
-  const db = getDb()
-  if (status === 'all') {
-    return db.prepare('SELECT * FROM plans ORDER BY updated_at DESC').all() as PlanRow[]
-  }
-  return db.prepare('SELECT * FROM plans WHERE status = ? ORDER BY updated_at DESC').all(status) as PlanRow[]
-}
-
-export function getPlan(id: string): PlanRow | undefined {
-  const db = getDb()
-  return db.prepare('SELECT * FROM plans WHERE id = ?').get(id) as PlanRow | undefined
-}
-
-export function insertPlan(plan: PlanRow): void {
-  const db = getDb()
-  db.prepare(`
-    INSERT INTO plans (id, name, description, status, working_dir, focus_task_id, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.focus_task_id, plan.created_at, plan.updated_at)
-}
-
-export function updatePlan(id: string, fields: Partial<Omit<PlanRow, 'id'>>): void {
-  const db = getDb()
-  const entries = Object.entries(fields)
-  if (entries.length === 0) return
-  const setClauses = entries.map(([k]) => `${k} = ?`).join(', ')
-  db.prepare(`UPDATE plans SET ${setClauses} WHERE id = ?`).run(...entries.map(([, v]) => v), id)
-}
-
-export function touchPlan(id: string): void {
-  updatePlan(id, { updated_at: new Date().toISOString() })
-}
-
-// ─── Tasks ────────────────────────────────────────────────────────────────────
-
-export function getTask(planId: string, taskId: string): Task | undefined {
-  const db = getDb()
-  const row = db.prepare('SELECT * FROM tasks WHERE id = ? AND plan_id = ?').get(taskId, planId) as Record<string, unknown> | undefined
-  return row ? deserializeTask(row) : undefined
-}
-
-export function getChildren(planId: string, parentId: string): Task[] {
-  const db = getDb()
-  const prefix = parentId === '' ? '' : `${parentId}.`
-  const pattern = `${prefix}%`
-  const parentDepth = parentId === '' ? 0 : parentId.split('.').length
-  const rows = db.prepare('SELECT * FROM tasks WHERE plan_id = ? AND id LIKE ?').all(planId, pattern) as Record<string, unknown>[]
-  return rows
-    .filter((r) => (r.id as string).split('.').length === parentDepth + 1)
-    .map(deserializeTask)
-}
-
-export function getSiblings(planId: string, taskId: string): Task[] {
-  const db = getDb()
-  const parts = taskId.split('.')
-  const parentId = parts.length === 1 ? null : parts.slice(0, -1).join('.')
-  let rows: Record<string, unknown>[]
-  if (!parentId) {
-    rows = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%' AND id != ?").all(planId, taskId) as Record<string, unknown>[]
-  } else {
-    rows = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id LIKE ? AND id NOT LIKE ? AND id != ?")
-      .all(planId, `${parentId}.%`, `${parentId}.%.%`, taskId) as Record<string, unknown>[]
-  }
-  return rows.map(deserializeTask)
-}
-
-export function getTreeStats(planId: string): TreeStats {
-  const db = getDb()
-  const rows = db.prepare('SELECT status, COUNT(*) as count FROM tasks WHERE plan_id = ? GROUP BY status').all(planId) as { status: string; count: number }[]
-  const map: Record<string, number> = {}
-  for (const row of rows) map[row.status] = row.count
-  return {
-    total_tasks: Object.values(map).reduce((a, b) => a + b, 0),
-    active: map['active'] ?? 0,
-    completed: map['completed'] ?? 0,
-    pending: map['pending'] ?? 0,
-    abandoned: map['abandoned'] ?? 0,
-  }
-}
-
-export function nextChildId(planId: string, parentId: string | null): string {
-  // Use max index + 1, not count + 1: deleted children leave gaps, and
-  // count + 1 would then collide with an existing ID.
-  const db = getDb()
-  const rows = parentId
-    ? db.prepare('SELECT id FROM tasks WHERE plan_id = ? AND id LIKE ? AND id NOT LIKE ?')
-        .all(planId, `${parentId}.%`, `${parentId}.%.%`) as { id: string }[]
-    : db.prepare("SELECT id FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%'").all(planId) as { id: string }[]
-  const maxIndex = rows.reduce((max, r) => Math.max(max, Number(r.id.split('.').pop())), 0)
-  return parentId ? `${parentId}.${maxIndex + 1}` : String(maxIndex + 1)
-}
-
-export function countAllTasks(planId: string): number {
-  const db = getDb()
-  const row = db.prepare('SELECT COUNT(*) as count FROM tasks WHERE plan_id = ?').get(planId) as { count: number }
-  return row.count
-}
-
-export function insertTask(task: Omit<Task, 'locked_by' | 'locked_at' | 'requires_approval' | 'approved_by' | 'approved_at' | 'created_by' | 'assigned_to' | 'notes'> & Partial<Pick<Task, 'locked_by' | 'locked_at' | 'requires_approval' | 'approved_by' | 'approved_at' | 'created_by' | 'assigned_to' | 'notes'>>): void {
-  const db = getDb()
-  db.prepare(`
-    INSERT INTO tasks (
-      id, plan_id, goal, status, result, abandon_reason,
-      state, depends_on, locked_by, locked_at, requires_approval,
-      approved_by, approved_at, created_by, assigned_to, notes,
-      created_at, updated_at
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?,
-      ?, ?, ?, ?, ?,
-      ?, ?
-    )
-  `).run(
-    task.id,
-    task.plan_id,
-    task.goal,
-    task.status,
-    task.result ?? null,
-    task.abandon_reason ?? null,
-    JSON.stringify(task.state),
-    task.depends_on ? JSON.stringify(task.depends_on) : null,
-    task.locked_by ?? null,
-    task.locked_at ?? null,
-    task.requires_approval ? 1 : 0,
-    task.approved_by ?? null,
-    task.approved_at ?? null,
-    task.created_by ?? 'human',
-    task.assigned_to ?? null,
-    task.notes ?? null,
-    task.created_at,
-    task.updated_at,
-  )
-}
-
-export function updateTask(planId: string, taskId: string, fields: Partial<Task>): void {
-  const db = getDb()
-  const serialized: Record<string, unknown> = { ...fields }
-  if ('state' in fields) serialized['state'] = JSON.stringify(fields.state)
-  if ('depends_on' in fields) serialized['depends_on'] = fields.depends_on ? JSON.stringify(fields.depends_on) : null
-  if ('requires_approval' in fields) serialized['requires_approval'] = fields.requires_approval ? 1 : 0
-  const entries = Object.entries(serialized)
-  if (entries.length === 0) return
-  const setClauses = entries.map(([k]) => `${k} = ?`).join(', ')
-  db.prepare(`UPDATE tasks SET ${setClauses} WHERE id = ? AND plan_id = ?`).run(...entries.map(([, v]) => v), taskId, planId)
-}
+export const getTask = (planId: string, taskId: string) => core.getTask(getDb(), planId, taskId)
+export const getChildren = (planId: string, parentId: string) => core.getChildren(getDb(), planId, parentId)
+export const getSiblings = (planId: string, taskId: string) => core.getSiblings(getDb(), planId, taskId)
+export const getTreeStats = (planId: string) => core.getTreeStats(getDb(), planId)
+export const nextChildId = (planId: string, parentId: string | null) => core.nextChildId(getDb(), planId, parentId)
+export const countAllTasks = (planId: string) => core.countAllTasks(getDb(), planId)
+export const insertTask = (task: NewTask) => core.insertTask(getDb(), task)
+export const updateTask = (planId: string, taskId: string, fields: Partial<Task>) => core.updateTask(getDb(), planId, taskId, fields)
+export const deleteTaskTree = (planId: string, taskId: string) => core.deleteTaskTree(getDb(), planId, taskId)
 
 // ─── UI-specific task operations ──────────────────────────────────────────────
 
@@ -301,14 +110,6 @@ export function getFullTree(planId: string): TreeNode[] {
     }
   }
   return roots
-}
-
-/**
- * Deletes a task and all its descendants (LIKE prefix query).
- */
-export function deleteTaskTree(planId: string, taskId: string): void {
-  const db = getDb()
-  db.prepare("DELETE FROM tasks WHERE plan_id = ? AND (id = ? OR id LIKE ?)").run(planId, taskId, `${taskId}.%`)
 }
 
 export function deletePlan(id: string): void {
@@ -449,7 +250,4 @@ export function getSessionsForPlan(planId: string): AgentSession[] {
 
 // ─── Test helpers ─────────────────────────────────────────────────────────────
 
-export function clearAllData(): void {
-  const db = getDb()
-  db.exec('DELETE FROM transcript_messages; DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
-}
+export const clearAllData = () => core.clearAllData(getDb())

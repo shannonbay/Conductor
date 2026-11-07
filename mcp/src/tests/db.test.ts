@@ -13,11 +13,11 @@ import {
   updateTask,
   countAllTasks,
 } from '../db.js'
-import type { PlanRow, Task } from '../db.js'
+import type { NewPlan, NewTask } from '../db.js'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function makeProject(id: string, overrides: Partial<PlanRow> = {}): PlanRow {
+function makeProject(id: string, overrides: Partial<NewPlan> = {}): NewPlan {
   const now = new Date().toISOString()
   return {
     id,
@@ -31,7 +31,7 @@ function makeProject(id: string, overrides: Partial<PlanRow> = {}): PlanRow {
   }
 }
 
-function makeTask(projectId: string, id: string, overrides: Partial<Task> = {}): Task {
+function makeTask(projectId: string, id: string, overrides: Partial<NewTask> = {}): NewTask {
   const now = new Date().toISOString()
   return {
     id,
