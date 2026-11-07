@@ -1,0 +1,6 @@
+{
+  "name": "conductor-goals",
+  "version": "0.1.0",
+  "description": "Conductor goals beside the chat: proposals to approve or reject, run status and health",
+  "types": "./types/index.d.ts"
+}

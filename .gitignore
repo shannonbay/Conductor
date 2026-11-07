@@ -8,3 +8,4 @@ dist/
 *.tsbuildinfo
 .claude/settings.local.json
 next-env.d.ts
+.claude-plugin/types/

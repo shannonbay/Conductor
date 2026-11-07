@@ -1,0 +1,11 @@
+{
+  "name": "conductor",
+  "owner": { "name": "Shannon Bay" },
+  "plugins": [
+    {
+      "name": "conductor-goals",
+      "source": "./plugins/conductor-goals",
+      "description": "Conductor goals beside the chat: proposals to approve or reject, run status and health"
+    }
+  ]
+}
