@@ -6,6 +6,7 @@
  */
 import {
   listGoals, decideTick, updateGoal, updateRun, recordSkip, nextIntervalRun, archiveResolved, getDb, failRun,
+  healthDue, runHealthCheck, getOpenRun, queueRun,
 } from './db'
 import { getChannelStatus } from './channel-client'
 import { startGoalRun, isGoalRunActive, activeRunIds } from './goal-runner'
@@ -39,6 +40,12 @@ export async function tickGoals(now: Date = new Date(), deps: TickDeps = default
     expireStaleRuns(now)
     const goals = listGoals('active')
     if (goals.length === 0) return
+
+    // Health checks first: a failing check can queue a run that starts in this same tick
+    for (const { plan, goal } of goals) {
+      if (!healthDue(goal, now)) continue
+      await checkHealth(plan.id)
+    }
 
     let channel: { connected: boolean; busy: boolean } | null = null
     for (const { plan } of goals) {
@@ -76,11 +83,23 @@ export async function tickGoals(now: Date = new Date(), deps: TickDeps = default
       } catch (err) {
         console.error(`[goals] could not start run for ${plan.id}:`, err instanceof Error ? err.message : err)
       }
-      if (decision.trigger === 'interval') updateGoal(plan.id, { next_run_at: nextIntervalRun(plan.id, now) })
+      if (decision.trigger === 'interval' || decision.trigger === 'cron') updateGoal(plan.id, { next_run_at: nextIntervalRun(plan.id, now) })
     }
   } finally {
     state.ticking = false
   }
+}
+
+/** Runs a goal's health check; when it fails and the goal says so, queues a run (trigger 'health'). */
+export async function checkHealth(planId: string): Promise<{ passed: boolean; queuedRun: boolean }> {
+  const result = await runHealthCheck(planId)
+  const goal = listGoals().find((g) => g.plan.id === planId)?.goal
+  let queuedRun = false
+  if (!result.passed && goal?.health_triggers_run && goal.status === 'active' && !getOpenRun(planId)) {
+    queueRun(planId, 'health')
+    queuedRun = true
+  }
+  return { passed: result.passed, queuedRun }
 }
 
 /** Runs marked running in the DB that no process is tracking and are well past their limit. */

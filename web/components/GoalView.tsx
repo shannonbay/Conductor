@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useState } from 'react'
-import type { Goal, GoalMemory, GoalRun, IntervalConfig } from '@/lib/db'
+import type { Goal, GoalMemory, GoalRun, IntervalConfig, HealthResult, ToolCallRecord, Schedule } from '@/lib/db'
 
 type Action = { category: string; summary: string; params?: Record<string, unknown> }
 interface Item {
@@ -28,6 +28,11 @@ interface GoalData {
   recently_resolved: Item[]
   memory: GoalMemory[]
   approval_stats: Record<string, { approved: number; rejected: number }>
+  schedule: Schedule | null
+  webhook_enabled: boolean
+  health: HealthResult[]
+  tool_calls: ToolCallRecord[]
+  suggestions: { category: string; approved_in_a_row: number }[]
 }
 
 const MODES = ['off', 'propose', 'auto'] as const
@@ -107,7 +112,7 @@ export function GoalView({ goalId }: { goalId: string }) {
             <p className="text-sm text-gray-600 mt-1">{goal.objective}</p>
             <p className="text-xs text-gray-400 mt-1">
               {open_run ? (open_run.status === 'running' ? `Run in progress since ${when(open_run.started_at)}` : 'Run queued — starts when Claude Code is free')
-                : data.interval ? `Every ${data.interval.minutes} min${data.interval.active_hours ? ` (${data.interval.active_hours})` : ''} · next run ${goal.status === 'active' ? when(goal.next_run_at) : '— paused'}`
+                : data.schedule ? `${data.schedule.kind === 'interval' ? `Every ${data.schedule.minutes} min${data.schedule.active_hours ? ` (${data.schedule.active_hours})` : ''}` : `Cron ${data.schedule.expr}`} · next run ${goal.status === 'active' ? when(goal.next_run_at) : '— paused'}`
                 : 'Runs only when you click Run now'}
             </p>
           </div>
@@ -186,9 +191,16 @@ export function GoalView({ goalId }: { goalId: string }) {
           </Section>
         </div>
 
+        <Suggestions data={data} busy={busy} patch={patch} />
+
+        <div className="grid md:grid-cols-2 gap-8">
+          <HealthSection data={data} goalId={goalId} busy={busy} call={call} />
+          <GuardSection calls={data.tool_calls} hasRules={Object.keys(goal.tool_map).length > 0} />
+        </div>
+
         <MemorySection memory={data.memory} goalId={goalId} busy={busy} call={call} />
 
-        <Settings data={data} busy={busy} patch={patch} />
+        <Settings data={data} busy={busy} patch={patch} call={call} />
       </main>
     </div>
   )
@@ -308,17 +320,29 @@ function MemorySection({ memory, goalId, busy, call }: { memory: GoalMemory[]; g
   )
 }
 
-function Settings({ data, busy, patch }: { data: GoalData; busy: string | null; patch: (body: object, label?: string) => Promise<boolean> }) {
+function Settings({ data, busy, patch, call }: { data: GoalData; busy: string | null; patch: (body: object, label?: string) => Promise<boolean>; call: Call }) {
   const { goal } = data
   const [instructions, setInstructions] = useState(goal.instructions)
   const [objective, setObjective] = useState(goal.objective)
-  const [minutes, setMinutes] = useState(data.interval ? String(data.interval.minutes) : '')
-  const [hours, setHours] = useState(data.interval?.active_hours ?? '')
+  const [scheduleKind, setScheduleKind] = useState<'manual' | 'interval' | 'cron'>(data.schedule?.kind ?? 'manual')
+  const [minutes, setMinutes] = useState(data.schedule?.kind === 'interval' ? String(data.schedule.minutes) : '30')
+  const [hours, setHours] = useState(data.schedule?.kind === 'interval' ? data.schedule.active_hours ?? '' : '')
+  const [cron, setCron] = useState(data.schedule?.kind === 'cron' ? data.schedule.expr : '0 9 * * 1-5')
+  const [healthCommand, setHealthCommand] = useState(goal.health_command ?? '')
+  const [healthEvery, setHealthEvery] = useState(goal.health_every_minutes)
+  const [healthTriggers, setHealthTriggers] = useState(goal.health_triggers_run)
+  const [toolMap, setToolMap] = useState<[string, string][]>(Object.entries(goal.tool_map))
+  const [secret, setSecret] = useState<string | null>(null)
+  const enableWebhook = async () => {
+    const r = await fetch(`/api/goals/${data.plan.id}/webhook`, { method: 'POST' })
+    if (r.ok) setSecret((await r.json()).secret)
+  }
   const [autonomy, setAutonomy] = useState<Record<string, (typeof MODES)[number]>>(goal.autonomy)
   const [newCategory, setNewCategory] = useState('')
   const [limits, setLimits] = useState(goal.limits)
   const [retention, setRetention] = useState(goal.item_retention_days)
-  const categories = [...new Set([...Object.keys(autonomy), ...Object.keys(data.approval_stats)])].sort()
+  // Every category the goal knows about: configured, seen in decisions, or named by a tool rule
+  const categories = [...new Set([...Object.keys(autonomy), ...Object.keys(data.approval_stats), ...Object.values(goal.tool_map)])].sort()
   const input = 'border border-gray-200 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400'
 
   return (
@@ -336,13 +360,75 @@ function Settings({ data, busy, patch }: { data: GoalData; busy: string | null; 
 
         <div className="flex flex-wrap items-end gap-4">
           <label className="space-y-1">
-            <span className="block text-xs font-medium text-gray-600">Run every (minutes, empty = manual only)</span>
-            <input value={minutes} onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ''))} className={`${input} w-28`} />
+            <span className="block text-xs font-medium text-gray-600">Schedule</span>
+            <select value={scheduleKind} onChange={(e) => setScheduleKind(e.target.value as typeof scheduleKind)} className={`${input} bg-white`}>
+              <option value="manual">Manual only</option>
+              <option value="interval">Every N minutes</option>
+              <option value="cron">Cron</option>
+            </select>
           </label>
-          <label className="space-y-1">
-            <span className="block text-xs font-medium text-gray-600">Active hours</span>
-            <input value={hours} onChange={(e) => setHours(e.target.value)} placeholder="08:00-20:00" className={`${input} w-32`} disabled={!minutes} />
-          </label>
+          {scheduleKind === 'interval' && (<>
+            <label className="space-y-1">
+              <span className="block text-xs font-medium text-gray-600">Minutes</span>
+              <input value={minutes} onChange={(e) => setMinutes(e.target.value.replace(/\D/g, ''))} className={`${input} w-24`} />
+            </label>
+            <label className="space-y-1">
+              <span className="block text-xs font-medium text-gray-600">Active hours</span>
+              <input value={hours} onChange={(e) => setHours(e.target.value)} placeholder="08:00-20:00" className={`${input} w-32`} />
+            </label>
+          </>)}
+          {scheduleKind === 'cron' && (
+            <label className="space-y-1">
+              <span className="block text-xs font-medium text-gray-600">Cron (minute hour day month weekday, local time)</span>
+              <input value={cron} onChange={(e) => setCron(e.target.value)} placeholder="0 9 * * 1-5" className={`${input} w-56 font-mono`} />
+            </label>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-gray-600">Webhook — let another system start a run</p>
+          {data.webhook_enabled || secret ? (
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-green-700">On</span>
+              <button type="button" className="px-2 py-1 border border-gray-200 rounded-md" onClick={enableWebhook}>New secret</button>
+              <button type="button" className="px-2 py-1 text-gray-500 hover:text-red-600"
+                onClick={async () => { setSecret(null); await call('webhook', `/api/goals/${data.plan.id}/webhook`, { method: 'DELETE' }) }}>Turn off</button>
+            </div>
+          ) : (
+            <button type="button" className="px-2 py-1 text-xs border border-gray-200 rounded-md" onClick={enableWebhook}>Turn on</button>
+          )}
+          {secret && (
+            <div className="text-xs bg-amber-50 border border-amber-200 rounded-md p-2 space-y-1">
+              <p>Copy this now — the secret won&apos;t be shown again.</p>
+              <pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-gray-800">
+                {`curl -X POST ${typeof location !== 'undefined' ? location.origin : ''}/api/goals/${data.plan.id}/trigger -H "Authorization: Bearer ${secret}"`}
+              </pre>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-gray-600">Health check — a command that exits 0 while the goal is met (the last number it prints is charted)</p>
+          <input value={healthCommand} onChange={(e) => setHealthCommand(e.target.value)} placeholder="node scripts/unread-older-than-a-day.js" className={`${input} w-full font-mono`} />
+          <div className="flex flex-wrap items-center gap-4 text-xs text-gray-600">
+            <label className="flex items-center gap-2">Every
+              <input value={healthEvery} onChange={(e) => setHealthEvery(Number(e.target.value.replace(/\D/g, '')) || 1)} className={`${input} w-20`} /> minutes</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={healthTriggers} onChange={(e) => setHealthTriggers(e.target.checked)} /> Start a run when it fails</label>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-gray-600">Tool rules — which tools count as which action (enforced by the goal-guard hook)</p>
+          {toolMap.map(([pattern, category], i) => (
+            <div key={i} className="flex gap-2">
+              <input value={pattern} onChange={(e) => setToolMap(toolMap.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} placeholder="mcp__gmail__send*" className={`${input} flex-1 font-mono text-xs`} />
+              <span className="text-gray-400 self-center">→</span>
+              <input value={category} onChange={(e) => setToolMap(toolMap.map((r, j) => (j === i ? [r[0], e.target.value] : r)))} placeholder="email.send" className={`${input} w-40 font-mono text-xs`} />
+              <button type="button" onClick={() => setToolMap(toolMap.filter((_, j) => j !== i))} className="text-xs text-gray-400 hover:text-red-600">Remove</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => setToolMap([...toolMap, ['', '']])} className="px-2 py-1 text-xs border border-gray-200 rounded-md">Add rule</button>
+          {toolMap.length > 0 && <p className="text-xs text-gray-500">Rules only apply with the guard installed: <code>npm run setup-hooks --prefix mcp -- --guard</code></p>}
         </div>
 
         <div>
@@ -393,7 +479,13 @@ function Settings({ data, busy, patch }: { data: GoalData; busy: string | null; 
           <button disabled={busy !== null}
             onClick={() => patch({
               objective, instructions, autonomy, limits, item_retention_days: retention,
-              interval: minutes ? { minutes: Number(minutes), active_hours: hours.trim() || null } : null,
+              schedule: scheduleKind === 'manual' ? null
+                : scheduleKind === 'interval' ? { kind: 'interval', minutes: Number(minutes) || 30, active_hours: hours.trim() || null }
+                : { kind: 'cron', expr: cron },
+              health_command: healthCommand.trim() || null,
+              health_every_minutes: healthEvery,
+              health_triggers_run: healthTriggers,
+              tool_map: Object.fromEntries(toolMap.filter(([p, c]) => p.trim() && c.trim()).map(([p, c]) => [p.trim(), c.trim()])),
             })}
             className="px-4 py-2 text-sm bg-gray-900 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50">{busy === 'save' ? 'Saving…' : 'Save settings'}</button>
           {goal.status !== 'retired' && (
@@ -403,5 +495,92 @@ function Settings({ data, busy, patch }: { data: GoalData; busy: string | null; 
         </div>
       </div>
     </details>
+  )
+}
+
+function Suggestions({ data, busy, patch }: { data: GoalData; busy: string | null; patch: (body: object, label?: string) => Promise<boolean> }) {
+  if (data.suggestions.length === 0) return null
+  return (
+    <div className="space-y-2">
+      {data.suggestions.map((sug) => (
+        <div key={sug.category} className="flex items-center gap-3 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm">
+          <span className="flex-1 text-blue-900">
+            You approved the last <b>{sug.approved_in_a_row}</b> <code className="text-xs">{sug.category}</code> proposals in a row. Let the agent do these on its own?
+          </span>
+          <button disabled={busy !== null} onClick={() => patch({ autonomy: { ...data.goal.autonomy, [sug.category]: 'auto' } }, 'promote')}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">Switch to auto</button>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+/** Tiny trend line of health values, oldest → newest. */
+function Sparkline({ values }: { values: number[] }) {
+  if (values.length < 2) return null
+  const w = 160
+  const h = 32
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min || 1
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * w},${h - 2 - ((v - min) / span) * (h - 4)}`).join(' ')
+  return (
+    <svg width={w} height={h} className="text-gray-500" role="img" aria-label={`Trend from ${values[0]} to ${values[values.length - 1]}`}>
+      <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  )
+}
+
+function HealthSection({ data, goalId, busy, call }: { data: GoalData; goalId: string; busy: string | null; call: Call }) {
+  const last = data.health[0]
+  const values = [...data.health].reverse().map((h) => h.value).filter((v): v is number => v !== null)
+  return (
+    <Section title="Health">
+      {!data.goal.health_command ? (
+        <Empty>No health check. Add a command in Settings that exits 0 while the goal is being met.</Empty>
+      ) : (
+        <div className="bg-white rounded-lg border border-gray-200 px-4 py-3 space-y-2">
+          <div className="flex items-center gap-3">
+            {last ? (
+              <span className={`text-xs px-1.5 py-0.5 rounded ${last.passed ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{last.passed ? 'healthy' : 'failing'}</span>
+            ) : <span className="text-xs text-gray-400">not checked yet</span>}
+            {last && last.value !== null && <span className="text-lg font-semibold text-gray-800 tabular-nums">{last.value}</span>}
+            <Sparkline values={values} />
+            <button onClick={() => call('health', `/api/goals/${goalId}/health`)} disabled={busy !== null}
+              className="ml-auto text-xs px-2 py-1 border border-gray-200 rounded-md hover:bg-gray-50 disabled:opacity-50">{busy === 'health' ? 'Checking…' : 'Check now'}</button>
+          </div>
+          <code className="block text-xs text-gray-500 truncate">{data.goal.health_command}</code>
+          {last && !last.passed && last.output && <pre className="text-[11px] bg-gray-50 rounded p-2 max-h-24 overflow-auto whitespace-pre-wrap">{last.output}</pre>}
+          {last && (
+            <p className="text-xs text-gray-400">
+              Last checked {when(last.created_at)} · every {data.goal.health_every_minutes} min{data.goal.health_triggers_run ? ' · failures start a run' : ''}
+            </p>
+          )}
+        </div>
+      )}
+    </Section>
+  )
+}
+
+function GuardSection({ calls, hasRules }: { calls: ToolCallRecord[]; hasRules: boolean }) {
+  return (
+    <Section title="Guard">
+      {!hasRules ? (
+        <Empty>No tool rules. Map tools to action categories in Settings so the goal-guard hook can enforce autonomy on them.</Empty>
+      ) : calls.length === 0 ? (
+        <Empty>No guarded tool calls yet.</Empty>
+      ) : (
+        <ul className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+          {calls.map((c) => (
+            <li key={c.id} className="px-4 py-2 text-xs flex items-center gap-2" title={c.reason ?? undefined}>
+              <span className={c.decision === 'allow' ? 'text-green-600' : 'text-red-600'}>{c.decision === 'allow' ? 'allowed' : 'blocked'}</span>
+              <code className="truncate">{c.tool_name}</code>
+              <span className="text-gray-400">{c.category}</span>
+              <span className="text-gray-400 ml-auto">{when(c.created_at)}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Section>
   )
 }

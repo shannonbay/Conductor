@@ -90,7 +90,7 @@ export const getRun = (runId: string) => core.getRun(getDb(), runId)
 export const updateRun = (runId: string, fields: Parameters<typeof core.updateRun>[2]) => core.updateRun(getDb(), runId, fields)
 export const listRuns = (planId: string, limit?: number) => core.listRuns(getDb(), planId, limit)
 export const getOpenRun = (planId: string) => core.getOpenRun(getDb(), planId)
-export const queueRun = (planId: string) => core.queueRun(getDb(), planId, 'manual')
+export const queueRun = (planId: string, trigger: core.TriggerKind = 'manual') => core.queueRun(getDb(), planId, trigger)
 export const startRun = (runId: string, sessionId: string | null) => core.startRun(getDb(), runId, sessionId)
 export const failRun = (runId: string, status: 'failed' | 'timed_out', reason: string) => core.failRun(getDb(), runId, status, reason)
 export const decideTick = (planId: string, now?: Date) => core.decideTick(getDb(), planId, now)
@@ -98,6 +98,45 @@ export const nextIntervalRun = (planId: string, from?: Date) => core.nextInterva
 export const recordSkip = (planId: string, trigger: core.TriggerKind, reason: string, now?: Date) => core.recordSkip(getDb(), planId, trigger, reason, now)
 export const archiveResolved = (planId: string, now?: Date) => core.archiveResolved(getDb(), planId, now)
 export const listMemory = (planId: string) => core.listMemory(getDb(), planId)
+export type { Schedule, HealthResult, ToolCallRecord } from '@conductor/core'
+export const getSchedule = (planId: string) => core.getSchedule(getDb(), planId)
+export const setSchedule = (planId: string, schedule: core.Schedule | null) => core.setSchedule(getDb(), planId, schedule)
+export const nextScheduledRun = (planId: string, from?: Date) => core.nextScheduledRun(getDb(), planId, from)
+export const getEventTrigger = (planId: string) => core.getEventTrigger(getDb(), planId)
+export const enableEventTrigger = (planId: string) => core.enableEventTrigger(getDb(), planId)
+export const disableEventTrigger = (planId: string) => core.disableEventTrigger(getDb(), planId)
+export const verifyEventSecret = (planId: string, secret: string) => core.verifyEventSecret(getDb(), planId, secret)
+export const runHealthCheck = (planId: string) => core.runHealthCheck(getDb(), planId)
+export const listHealth = (planId: string, limit?: number) => core.listHealth(getDb(), planId, limit)
+export const healthDue = core.healthDue
+export const listToolCalls = (planId: string, limit?: number) => core.listToolCalls(getDb(), planId, limit)
+
+/** Number of recent decisions per category, and the suggestion threshold. */
+export const PROMOTE_AFTER = 10
+
+/**
+ * Categories still at "propose" whose last PROMOTE_AFTER human decisions were all
+ * approvals — candidates to switch to "auto".
+ */
+export function getAutonomySuggestions(planId: string): { category: string; approved_in_a_row: number }[] {
+  const goal = core.getGoal(getDb(), planId)
+  if (!goal) return []
+  const rows = getDb().prepare(`
+    SELECT json_extract(t.state, '$.action.category') AS category, v.passed
+    FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
+    WHERE v.plan_id = ? AND v.gate = 'approval' AND json_extract(t.state, '$.action.category') IS NOT NULL
+    ORDER BY v.created_at DESC, v.rowid DESC
+  `).all(planId) as { category: string; passed: number }[]
+  const streak = new Map<string, { n: number; broken: boolean }>()
+  for (const r of rows) {
+    const s = streak.get(r.category) ?? { n: 0, broken: false }
+    if (!s.broken) { if (r.passed) s.n++; else s.broken = true }
+    streak.set(r.category, s)
+  }
+  return [...streak.entries()]
+    .filter(([c, s]) => s.n >= PROMOTE_AFTER && core.autonomyFor(goal, c) === 'propose')
+    .map(([category, s]) => ({ category, approved_in_a_row: s.n }))
+}
 export const getMemory = (id: string) => core.getMemory(getDb(), id)
 export const insertMemory = (m: Parameters<typeof core.insertMemory>[1]) => core.insertMemory(getDb(), m)
 export const updateMemory = (id: string, fields: Parameters<typeof core.updateMemory>[2]) => core.updateMemory(getDb(), id, fields)

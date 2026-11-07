@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { nanoid } from 'nanoid'
 import { existsSync } from 'fs'
-import { createGoal, listGoals, getGoalItems, listRuns, GoalError } from '@/lib/db'
+import { createGoal, listGoals, getGoalItems, listRuns, GoalError, setSchedule, updateGoal, nextScheduledRun } from '@/lib/db'
 import { recordEvent } from '@/lib/event-log'
 import { ok, err, serverError } from '@/lib/api-utils'
 
@@ -15,6 +15,7 @@ const CreateGoalSchema = z.object({
   working_dir: z.string().trim().min(1),
   interval_minutes: z.number().int().min(1).max(10_080).nullable().optional(),
   active_hours: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/, 'Use HH:MM-HH:MM').nullable().optional(),
+  cron: z.string().trim().min(1).nullable().optional(),
   autonomy: AutonomySchema.optional(),
 })
 
@@ -57,6 +58,14 @@ export async function POST(req: NextRequest) {
       { objective: input.objective, instructions: input.instructions, autonomy: input.autonomy ?? {} },
       input.interval_minutes ? { minutes: input.interval_minutes, ...(input.active_hours && { active_hours: input.active_hours }) } : undefined,
     )
+    if (input.cron && !input.interval_minutes) {
+      try {
+        setSchedule(id, { kind: 'cron', expr: input.cron })
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e))
+      }
+      updateGoal(id, { next_run_at: nextScheduledRun(id) })
+    }
     recordEvent({ planId: id, taskId: id, eventType: 'plan_created', actor: 'human', payload: { kind: 'goal' } })
     return ok({ id, goal }, 201)
   } catch (e) {

@@ -1,8 +1,9 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import {
-  getPlan, updatePlan, getGoal, updateGoal, getIntervalTrigger, setIntervalTrigger, listRuns, getOpenRun,
+  getPlan, updatePlan, getGoal, updateGoal, getIntervalTrigger, listRuns, getOpenRun,
   listMemory, getGoalItems, getApprovalStats, isProposal, type Task,
+  getSchedule, setSchedule, nextScheduledRun, getEventTrigger, listHealth, listToolCalls, getAutonomySuggestions,
 } from '@/lib/db'
 import { recordEvent } from '@/lib/event-log'
 import { ok, err, notFound, serverError } from '@/lib/api-utils'
@@ -50,6 +51,11 @@ export async function GET(_req: NextRequest, { params }: Params) {
         .map(itemView),
       memory: listMemory(id),
       approval_stats: getApprovalStats(id),
+      schedule: getSchedule(id),
+      webhook_enabled: Boolean(getEventTrigger(id)),
+      health: listHealth(id, 30),
+      tool_calls: listToolCalls(id, 20),
+      suggestions: getAutonomySuggestions(id),
     })
   } catch (e) {
     return serverError(e)
@@ -72,6 +78,15 @@ const PatchSchema = z.object({
     minutes: z.number().int().min(1).max(10_080),
     active_hours: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/, 'Use HH:MM-HH:MM').nullable().optional(),
   }).nullable().optional(),
+  /** Replaces interval: { kind: 'interval', minutes, active_hours? } | { kind: 'cron', expr } | null (manual only) */
+  schedule: z.discriminatedUnion('kind', [
+    z.object({ kind: z.literal('interval'), minutes: z.number().int().min(1).max(10_080), active_hours: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/, 'Use HH:MM-HH:MM').nullable().optional() }),
+    z.object({ kind: z.literal('cron'), expr: z.string().trim().min(1) }),
+  ]).nullable().optional(),
+  tool_map: z.record(z.string().min(1), z.string().min(1)).optional(),
+  health_command: z.string().trim().min(1).nullable().optional(),
+  health_every_minutes: z.number().int().min(1).max(10_080).optional(),
+  health_triggers_run: z.boolean().optional(),
 })
 
 /** PATCH — edit goal settings, pause/resume/retire, change the schedule. */
@@ -82,24 +97,34 @@ export async function PATCH(req: NextRequest, { params }: Params) {
     if (!goal) return notFound('Goal')
     const parsed = PatchSchema.safeParse(await req.json())
     if (!parsed.success) return err(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
-    const { name, interval, ...fields } = parsed.data
+    const { name, interval, schedule: scheduleInput, ...fields } = parsed.data
 
     if (name) updatePlan(id, { name, updated_at: new Date().toISOString() })
     if (fields.objective) updatePlan(id, { description: fields.objective })
     updateGoal(id, fields)
 
-    if (interval !== undefined) {
-      setIntervalTrigger(id, interval ? { minutes: interval.minutes, ...(interval.active_hours && { active_hours: interval.active_hours }) } : null)
+    // `interval` is the older form of `schedule`
+    const schedule = scheduleInput !== undefined ? scheduleInput
+      : interval !== undefined ? (interval ? { kind: 'interval' as const, ...interval } : null)
+      : undefined
+    if (schedule !== undefined) {
+      try {
+        setSchedule(id, schedule ? (schedule.kind === 'interval'
+          ? { kind: 'interval', minutes: schedule.minutes, ...(schedule.active_hours && { active_hours: schedule.active_hours }) }
+          : schedule) : null)
+      } catch (e) {
+        return err(e instanceof Error ? e.message : String(e))
+      }
     }
-    // Resuming or (re)scheduling an active goal makes the next run due now
-    const nowActive = (fields.status ?? goal.status) === 'active'
-    if (nowActive && (interval || (fields.status === 'active' && goal.status !== 'active'))) {
-      updateGoal(id, { next_run_at: getIntervalTrigger(id) ? new Date().toISOString() : null })
+    // A new schedule, or resuming, makes the next run due: now for intervals, the next match for cron
+    const resumed = fields.status === 'active' && goal.status !== 'active'
+    if (schedule !== undefined || resumed) {
+      const s = getSchedule(id)
+      updateGoal(id, { next_run_at: !s ? null : s.kind === 'interval' ? new Date().toISOString() : nextScheduledRun(id) })
     }
-    if (interval === null) updateGoal(id, { next_run_at: null })
 
     recordEvent({ planId: id, taskId: id, eventType: 'plan_updated', actor: 'human', payload: { changes: Object.keys(parsed.data) } })
-    return ok({ goal: getGoal(id), interval: getIntervalTrigger(id)?.config ?? null })
+    return ok({ goal: getGoal(id), interval: getIntervalTrigger(id)?.config ?? null, schedule: getSchedule(id) })
   } catch (e) {
     return serverError(e)
   }
