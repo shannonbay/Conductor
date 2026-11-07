@@ -71,6 +71,8 @@ Tests live in `mcp/src/tests/`. `vitest.config.ts` sets `CONDUCTOR_DB=:memory:`.
 
 To run a single test file: `npm test -- src/tests/tools/create_plan.test.ts`
 
+When working in this repo, call `mcp__conductor__next_task` after opening a plan or finishing a task to see what to do next.
+
 ### Web App (`cd web`)
 
 ```bash
@@ -148,6 +150,14 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 **`set_status` to `active` is blocked** if `depends_on` lists any sibling not yet `completed`.
 
 **Forced decomposition (opt-in):** with `CONDUCTOR_REQUIRE_DECOMPOSE=1` in the MCP server's env, `set_status` to `active` is also blocked for a task with no children unless its `state.atomic` is `true`. This lives in the server (not a hook) because only the server knows which plan is open.
+
+**Strict completion (opt-in):** with `CONDUCTOR_STRICT_COMPLETE=1`, `set_status` to `completed` throws while any child is not completed/abandoned (otherwise it's a warning in the response).
+
+**Change history**: every mutating MCP tool calls `record()` (`mcp/src/history.ts`) to write an `events` row with `actor: 'agent'`, `via: 'mcp'` and, for edits/status changes, old and new values. The web app writes `actor: 'human'` rows via `recordEvent()`. Both show in the activity feed and in the `get_history` tool. A new mutating MCP tool must call `record()` too.
+
+**`next_task`** walks the open plan in tree order and returns `continue` (active leaf), `start` (pending leaf with dependencies met), `complete` (all children resolved) or `none` with blockers.
+
+**Setup check**: `npm run doctor` from the repo root (rebuilds core/mcp, then runs `mcp/src/doctor.ts`). Add a check there when you add a new piece of setup.
 
 **`working_dir` is required on every plan** and is never null. MCP's `create_plan` defaults it to `process.cwd()` (the directory Claude Code was launched from). Web UI requires the user to select one. Agents receive it in their system prompt so they know where to operate on the filesystem.
 

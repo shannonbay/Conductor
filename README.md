@@ -35,6 +35,8 @@ At each turn, the agent sees only its **immediate context**: the current task, i
 | `set_status` | Transition a task to `active`, `completed`, or `abandoned` |
 | `provision_tasks` | Bulk-create a list of child tasks in one call |
 | `synthesize` | Summarise direct children grouped by completion status |
+| `next_task` | What to work on next: continue an active task, start a ready one, or complete a finished parent — or why nothing is ready |
+| `get_history` | Recent changes to the plan (by Claude or in the UI), with old and new values |
 
 ## Web UI
 
@@ -155,21 +157,32 @@ Open [http://localhost:3000](http://localhost:3000). The settings gear (⚙) sho
 
 > **Note:** `--dangerously-load-development-channels` is required during the Channels research preview (Claude Code v2.1.80+). Custom channel plugins are not yet on the approved allowlist.
 
+## Checking your setup
+
+```bash
+npm run doctor
+```
+
+Rebuilds `core/` and `mcp/`, then checks Node.js, the SQLite native module, the database and schema, `.mcp.json`, the Claude Code hooks, the channel server and the web UI. Anything wrong comes with the command to fix it.
+
 ## Database
 
-Both the MCP server and web app write to `~/.conductor/tasks.db` (SQLite, WAL mode). Override the path with the `CONDUCTOR_DB` environment variable — set it to `:memory:` in tests for an isolated in-memory database.
+Both the MCP server and web app write to `~/.conductor/tasks.db` (SQLite, WAL mode). Override the path with the `CONDUCTOR_DB` environment variable — set it to `:memory:` in tests for an isolated in-memory database. The schema lives in one place, `core/src/migrate.ts`, and every change made by Claude or in the UI is recorded in the `events` table (shown in the activity feed and by `get_history`).
 
 ## Project structure
 
 ```
 Conductor/
+  core/              Shared schema, migrations and queries (@conductor/core)
   channel/           Claude Code channel server (MCP over stdio + HTTP :8789)
     src/server.ts    Entry point — MCP server + HTTP bridge
   mcp/               MCP server (stdio transport, no HTTP)
     src/
       index.ts       Entry point — registers tools and dispatches calls
+      cli.ts         `conductor doctor` setup checker
       schema.ts      Zod schemas for all tool inputs
-      db.ts          SQLite helpers (minimal, no migrations)
+      db.ts          Binds @conductor/core queries to one connection
+      history.ts     Records MCP changes in the events log
       session.ts     In-memory open-plan tracking
       context.ts     Builds the context view returned by every tool
       tools/         One file per tool handler
@@ -185,14 +198,14 @@ Conductor/
 ## Running tests
 
 ```bash
-# MCP server
-cd mcp && npm test
+npm test             # all packages, from the repo root
 
-# Web app
-cd web && npm test
+cd core && npm test  # schema and migrations
+cd mcp && npm test   # MCP tools and doctor
+cd web && npm test   # web API, poller, request guard
 ```
 
-Both use Vitest with `CONDUCTOR_DB=:memory:` so tests are isolated and leave no files behind.
+All use Vitest with `CONDUCTOR_DB=:memory:` so tests are isolated and leave no files behind.
 
 ## Configuration
 
@@ -201,4 +214,7 @@ Both use Vitest with `CONDUCTOR_DB=:memory:` so tests are isolated and leave no 
 | `CONDUCTOR_DB` | `~/.conductor/tasks.db` | Path to SQLite database; use `:memory:` for tests |
 | `CONDUCTOR_CHANNEL_URL` | `http://127.0.0.1:8789` | URL of the channel server (web app → channel) |
 | `CONDUCTOR_CHANNEL_PORT` | `8789` | Port the channel server listens on |
+| `CONDUCTOR_REQUIRE_DECOMPOSE` | off | MCP server: `1` blocks activating a task with no sub-tasks unless `state.atomic` is true |
+| `CONDUCTOR_STRICT_COMPLETE` | off | MCP server: `1` blocks completing a task while any child is unresolved (otherwise a warning) |
+| `CONDUCTOR_ALLOWED_HOSTS` | — | Web server: extra `host:port` values to accept besides localhost (comma-separated) |
 | `BRAVE_SEARCH_API_KEY` | — | Optional; enables `web_search` tool in agent runs |
