@@ -14,6 +14,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
+import { fileURLToPath } from 'url'
 
 if (process.env.CONDUCTOR_SKIP_HOOKS === '1') {
   console.log('Conductor: skipping hook installation (CONDUCTOR_SKIP_HOOKS=1)')
@@ -88,6 +89,32 @@ for (const { event, detect, hook } of HOOKS) {
     changes.push(`updated ${event} hook`)
   }
 }
+
+// Goal guard (opt-in): a PreToolUse hook that enforces persistent-goal autonomy on
+// other tools during goal runs. Opt-in because it runs on every tool call.
+//   --guard     install or update it      --no-guard  remove it
+//   (neither)   keep an installed guard's path current
+const guardScript = fileURLToPath(new URL('../dist/goal-guard.js', import.meta.url))
+const guardHook = { type: 'command', command: `node "${guardScript}"`, timeout: 10 }
+const wantGuard = process.argv.includes('--guard')
+const removeGuard = process.argv.includes('--no-guard')
+settings.hooks.PreToolUse ??= []
+const guardGroup = settings.hooks.PreToolUse.find((g) => g.hooks?.some((h) => h.command?.includes('goal-guard')))
+if (removeGuard && guardGroup) {
+  settings.hooks.PreToolUse = settings.hooks.PreToolUse.filter((g) => g !== guardGroup)
+  changes.push('removed goal-guard hook')
+} else if (guardGroup) {
+  const h = guardGroup.hooks.find((x) => x.command?.includes('goal-guard'))
+  if (h.command !== guardHook.command) { Object.assign(h, guardHook); changes.push('updated goal-guard hook') }
+} else if (wantGuard) {
+  if (!existsSync(guardScript)) {
+    console.warn(`Conductor: ${guardScript} not found — run \`npm run build --prefix mcp\` first, then rerun with --guard.`)
+  } else {
+    settings.hooks.PreToolUse.push({ hooks: [guardHook] })
+    changes.push('installed goal-guard hook')
+  }
+}
+if (settings.hooks.PreToolUse.length === 0) delete settings.hooks.PreToolUse
 
 if (changes.length === 0) {
   console.log('Conductor: hooks in ~/.claude/settings.json are up to date — nothing to do.')

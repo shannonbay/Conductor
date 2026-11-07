@@ -189,7 +189,7 @@ export async function checkWeb(o: DoctorOptions): Promise<CheckResult> {
 
 /** Active goals only run while the web app (scheduler) and a channel-connected Claude Code session are up. */
 export async function checkGoals(o: DoctorOptions, channel: CheckResult, web: CheckResult): Promise<CheckResult | null> {
-  let goals: { plan: { name: string } }[]
+  let goals: { plan: { name: string }; goal: { tool_map: Record<string, string> } }[]
   try {
     const core = await import('@conductor/core')
     const db = core.openDatabase(o.env.CONDUCTOR_DB ?? join(o.home, '.conductor', 'tasks.db'))
@@ -199,6 +199,17 @@ export async function checkGoals(o: DoctorOptions, channel: CheckResult, web: Ch
   }
   if (goals.length === 0) return null
   const names = goals.map((g) => g.plan.name).join(', ')
+
+  // Goals with tool rules need the goal-guard hook, or the rules aren't enforced
+  const withRules = goals.filter((g) => Object.keys(g.goal.tool_map).length > 0)
+  if (withRules.length > 0) {
+    const settingsFile = join(o.home, '.claude', 'settings.json')
+    const installed = existsSync(settingsFile) && readFileSync(settingsFile, 'utf8').includes('goal-guard')
+    if (!installed) {
+      return warn('Persistent goals', `${withRules.map((g) => g.plan.name).join(', ')} ha${withRules.length === 1 ? 's' : 've'} tool rules, but the goal-guard hook isn't installed, so they aren't enforced`,
+        'Run `npm run setup-hooks --prefix mcp -- --guard`.')
+    }
+  }
   const missing = [web.level !== 'ok' && 'the web app', channel.level !== 'ok' && 'a channel-connected Claude Code session'].filter(Boolean)
   return missing.length === 0
     ? ok('Persistent goals', `${goals.length} active (${names}); scheduler can run them`)
