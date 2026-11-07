@@ -1,6 +1,7 @@
 {
   "name": "@conductor/core",
   "version": "1.0.0",
+  "license": "Apache-2.0",
   "private": true,
   "description": "Shared SQLite schema, migrations and queries for the Conductor MCP server and web app",
   "type": "module",

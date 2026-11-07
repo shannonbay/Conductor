@@ -1,6 +1,7 @@
 {
   "name": "@conductor/channel",
   "version": "0.1.0",
+  "license": "Apache-2.0",
   "description": "Conductor Claude Code channel server — bridges Conductor UI to a running Claude Code session",
   "type": "module",
   "scripts": {

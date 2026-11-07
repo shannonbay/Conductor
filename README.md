@@ -251,3 +251,7 @@ All use Vitest with `CONDUCTOR_DB=:memory:` so tests are isolated and leave no f
 | `CONDUCTOR_STRICT_COMPLETE` | off | MCP server: `1` blocks completing a task while any child is unresolved (otherwise a warning) |
 | `CONDUCTOR_ALLOWED_HOSTS` | — | Web server: extra `host:port` values to accept besides localhost (comma-separated) |
 | `BRAVE_SEARCH_API_KEY` | — | Optional; enables `web_search` tool in agent runs |
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE).
