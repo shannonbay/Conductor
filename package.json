@@ -7,5 +7,10 @@
     "channel",
     "mcp",
     "web"
-  ]
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=core --workspace=mcp --workspace=web",
+    "test": "npm test --workspaces --if-present",
+    "doctor": "npm run build --prefix core && npm run build --prefix mcp && node mcp/dist/cli.js doctor"
+  }
 }
