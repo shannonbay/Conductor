@@ -48,7 +48,7 @@ interface RunAgentPayload {
 }
 
 interface GeneratePlanPayload {
-  planId: number
+  planId: string
   planName: string
   description: string
   workingDir: string

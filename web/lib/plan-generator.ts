@@ -33,7 +33,7 @@ export async function generatePlan(
     : undefined
 
   const raw = await generatePlanViaChannel({
-    planId: plan.id as unknown as number,
+    planId: plan.id,
     planName: plan.name,
     description: plan.description ?? '',
     workingDir: plan.working_dir,

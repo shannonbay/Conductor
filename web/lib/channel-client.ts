@@ -84,7 +84,7 @@ async function channelRequest<T>(type: string, payload: unknown, timeoutMs = 60_
 // ── Plan generation ───────────────────────────────────────────────────────────
 
 export async function generatePlanViaChannel(params: {
-  planId: number
+  planId: string
   planName: string
   description: string
   workingDir: string
