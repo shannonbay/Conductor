@@ -248,3 +248,21 @@ test('Reschedule sets the chosen schedule', async ($, on) => {
   expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 10080 } }])
   await ui.unmount()
 })
+
+test('a category approved every time lately can be switched to auto, after a second press', async ($, on) => {
+  engine(on)
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Tidy', suggestions: [{ category: 'file.delete', approved_in_a_row: 10 }] })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Approved every time lately \(10 in a row\): file\.delete/ })).toBeDefined()
+
+  await ui.press({ key: 'auto-g1-file.delete' })
+  expect(await ui.find({ type: 'Text', text: /Runs will do file\.delete actions without asking you first/ })).toBeDefined()
+  await ui.press({ key: 'auto-no-g1-file.delete' })
+  expect(fake.of('update_goal')).toEqual([])
+
+  await ui.press({ key: 'auto-g1-file.delete' })
+  await ui.press({ key: 'auto-yes-g1-file.delete' })
+  expect(fake.of('update_goal').map((c) => c.input)).toEqual([{ goal_id: 'g1', autonomy: { 'file.delete': 'auto' } }])
+  await ui.unmount()
+})

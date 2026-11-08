@@ -9,7 +9,7 @@
 import type { EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
 import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
-import { approve, baseUrl, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus } from './api'
+import { approve, baseUrl, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
@@ -134,13 +134,43 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
       {g.needsYou.map((item) => proposalRow($, e, view, g, item))}
       {controls($, e, view, g)}
       {isOpen && details($, e, view, g)}
-      {g.suggestions.length > 0 && (
-        // The link on a line of its own: beside long text that wraps, the row draws them apart
+      {g.suggestions.map((s) => autoSuggestion($, e, view, g, s))}
+    </Box>
+  )
+}
+
+/**
+ * A category whose proposals were approved every time lately: switch it to
+ * auto here, after a second press, since runs then act without asking.
+ */
+function autoSuggestion($: $, e: E, view: View, g: GoalCard, s: GoalCard['suggestions'][number]) {
+  const { Box, Text, Button, Link } = $.ui.resolve(e)
+  const key = `${g.id}-${s.category}`
+  const confirming = view.pending?.kind === 'auto' && view.pending.goalId === g.id && view.pending.category === s.category
+  return (
+    <Box key={`suggestion-${key}`} flexDirection="column">
+      <Text dimColor>Approved every time lately ({s.approvedInARow} in a row): {s.category}</Text>
+      {confirming ? (
         <Box flexDirection="column">
-          <Text dimColor>
-            Approved every time lately: {g.suggestions.map((x) => x.category).join(', ')}. Consider switching to auto: ask Claude, or
-          </Text>
-          <Link key={`autonomy-${g.id}`} href={`${view.base}/goals/${encodeURIComponent(g.id)}`} label="open the goal page" />
+          <Text color="yellow">Runs will do {s.category} actions without asking you first. Switch?</Text>
+          <Box>
+            <Button
+              key={`auto-yes-${key}`}
+              label={view.doing === `auto:${key}` ? 'Switching…' : 'Yes, switch'}
+              onPress={() => {
+                void setConfirm($, null)
+                void act($, `auto:${key}`, 'switch to auto', async () => void (await updateGoal($, g.id, { autonomy: { [s.category]: 'auto' } })))
+              }}
+            />
+            <Text dimColor> · </Text>
+            <Button key={`auto-no-${key}`} label="Keep asking" plain onPress={() => void setConfirm($, null)} />
+          </Box>
+        </Box>
+      ) : (
+        <Box>
+          <Button key={`auto-${key}`} label={`Switch ${s.category} to auto`} plain onPress={() => void setConfirm($, { kind: 'auto', goalId: g.id, category: s.category })} />
+          <Text dimColor> · </Text>
+          <Link key={`autonomy-${key}`} href={`${view.base}/goals/${encodeURIComponent(g.id)}`} label="open the goal page" />
         </Box>
       )}
     </Box>
