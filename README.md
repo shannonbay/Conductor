@@ -8,7 +8,7 @@ It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `
 
 What a scheduled prompt (Claude Code's `/schedule`) can't give you: a goal remembers between runs (its items, memory and your past decisions), and it can't act beyond what you've approved, because the approval gate is enforced outside the model, not just asked for in the prompt.
 
-![The Goals pane beside a Claude Code chat: three goals with their last and next runs, the to-do lists, and an expanded to-do with Ask, Plan and Start](docs/goals-pane.png)
+![The Goals pane: five goals with their last and next runs and Reschedule, Run now and Pause, then the to-do lists, with an expanded to-do showing Ask, Plan and Start](docs/goals-pane.png)
 
 ## Persistent goals
 
