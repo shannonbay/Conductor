@@ -245,6 +245,12 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean; sugge
     notifications.push(e.text)
     return { value: { isSent: true, channel: 'terminal_bell' } }
   })
+  // Claude Code's phone push (sent only while Remote Control is connected and the person is away)
+  const pushes: string[] = []
+  on('tool.call', { tool: 'PushNotification' }, (_, e) => {
+    pushes.push(String((e as unknown as { message: string }).message))
+    return { result: { message: 'sent', pushSent: true } } as never
+  })
   on('ui.status', (_, e) => {
     statuses.push(e.text)
     return { value: undefined }
@@ -300,7 +306,7 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean; sugge
     return { result: { message: `stopped ${id}` } } as never
   })
   return {
-    toasts, notifications, statuses, asked, clock, agents, spawned, stopped, prompts, box,
+    toasts, notifications, pushes, statuses, asked, clock, agents, spawned, stopped, prompts, box,
     /** Loads or unloads the guard plugin (its status tool). */
     setGuarded: (on: boolean) => {
       tools = on ? [GUARD] : []

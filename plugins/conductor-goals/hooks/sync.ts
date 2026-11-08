@@ -5,7 +5,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { Snapshot } from '../types'
-import { announce, showStatus } from './alerts'
+import { announce, showStatus, savePoll } from './alerts'
 import { fetchOverview, fetchTodos, settings } from './api'
 import { toCard } from './model'
 import { kick } from './runner'
@@ -69,6 +69,7 @@ export function nextDelay(s: Snapshot): number {
 export function startPolling($: $, first: Snapshot): void {
   timer?.cancel()
   timer = $.clock.after(nextDelay(first), () => {
+    void $.clock.now().then((t) => savePoll($, t))
     void refresh($).then((s) => startPolling($, s))
   })
 }

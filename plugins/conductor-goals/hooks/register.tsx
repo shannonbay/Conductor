@@ -6,7 +6,7 @@
  */
 import type { EngineInterface, Register } from 'claude-code'
 
-import { resetAlerts } from './alerts'
+import { resetAlerts, markActive } from './alerts'
 import { configure } from './api'
 import { ago } from './model'
 import { renderPane } from './pane'
@@ -73,6 +73,11 @@ function failedTool() {
   return { result: 'Error: the conductor-goals tool failed unexpectedly.' }
 }
 
+/** A prompt or delivery the person sent: typed at the terminal, or from the phone (Remote Control). */
+function byPerson(origin: { kind: string } | undefined): boolean {
+  return origin?.kind === 'composer' || origin?.kind === 'bridge'
+}
+
 export const register: Register = (on, options) => {
   configure(options)
 
@@ -83,6 +88,17 @@ export const register: Register = (on, options) => {
 
   on('prompt.submit', async ($, e, next) => {
     await safeStart($, false)
+    // The person typed (or sent from the phone): no phone relay for a while. Task
+    // notifications and other automatic prompts don't count.
+    if (byPerson(e.origin)) void $.clock.now().then((t) => markActive($, t))
+    return next(e)
+  }).catch(passOn)
+
+  // A message from the phone or web (Remote Control) arrives as a delivery, not
+  // a prompt: after a reload it must start polling too, or phone alerts never come
+  on('session.receive', async ($, e, next) => {
+    await safeStart($, false)
+    if (!e.agentId && byPerson(e.origin)) void $.clock.now().then((t) => markActive($, t))
     return next(e)
   }).catch(passOn)
 
@@ -102,6 +118,7 @@ export const register: Register = (on, options) => {
   // A run's agent ending its work: finish the run now instead of at the next tick
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
+    if (!e.agentId) void safeStart($, false) // any turn of the conversation starts a reloaded plugin
     if (e.agentId && (await getRuns($))[e.agentId]) {
       $.clock.after(2_000, () => {
         void reconcile($).then((ended) => {

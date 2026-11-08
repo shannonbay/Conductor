@@ -109,6 +109,7 @@ Ask things like "what do my goals need?" or "approve the Alice reply".
 - The status line shows `Conductor: 2 need you · Inbox running`, or `Conductor: offline`.
 - A toast appears for each new proposal or failed run. If several arrive at once, they become one toast.
 - With system notifications on, you also get a notification through your Claude Code notification channel, at most once a minute per goal.
+- **On your phone:** with Remote Control connected and mobile push on in `/config`, an alert reaches the Claude app when you haven't typed (at the terminal or from the phone) for 5 minutes. The plugin passes it to Claude, which sends the push; reply "approve" or "reject, because ..." in the session, and confirm. Each relayed alert is a short turn. (A push the plugin sends itself is reported as sent but doesn't arrive in Claude Code 2.1.319, so that path, the `phone_push` setting, is off until it's fixed.) `goals_status` shows what happened to the last alert and its push.
 - While goal runs are going, a band above the prompt shows which (`● Goal run: Inbox · in the background`).
 
 ## Settings

@@ -47,6 +47,18 @@
       "title": "System notifications",
       "description": "Also send alerts through your notification channel, so you hear about them while working elsewhere.",
       "default": true
+    },
+    "phone_push": {
+      "type": "boolean",
+      "title": "Phone push from the plugin",
+      "description": "Push alerts to the Claude app from the plugin itself. Off by default: Claude Code reports these pushes as sent but doesn't deliver them yet (phone relay does the job meanwhile).",
+      "default": false
+    },
+    "phone_relay": {
+      "type": "boolean",
+      "title": "Phone notifications (through Claude)",
+      "description": "When you haven't typed in this session for 5 minutes, an alert is passed to Claude, which pushes it to the Claude app on your phone (with Remote Control connected and mobile push on in /config). Each alert costs a short turn. Reply in the session to approve or reject.",
+      "default": true
     }
   }
 }

@@ -14,7 +14,7 @@ type $ = EngineInterface
 export const DEFAULT_URL = 'http://localhost:3000'
 
 /** Settings from the plugin's userConfig, set by `register`. */
-export const settings = { url: DEFAULT_URL, pollSeconds: 15, alerts: 'all', osNotifications: true, maxConcurrent: 2 }
+export const settings = { url: DEFAULT_URL, pollSeconds: 15, alerts: 'all', osNotifications: true, phonePush: false, phoneRelay: true, maxConcurrent: 2 }
 
 export function configure(options: Readonly<Record<string, unknown>>): void {
   const url = typeof options.url === 'string' && options.url.trim() ? options.url.trim() : DEFAULT_URL
@@ -24,6 +24,8 @@ export function configure(options: Readonly<Record<string, unknown>>): void {
   settings.pollSeconds = Math.min(Math.max(Math.round(poll), 5), 600)
   settings.alerts = typeof options.alerts === 'string' ? options.alerts : 'all'
   settings.osNotifications = options.os_notifications !== false
+  settings.phonePush = options.phone_push === true
+  settings.phoneRelay = options.phone_relay !== false
   settings.maxConcurrent = Math.min(Math.max(Math.round(concurrent), 1), 5)
 }
 

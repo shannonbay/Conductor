@@ -12,6 +12,7 @@ import { kick } from './runner'
 import { askSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
 import { act, refresh, refreshTodos } from './sync'
+import { readLastAlert, readLastPoll, readTrace } from './alerts'
 
 type $ = EngineInterface
 
@@ -138,9 +139,19 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
   if (name === 'todos' || name === 'add_todo' || name === 'complete_todo') return todoTool($, name, input)
 
   if (name === 'goals_status') {
+    // Read the alert record first: the refresh below can raise an alert itself
+    const lastAlert = await readLastAlert($)
+    const lastPoll = await readLastPoll($)
+    const traced = await readTrace($)
     const s = await refresh($)
     if (!s.reachable) return fail(`Conductor isn't connected${s.error ? ` (${s.error})` : ''}. Check the conductor MCP server with /mcp.`)
-    return { text: summarize(s.goals, now), isError: false }
+    const at = (ms: number) => `${new Date(ms).toISOString()}, ${ago(new Date(ms).toISOString(), now)}`
+    const alert = lastAlert
+      ? `\n\nLast alert (${at(lastAlert.at)}): ${lastAlert.text}. Notification: ${lastAlert.notify}. Phone: ${lastAlert.push}.`
+      : ''
+    const poll = lastPoll ? `\nLast background poll: ${at(lastPoll)}.` : '\nNo background poll recorded.'
+    const checks = traced.length ? `\nAlert checks (oldest first):\n${traced.map((l) => `- ${l}`).join('\n')}` : ''
+    return { text: summarize(s.goals, now) + alert + poll + checks, isError: false }
   }
 
   const found = await resolveGoal($, input.goal)

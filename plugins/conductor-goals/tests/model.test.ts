@@ -1,5 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
+import { phoneText } from '../hooks/alerts'
+
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
   statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs,
@@ -115,4 +117,14 @@ test('/goal-new arguments: a short name before a colon, otherwise all objective;
   expect(fallbackTitle('keep my inbox under 20 unread')).toBe('Keep inbox under 20 unread')
   expect(fallbackTitle('!!!')).toBe('New goal')
   expect(parseSuggestion('{"choice": "daily", "reason": "x", "title": "Tidy Downloads"}')).toEqual({ choice: 'daily', reason: 'x', title: 'Tidy Downloads' })
+})
+
+test('phoneText keeps the answer instructions and fits a push', () => {
+  const g = { name: 'Tidy downloads' } as never
+  const long = phoneText([{ goal: g, item: { title: 'Delete '.concat('x'.repeat(300)) } }], [])
+  expect(long.length).toBeLessThanOrEqual(200)
+  expect(long).toContain('Reply "approve"')
+  expect(phoneText([], [{ goal: g }, { goal: g }])).toBe('Conductor: 2 goal runs failed.')
+  expect(phoneText([{ goal: g, item: { title: 'a' } }, { goal: g, item: { title: 'b' } }], [{ goal: g }]))
+    .toBe('Conductor: 2 proposals need you. Reply "what needs me?" in Claude. Tidy downloads: run failed.')
 })

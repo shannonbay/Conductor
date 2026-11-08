@@ -21,6 +21,29 @@ test('a new proposal raises a toast and a notification; ones waiting at load do 
   expect(notifications).toEqual(['Inbox: "Archive the newsletter" needs you'])
 })
 
+test('with phone_push on, a new proposal is pushed to the phone by the plugin', { options: { phone_push: true } }, async ($, on) => {
+  const { pushes, clock } = engine(on)
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeConductor(on, goals)
+  await $.session.start(START)
+  goals[0]!.needs_you.push(proposal('12', 'Archive the newsletter'))
+  fake.bump()
+  await poll(clock)
+  expect(pushes).toEqual(['Conductor: Inbox asks: "Archive the newsletter". Reply "approve" or "reject, because ..." in Claude.'])
+})
+
+test('by default the plugin sends no push itself', async ($, on) => {
+  const { pushes, notifications, clock } = engine(on)
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeConductor(on, goals)
+  await $.session.start(START)
+  goals[0]!.needs_you.push(proposal('1', 'A'))
+  fake.bump()
+  await poll(clock)
+  expect(notifications).toHaveLength(1)
+  expect(pushes).toEqual([])
+})
+
 test('several new proposals fold into one alert, and notifications are rate limited per goal', async ($, on) => {
   const { toasts, notifications, clock } = engine(on)
   const goals = [goal({ id: 'g1', name: 'Inbox' })]
@@ -76,4 +99,51 @@ test('os_notifications off keeps the toast only', { options: { os_notifications:
   await poll(clock)
   expect(toasts).toHaveLength(1)
   expect(notifications).toHaveLength(0)
+})
+
+test('goals_status reports the last alert and what became of its push', async ($, on) => {
+  const { clock } = engine(on)
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeConductor(on, goals)
+  await $.session.start(START)
+  goals[0]!.needs_you.push(proposal('12', 'Archive the newsletter'))
+  fake.bump()
+  await poll(clock)
+  const r = await $.tool.call({ tool: 'mcp__conductor-goals__goals_status' } as never)
+  expect(String(r.result)).toContain('Last alert')
+  expect(String(r.result)).toContain('Phone: relayed to Claude to push.')
+})
+
+test('while the person is away, an alert is relayed to Claude to push; not while they are typing', async ($, on) => {
+  const { prompts, clock } = engine(on)
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeConductor(on, goals)
+  await $.session.start(START)
+  goals[0]!.needs_you.push(proposal('12', 'Archive the newsletter'))
+  fake.bump()
+  await poll(clock)
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('PushNotification')
+  expect(prompts[0]).toContain('Conductor: Inbox asks: "Archive the newsletter"')
+
+  await $.prompt.submit({ text: 'what changed?', origin: { kind: 'composer' } } as never) // the person is back, typing at the terminal
+  await clock.advance(61_000)
+  goals[0]!.needs_you.push(proposal('13', 'Archive another'))
+  fake.bump()
+  await poll(clock)
+  expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(1)
+})
+
+test('a proposal that arrives while the plugin restarts still raises its alert', async ($, on) => {
+  on('session.end', () => ({ sessionId: 'test-session' }) as never)
+  const { toasts, clock } = engine(on)
+  const goals = [goal({ id: 'g1', name: 'Inbox', needs_you: [proposal('11', 'Old one')] })]
+  const fake = fakeConductor(on, goals)
+  await $.session.start(START)
+  await poll(clock)
+  await $.session.end({ reason: 'other' } as never)
+  goals[0]!.needs_you.push(proposal('12', 'Arrived during the restart'))
+  fake.bump()
+  await $.session.start(START)
+  expect(toasts).toEqual(['Conductor · Inbox: "Arrived during the restart" needs you'])
 })
