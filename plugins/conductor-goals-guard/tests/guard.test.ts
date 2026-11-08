@@ -77,3 +77,21 @@ test("a run's other tools go through the goal's guard", async ($, on) => {
   const r = await $.tool.call(call({ tool: 'mcp__gmail__delete', id: 'm1', agentId: 'run-agent' }))
   expect(said(r)).toContain('email.delete is off')
 })
+
+test("a run stopped by the usage limit is reported to Conductor; an ordinary turn isn't", async ($, on) => {
+  world(on)
+  const reports: unknown[] = []
+  on('tool.call', { tool: 'mcp__conductor__report_run_end' }, (_, e) => {
+    const { run_id, answer, reason } = e as unknown as Record<string, unknown>
+    reports.push({ run_id, answer, reason })
+    return { result: '{"outcome":"held"}' } as never
+  })
+  on('turn.complete', (_, e) => ({ text: e.answer }) as never)
+  await $.session.start(START)
+  const turn = (answer: string, agentId: string) =>
+    $.turn.complete({ answer, agentId, reason: 'answer', durationMs: 10, isAborted: false, turnId: 't1' } as never)
+  await turn('Archived 3 newsletters.', 'run-agent')
+  await turn("You've hit your 5-hour limit · resets 8:10pm", 'model-agent')
+  await turn("You've hit your 5-hour limit · resets 8:10pm", 'run-agent')
+  expect(reports).toEqual([{ run_id: 'run_abc123', answer: "You've hit your 5-hour limit · resets 8:10pm", reason: 'answer' }])
+})

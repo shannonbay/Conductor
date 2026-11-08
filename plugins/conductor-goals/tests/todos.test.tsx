@@ -73,9 +73,16 @@ test('ticking says how to undo; done to-dos can be put back; adding works', asyn
   expect(fake.of('todo_set').at(-1)?.input).toEqual({ list_id: 'p1', item_id: '1.1', status: 'pending' })
   expect(await ui.find({ key: 'todo-open-p1/1.1' })).toBeDefined()
 
+  expect(await ui.find({ key: 'todo-add-p1' })).toBeUndefined() // closed until + Add is pressed
+  await ui.press({ key: 'todo-addbtn-p1' })
+  expect((await ui.find({ key: 'todo-add-p1' }))?.props).toMatchObject({ autoFocus: true, placeholder: 'type it, then Enter' })
   await ui.input({ key: 'todo-add-p1', text: 'Goal templates' })
   expect(fake.of('todo_add').at(-1)?.input).toEqual({ working_dir: '/work/project', text: 'Goal templates', added_by: 'human', list_id: 'p1' })
   expect(await ui.find({ key: 'todo-open-p1/4' })).toBeDefined()
+  expect(await ui.find({ key: 'todo-add-p1' })).toBeUndefined() // closes after adding
+  await ui.press({ key: 'todo-addbtn-p1' })
+  await ui.press({ key: 'todo-add-cancel-p1' })
+  expect(await ui.find({ key: 'todo-add-p1' })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -128,6 +135,6 @@ test('Ask sends a question about the to-do, or adds it to a draft the person has
   await ui.press({ key: 'todo-ask-p1/1.3' })
   expect(prompts).toHaveLength(1)
   expect(box.draft).toBe('Is this worth doing before 1.6 (about to-do 1.3 on "Goals roadmap": Set autonomy from Claude Code)')
-  expect(toasts.at(-1)).toBe('Added to-do 1.3 to your prompt: press Enter to send it.')
+  expect(toasts.at(-1)).toBe('Added to your prompt: press Enter to send it.')
   await ui.unmount()
 })

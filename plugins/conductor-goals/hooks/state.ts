@@ -13,8 +13,9 @@ type $ = EngineInterface
 
 export const PANE = 'conductor-goals'
 
-const snapshot = atom({ plugin: 'conductor-goals', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-4' })
+const snapshot = atom({ plugin: 'conductor-goals', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-5' })
 const rejecting = atom({ plugin: 'conductor-goals', key: 'rejecting' } as const, null)
+const addingTo = atom({ plugin: 'conductor-goals', key: 'addingTo' } as const, null)
 const busy = atom({ plugin: 'conductor-goals', key: 'busy' } as const, null)
 const notice = atom({ plugin: 'conductor-goals', key: 'notice' } as const, null)
 const expanded = atom({ plugin: 'conductor-goals', key: 'expanded' } as const, [])
@@ -99,4 +100,11 @@ export async function getTodos($: $): Promise<Todos | null> {
 }
 export async function setTodos($: $, value: Todos | null): Promise<void> {
   await update($, todos, () => value)
+}
+
+export async function getAddingTo($: $): Promise<string | null> {
+  return read($, addingTo)
+}
+export async function setAddingTo($: $, value: string | null): Promise<void> {
+  await update($, addingTo, () => value)
 }

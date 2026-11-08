@@ -11,6 +11,7 @@ import type { TodoItem, TodoList } from '../types'
 import { addTodo, fetchTodos, setTodo } from './api'
 import { clip } from './model'
 import { act, refresh, refreshTodos } from './sync'
+import { sendToChat } from './chat'
 
 type $ = EngineInterface
 
@@ -85,17 +86,8 @@ export async function workOnTodo($: $, list: TodoList, item: TodoItem, mode: 'pl
  * the person has started typing in the prompt box: then the to-do is added to
  * their draft, so they can ask their own question about it.
  */
-export async function askAboutTodo($: $, list: TodoList, item: TodoItem): Promise<'sent' | 'added'> {
-  const { text: draft } = await $.prompt.read()
-  if (draft.trim()) {
-    const filled = await $.prompt.fill({ text: ` (about to-do ${item.id} on "${list.name}": ${item.text})`, mode: 'append' })
-    if (filled.isFilled) {
-      $.ui.toast(`Added to-do ${item.id} to your prompt: press Enter to send it.`)
-      return 'added'
-    }
-  }
-  await $.prompt.submit({ text: todoPrompt(list, item, 'ask') })
-  return 'sent'
+export function askAboutTodo($: $, list: TodoList, item: TodoItem): Promise<'sent' | 'added'> {
+  return sendToChat($, todoPrompt(list, item, 'ask'), `about to-do ${item.id} on "${list.name}": ${item.text}`)
 }
 
 /** The pane's actions, through the shared busy/notice/re-read wrapper. */

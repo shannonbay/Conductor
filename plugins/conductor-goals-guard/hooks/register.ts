@@ -40,6 +40,8 @@ const HUMAN_ONLY = new Set([
   'mcp__conductor__create_goal',
   'mcp__conductor__delete_memory',
   'mcp__conductor__set_schedule',
+  'mcp__conductor__update_goal',
+  'mcp__conductor__report_run_end',
 ])
 const HUMAN_ONLY_REASON = "This Conductor action is the person's: they take it from the Goals pane (/goals)."
 
@@ -77,6 +79,8 @@ const approvedCalls = new Set<string>()
  * plugin's own call while one is in flight.
  */
 let guardCallsInFlight = 0
+/** The person-only tools this plugin itself calls, inside a run's loop. */
+const OWN_CALLS = new Set(['mcp__conductor__guard_check', 'mcp__conductor__report_run_end'])
 
 type Verdict = { decision: 'allow' | 'deny'; category?: string; reason?: string }
 
@@ -96,6 +100,18 @@ async function guardCheck($: $, runId: string, tool: string): Promise<Verdict> {
     const text = resultText(r)
     if (r.isError === true || text.startsWith('Error:')) throw new Error(text)
     return JSON.parse(text) as Verdict
+  } finally {
+    guardCallsInFlight--
+  }
+}
+
+/** A final message that may mean the run was stopped (Conductor decides which, in report_run_end). */
+const STOPPED = /limit|rate|quota|credits|overloaded|api error/i
+
+async function reportRunEnd($: $, runId: string, answer: string, reason: string): Promise<void> {
+  guardCallsInFlight++
+  try {
+    await $.tool.call({ tool: 'mcp__conductor__report_run_end', run_id: runId, answer, reason } as never)
   } finally {
     guardCallsInFlight--
   }
@@ -151,7 +167,7 @@ export const register: Register = (on) => {
   // Permission
   on('tool.check', async ($, e, next) => {
     // This plugin's own guard check, in whichever loop the engine places it
-    if (e.tool === 'mcp__conductor__guard_check' && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return allow
+    if (OWN_CALLS.has(e.tool) && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return allow
     const runId = await runIdFor($, e.agentId)
     if (runId) {
       const fixed = fixedVerdict(e.tool)
@@ -182,7 +198,12 @@ export const register: Register = (on) => {
 
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
-    if (e.agentId && (await runIdFor($, e.agentId))) lastAnswers.set(e.agentId, e.answer)
+    const runId = await runIdFor($, e.agentId)
+    if (e.agentId && runId) {
+      lastAnswers.set(e.agentId, e.answer)
+      // Stopped by the usage limit or an error: Conductor skips (and holds runs) or fails it with the reason
+      if (e.reason === 'error' || STOPPED.test(e.answer)) await reportRunEnd($, runId, e.answer, e.reason).catch(() => {})
+    }
     return r
   }).catch(($, e, next) => next(e))
 

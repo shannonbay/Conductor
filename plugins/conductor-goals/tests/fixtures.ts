@@ -36,11 +36,14 @@ type FakeGoal = {
   objective: string
   status: string
   one_off?: boolean
+  instructions?: string
+  autonomy?: Record<string, string>
+  tool_map?: Record<string, string>
   next_run_at: string | null
   schedule: { kind: 'interval'; minutes: number; active_hours?: string } | { kind: 'cron'; expr: string } | null
   open_run: { id: string; status: string } | null
   activity: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
-  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null }[]
+  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null }[]
   needs_you: Item[]
   open_items: Item[]
   health: { passed: boolean; value: number | null }[]
@@ -74,7 +77,7 @@ export type Call = { tool: string; input: Record<string, unknown> }
 
 const TOOLS = [
   'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'create_goal',
-  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set',
+  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set', 'update_goal',
 ] as const
 
 /**
@@ -83,7 +86,7 @@ const TOOLS = [
  */
 type FakeTodoList = { id: string; name: string; items: { id: string; text: string; status: string; depth: number; notes: string | null }[] }
 
-export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[] } = {}) {
+export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string } } = {}) {
   const lists: FakeTodoList[] = opts.todos ?? []
   const listView = () => lists.map((l) => {
     const done = l.items.filter((i) => i.status === 'completed').length
@@ -110,7 +113,7 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
       switch (name) {
         case 'goals_overview':
           if (input.etag === etag()) return ok({ changed: false, etag: etag() }) as never
-          return ok({ changed: true, etag: etag(), goals: goals.map((x) => ({ ...x, open_item_count: x.open_items.length })) }) as never
+          return ok({ changed: true, etag: etag(), goals: goals.map((x) => ({ ...x, open_item_count: x.open_items.length })), hold: opts.hold ?? null }) as never
         case 'decide_item':
           g!.needs_you = g!.needs_you.filter((t) => t.id !== input.item_id)
           version++
@@ -172,6 +175,18 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
           g!.next_run_at = g!.schedule ? (g!.schedule.kind === 'interval' ? new Date(NOW).toISOString() : '2026-11-08T09:00:00Z') : null
           version++
           return ok({ goal_id: g!.id, schedule: g!.schedule, next_run_at: g!.next_run_at }) as never
+        }
+        case 'update_goal': {
+          const changed: string[] = []
+          for (const [cat, mode] of Object.entries((input.autonomy ?? {}) as Record<string, string | null>)) {
+            g!.autonomy = { ...g!.autonomy }
+            if (mode === null) delete g!.autonomy[cat]
+            else g!.autonomy[cat] = mode
+            changed.push(`${cat}: ${mode ?? 'back to propose'}`)
+          }
+          if (input.status) { g!.status = String(input.status); changed.push(String(input.status)) }
+          version++
+          return ok({ goal_id: g!.id, changed }) as never
         }
         case 'todo_list':
           return ok({ lists: listView() }) as never

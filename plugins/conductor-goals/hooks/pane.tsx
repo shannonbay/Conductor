@@ -12,8 +12,9 @@ import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
 import { approve, baseUrl, deleteMemory, reject, runNow, setGoalStatus } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule } from './schedule'
-import { ago, clip, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
-import { getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setConfirm, setRejecting, toggleExpanded } from './state'
+import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
+import { sendToChat } from './chat'
+import { getAddingTo, getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setConfirm, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
@@ -47,6 +48,7 @@ export async function renderPane($: $, e: E) {
   const message = await getNotice($)
   const guardMissing = await getGuardMissing($)
   const todos = await getTodos($)
+  const addingTo = await getAddingTo($)
 
   if (!s.reachable && s.goals.length === 0) {
     return (
@@ -78,6 +80,7 @@ export async function renderPane($: $, e: E) {
   return (
     <Box flexDirection="column">
       {guardMissing && <Text color="yellow">{GUARD_MISSING}</Text>}
+      {s.hold && <Text color="yellow">Goal runs are on hold until {holdUntilText(s.hold.until, view.now)}: the usage limit is reached. Due runs start after that.</Text>}
       {!s.reachable && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
       {current.length === 0 && (
         <Box flexDirection="column">
@@ -86,7 +89,7 @@ export async function renderPane($: $, e: E) {
         </Box>
       )}
       {current.map((g, i) => goalCard($, e, view, g, i))}
-      {todos && todos.lists.length > 0 && todoSection($, e, view, todos)}
+      {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo)}
       {done.length > 0 && doneSection($, e, view, done)}
       {message && <Text color="red">{message}</Text>}
       <Box>
@@ -128,8 +131,10 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
       {g.suggestions.length > 0 && (
         <Box>
           <Text dimColor>
-            Approved every time lately: {g.suggestions.map((x) => x.category).join(', ')}. Consider switching to auto{' '}
+            Approved every time lately: {g.suggestions.map((x) => x.category).join(', ')}. Consider switching to auto
           </Text>
+          {/* A space of its own: a trailing space inside the text is trimmed when drawn */}
+          <Text> </Text>
           <Link key={`autonomy-${g.id}`} href={`${view.base}/goals/${encodeURIComponent(g.id)}`} label="on the goal page" />
         </Box>
       )}
@@ -221,6 +226,15 @@ function controls($: $, e: E, view: View, g: GoalCard) {
 
   return (
     <Box key={`controls-${g.id}`} marginTop={g.needsYou.length > 0 ? 1 : 0}>
+      {(() => {
+        const run = lastRun(g)
+        return run && isFailed(run.status) ? (
+          <Box>
+            <Button key={`discuss-${g.id}`} label={view.doing === `discuss:${g.id}` ? 'Sending…' : 'Discuss'} onPress={() => void discuss($, g, run)} />
+            <Text> </Text>
+          </Box>
+        ) : null
+      })()}
       {g.status === 'active' && !g.schedule && !g.oneOff && (
         <Button
           key={`schedule-${g.id}`}
@@ -265,15 +279,22 @@ function details($: $, e: E, view: View, g: GoalCard) {
       ))}
       {g.openItemCount > g.openItems.length && <Text dimColor>  … and {g.openItemCount - g.openItems.length} more</Text>}
 
+      <Button key={`discuss-goal-${g.id}`} plain label="Discuss this goal" onPress={() => void discuss($, g)} />
+
       <Text bold>Recent runs</Text>
       {g.runs.length === 0 && <Text dimColor>  none</Text>}
       {g.runs.map((r) => (
-        <Text key={`run-row-${r.id}`}>
-          {'  '}
-          <Text color={isFailed(r.status) ? 'red' : r.status === 'completed' ? 'green' : 'cyan'}>{r.status}</Text>
-          <Text dimColor> {r.trigger} · {ago(r.endedAt ?? r.startedAt, view.now)}</Text>
-          {r.summary ? ` — ${r.summary}` : ''}
-        </Text>
+        <Box key={`run-${r.id}`} flexDirection="column">
+          <Text key={`run-row-${r.id}`}>
+            {'  '}
+            <Text color={isFailed(r.status) ? 'red' : r.status === 'completed' ? 'green' : 'cyan'}>{r.status}</Text>
+            <Text dimColor> {r.trigger} · {ago(r.endedAt ?? r.startedAt, view.now)}</Text>
+            {r.summary ? ` — ${r.summary}` : ''}
+          </Text>
+          {r.status !== 'running' && r.status !== 'queued' && (
+            <Button key={`discuss-run-${r.id}`} plain label="    Discuss this run" onPress={() => void discuss($, g, r)} />
+          )}
+        </Box>
       ))}
 
       <Text bold>Memory</Text>
@@ -346,7 +367,7 @@ function doneSection($: $, e: E, view: View, done: GoalCard[]) {
  * full text, Ask, Plan and Start), and "n done" shows the ticked ones, each of
  * which goes back on the list when pressed.
  */
-function todoSection($: $, e: E, view: View, todos: Todos) {
+function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | null) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   return (
     <Box key="todos" flexDirection="column" marginBottom={1}>
@@ -406,12 +427,36 @@ function todoSection($: $, e: E, view: View, todos: Todos) {
                 onPress={() => void toggleTodo($, list, item)}
               />
             ))}
-            {isOpen && Input && (
-              <Input key={`todo-add-${list.id}`} label="Add a to-do" submitLabel="Add" onSubmit={(text: string) => { if (text.trim()) void addFromPane($, todos.dir, list, text.trim()) }} />
-            )}
+            {/* The add box opens on demand, already focused, like Reject's feedback box */}
+            {isOpen && addingTo === list.id ? (
+              <Box flexDirection="column">
+                <Input
+                  key={`todo-add-${list.id}`}
+                  label="New to-do"
+                  placeholder="type it, then Enter"
+                  submitLabel="Add"
+                  autoFocus
+                  onSubmit={(text: string) => {
+                    if (!text.trim()) return
+                    void addFromPane($, todos.dir, list, text.trim()).then((ok) => {
+                      if (ok) void setAddingTo($, null)
+                    })
+                  }}
+                />
+                <Button key={`todo-add-cancel-${list.id}`} label="Cancel" plain onPress={() => void setAddingTo($, null)} />
+              </Box>
+            ) : isOpen ? (
+              <Button key={`todo-addbtn-${list.id}`} plain label="  + Add" onPress={() => void setAddingTo($, list.id)} />
+            ) : null}
           </Box>
         )
       })}
     </Box>
   )
+}
+
+/** Discuss: the goal, or one of its runs, brought into the conversation to talk over (and change). */
+function discuss($: $, g: GoalCard, run?: GoalCard['runs'][number]): Promise<boolean> {
+  const aside = run ? `about run ${run.id} of goal "${g.name}" (${g.id})` : `about goal "${g.name}" (${g.id})`
+  return act($, `discuss:${g.id}`, 'start the discussion', async () => void (await sendToChat($, discussPrompt(g, run), aside)))
 }

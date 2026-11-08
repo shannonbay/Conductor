@@ -195,6 +195,26 @@ export const TodoSetSchema = z.object({
   notes: z.string().optional(),
 })
 
+const Mode = z.enum(['off', 'propose', 'auto'])
+
+export const UpdateGoalSchema = z.object({
+  goal_id: z.string(),
+  name: z.string().trim().min(1).optional(),
+  objective: z.string().trim().min(1).optional(),
+  instructions: z.string().optional().describe('Standing instructions; "" clears them'),
+  autonomy: z.record(Mode.nullable()).optional().describe('Category → off | propose | auto; null removes the category'),
+  tool_map: z.record(z.string().nullable()).optional().describe('Tool name pattern → category; null removes the rule'),
+  add_memory: z.array(z.object({ kind: z.enum(['fact', 'rule', 'preference']), text: z.string().trim().min(1), pinned: z.boolean().optional() })).optional(),
+  forget_memory: z.array(z.string()).optional().describe('Memory ids to forget'),
+  status: z.enum(['active', 'paused']).optional(),
+})
+
+export const ReportRunEndSchema = z.object({
+  run_id: z.string(),
+  answer: z.string().describe("The run agent's final message"),
+  reason: z.string().optional().describe("turn.complete's reason, e.g. error"),
+})
+
 export const DeleteMemorySchema = z.object({
   goal_id: z.string(),
   memory_id: z.string(),

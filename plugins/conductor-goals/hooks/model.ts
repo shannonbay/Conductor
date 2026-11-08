@@ -13,9 +13,12 @@ export type OverviewGoal = {
   next_run_at: string | null
   schedule?: Schedule | null
   one_off?: boolean
+  instructions?: string
+  autonomy?: Record<string, string>
+  tool_map?: Record<string, string>
   open_run: { id: string; status: string } | null
   activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
-  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null }[]
+  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null }[]
   needs_you: OverviewItem[]
   open_items: OverviewItem[]
   open_item_count: number
@@ -26,7 +29,7 @@ export type OverviewGoal = {
 
 type OverviewItem = { id: string; goal: string; action?: { category?: string; summary?: string } | null }
 
-export const EMPTY: Snapshot = { reachable: false, error: null, goals: [], fetchedAt: 0, etag: null }
+export const EMPTY: Snapshot = { reachable: false, error: null, goals: [], fetchedAt: 0, etag: null, hold: null }
 
 function toItem(t: OverviewItem): Item {
   return { id: t.id, title: t.goal, category: t.action?.category ?? null, summary: t.action?.summary ?? null }
@@ -45,10 +48,13 @@ export function toCard(g: OverviewGoal): GoalCard {
     openItems: g.open_items.map(toItem),
     openItemCount: g.open_item_count,
     openRun: g.open_run ? { id: g.open_run.id, status: g.open_run.status } : null,
-    runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at })),
+    runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at, agentId: r.agent_id ?? null })),
     nextRunAt: g.next_run_at,
     schedule: g.schedule ?? null,
     oneOff: g.one_off ?? false,
+    instructions: g.instructions ?? '',
+    autonomy: g.autonomy ?? {},
+    toolMap: g.tool_map ?? {},
     health: latest ? { passed: latest.passed, value: latest.value } : null,
     trend: g.health.map((h) => h.value).filter((v): v is number => v !== null).reverse(),
     memory: g.memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, pinned: m.pinned })),
@@ -157,7 +163,11 @@ export function describe(g: GoalCard, now: number): string {
     g.runs.length > 0
       ? `Recent runs:\n${g.runs.map((r) => `- ${r.status} (${r.trigger}) ${ago(r.endedAt ?? r.startedAt, now)}${r.summary ? ` — ${r.summary}` : ''}`).join('\n')}`
       : null,
-    g.memory.length > 0 ? `Memory:\n${g.memory.map((m) => `- [${m.kind}] ${m.text}`).join('\n')}` : null,
+    g.instructions.trim() ? `Instructions: ${g.instructions.trim()}` : null,
+    `Schedule: ${g.oneOff ? 'one-off' : scheduleLabel(g.schedule)}`,
+    `Autonomy (unlisted categories: propose): ${Object.entries(g.autonomy).map(([c, m]) => `${c}=${m}`).join(', ') || 'none set'}`,
+    Object.keys(g.toolMap).length ? `Tool rules: ${Object.entries(g.toolMap).map(([p, c]) => `${p} → ${c}`).join(', ')}` : null,
+    g.memory.length > 0 ? `Memory:\n${g.memory.map((m) => `- ${m.id} [${m.kind}${m.pinned ? ', pinned' : ''}] ${m.text}`).join('\n')}` : null,
   ].filter(Boolean).join('\n\n')
 }
 
@@ -347,4 +357,51 @@ export function splitGoalArgs(args: string): { name: string | null; objective: s
     if (objective && name.length <= TITLE_MAX && name.split(/\s+/).length <= 5) return { name, objective }
   }
   return { name: null, objective: text }
+}
+
+// ── Discussing and changing goals ─────────────────────────────────────────────
+
+/** The prompt that brings a goal (or one of its runs) into the conversation to talk it over. */
+export function discussPrompt(g: GoalCard, run?: GoalCard['runs'][number]): string {
+  const how = 'Read its settings, items, runs and memory with goal_detail. If we agree on changes, make them with update_goal or set_schedule: they ask me to confirm.'
+  if (!run) {
+    return `Let's talk about my goal "${g.name}" (id ${g.id}). ${how} What's working, what isn't, and what would you change?`
+  }
+  const when = `${run.status} (${run.trigger}), ${run.endedAt ?? run.startedAt}`
+  const transcript = run.agentId
+    ? ` Its agent was ${run.agentId}: its transcript (agent-${run.agentId}.jsonl, under ~/.claude/projects) shows what it actually did.`
+    : ''
+  return `Let's talk about this run of my goal "${g.name}" (goal ${g.id}, run ${run.id}): ${when}.\n\nIts summary: ${run.summary ?? '(none)'}\n\n${isFailed(run.status) ? 'Why did it fail, and what should change so it doesn\'t again?' : 'Is this what should have happened, and what should change?'}${transcript} ${how}`
+}
+
+export type GoalChanges = {
+  name?: string
+  objective?: string
+  instructions?: string
+  autonomy?: Record<string, string | null>
+  tool_map?: Record<string, string | null>
+  add_memory?: { kind: string; text: string; pinned?: boolean }[]
+  forget_memory?: string[]
+  status?: 'active' | 'paused'
+}
+
+/** The changes as the person reads them before confirming: one line each, from what is to what will be. */
+export function describeGoalChanges(g: GoalCard, c: GoalChanges): string[] {
+  const lines: string[] = []
+  if (c.name && c.name !== g.name) lines.push(`Name: "${g.name}" → "${c.name}"`)
+  if (c.objective && c.objective !== g.objective) lines.push(`Objective → ${c.objective}`)
+  if (c.instructions !== undefined && c.instructions !== g.instructions) lines.push(c.instructions.trim() ? `Instructions → ${c.instructions}` : 'Instructions: cleared')
+  for (const [cat, mode] of Object.entries(c.autonomy ?? {})) lines.push(`${cat}: ${g.autonomy[cat] ?? 'propose'} → ${mode ?? 'propose (default)'}`)
+  for (const [pat, cat] of Object.entries(c.tool_map ?? {})) lines.push(cat === null ? `Tool rule removed: ${pat}` : `Tool rule: ${pat} → ${cat}`)
+  for (const m of c.add_memory ?? []) lines.push(`Remember (${m.kind}${m.pinned ? ', pinned' : ''}): ${m.text}`)
+  for (const id of c.forget_memory ?? []) lines.push(`Forget: ${g.memory.find((m) => m.id === id)?.text ?? id}`)
+  if (c.status && c.status !== g.status) lines.push(c.status === 'paused' ? 'Pause the goal' : 'Resume the goal')
+  return lines
+}
+
+/** When a hold ends, as a short local time ("8:10 pm", or with the date if not today). */
+export function holdUntilText(until: string, now: number): string {
+  const d = new Date(until)
+  const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+  return new Date(now).toDateString() === d.toDateString() ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
 }

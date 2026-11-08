@@ -9,6 +9,8 @@ export type Run = {
   summary: string | null
   startedAt: string
   endedAt: string | null
+  /** The subagent that did it (its transcript has what it actually did). */
+  agentId: string | null
 }
 
 /** One memory entry the goal's runs read. */
@@ -46,6 +48,11 @@ export type GoalCard = {
   schedule: Schedule | null
   /** Runs once; done (status 'retired') when its run leaves nothing open. */
   oneOff: boolean
+  instructions: string
+  /** Action category → off | propose | auto (unlisted: propose). */
+  autonomy: Record<string, string>
+  /** Tool name pattern → action category. */
+  toolMap: Record<string, string>
   health: { passed: boolean; value: number | null } | null
   /** Health values, oldest first. */
   trend: number[]
@@ -63,6 +70,8 @@ export type Snapshot = {
   fetchedAt: number
   /** The overview's ETag, sent back so an unchanged overview answers 304. */
   etag: string | null
+  /** Set while goal runs are held because the usage limit is reached. */
+  hold: { until: string; reason: string } | null
 }
 
 /** One to-do on the person's list. */
@@ -99,6 +108,8 @@ declare module 'claude-code' {
       snapshot: Shaped<Snapshot>
       /** "<goalId>/<itemId>" while its feedback box is open. */
       rejecting: string | null
+      /** The to-do list whose add box is open. */
+      addingTo: string | null
       /** The action a button is doing, e.g. "approve:g1/11" or "run:g1". */
       busy: string | null
       /** The last action's error, shown at the bottom of the pane. */

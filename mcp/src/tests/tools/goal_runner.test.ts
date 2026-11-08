@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory, set_schedule,
+  create_goal, delete_memory, set_schedule, update_goal, report_run_end,
 } from '../../tools/goal_runner.js'
 import { add_item, get_goal_brief, end_run, run_goal } from '../../tools/goals.js'
 import { create_plan } from '../../tools/create_plan.js'
@@ -208,5 +208,27 @@ describe('one-off goals and schedules at creation', () => {
     expect(getGoal(id)!.status).toBe('retired')
     await run_goal({ goal_id: id })
     expect(getGoal(id)!.status).toBe('active')
+  })
+})
+
+describe('update_goal and report_run_end', () => {
+  it('update_goal applies confirmed changes and records them as the human\'s', async () => {
+    const id = makeGoal()
+    const r = await update_goal({ goal_id: id, autonomy: { 'email.send': 'auto' }, add_memory: [{ kind: 'rule', text: 'Never email the bank' }] })
+    expect(r.changed).toEqual(['email.send: auto', 'remembered (rule): Never email the bank'])
+    expect(getGoal(id)!.autonomy).toMatchObject({ 'email.send': 'auto' })
+    expect(getEvents(id).find((e) => e.event_type === 'goal_updated')).toMatchObject({ actor: 'human' })
+    await expect(update_goal({ goal_id: id, autonomy: { x: 'sometimes' } })).rejects.toThrow()
+  })
+
+  it('report_run_end skips a run that hit the usage limit and holds goal runs', async () => {
+    const id = makeGoal()
+    const run = await claim(id)
+    expect(await report_run_end({ run_id: run.run_id, answer: 'All good so far.' })).toEqual({ outcome: 'unchanged' })
+    const held = await report_run_end({ run_id: run.run_id, answer: "You've hit your 5-hour limit" })
+    expect(held).toMatchObject({ outcome: 'held', hold: { reason: "You've hit your 5-hour limit" } })
+    expect(getRun(run.run_id)!.status).toBe('skipped')
+    queueRun(id)
+    expect(await tick('session-A')).toMatchObject({ claimed: [], hold: expect.anything() })
   })
 })

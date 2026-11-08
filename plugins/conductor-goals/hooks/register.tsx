@@ -136,6 +136,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'mcp__conductor-goals__reject_item' }, ($, e) => answerTool($, 'reject_item', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__conductor-goals__run_goal' }, ($, e) => answerTool($, 'run_goal', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__conductor-goals__set_schedule' }, ($, e) => answerTool($, 'set_schedule', e)).catch(failedTool)
+  on('tool.call', { tool: 'mcp__conductor-goals__update_goal' }, ($, e) => answerTool($, 'update_goal', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__conductor-goals__todos' }, ($, e) => answerTool($, 'todos', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__conductor-goals__add_todo' }, ($, e) => answerTool($, 'add_todo', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__conductor-goals__complete_todo' }, ($, e) => answerTool($, 'complete_todo', e)).catch(failedTool)

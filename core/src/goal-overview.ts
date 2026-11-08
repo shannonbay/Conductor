@@ -12,6 +12,7 @@ import { autonomyFor } from './goal-engine.js'
 import { getSchedule } from './schedule.js'
 import { listHealth } from './health.js'
 import type { Event, Goal, GoalRun, Task } from './types.js'
+import { getRunHold } from './goal-changes.js'
 
 const RUNS = 5
 const OPEN_ITEMS = 10
@@ -169,6 +170,9 @@ export function buildOverview(db: Database) {
         objective: goal.objective,
         status: goal.status,
         one_off: goal.one_off,
+        instructions: goal.instructions,
+        autonomy: goal.autonomy,
+        tool_map: goal.tool_map,
         next_run_at: goal.next_run_at,
         schedule: getSchedule(db, plan.id),
         open_run: openRun,
@@ -180,7 +184,7 @@ export function buildOverview(db: Database) {
           items,
         }),
         runs: runs.map((r) => ({
-          id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, started_at: r.started_at, ended_at: r.ended_at,
+          id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, started_at: r.started_at, ended_at: r.ended_at, agent_id: r.agent_id,
         })),
         needs_you: open.filter((t) => t.review_requested_at).map(itemView),
         open_items: open.filter((t) => !t.review_requested_at).slice(0, OPEN_ITEMS).map(itemView),
@@ -191,7 +195,7 @@ export function buildOverview(db: Database) {
         suggestions: getAutonomySuggestions(db, plan.id),
       }
     })
-  return { goals }
+  return { goals, hold: getRunHold(db) }
 }
 
 export type Overview = ReturnType<typeof buildOverview>

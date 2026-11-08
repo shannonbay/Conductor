@@ -337,6 +337,13 @@ export function runMigrations(db: Database): void {
       holder     TEXT NOT NULL,
       expires_at TEXT NOT NULL
     );
+
+    -- At most one row: while it's in force no goal run starts (the person's usage limit is reached)
+    CREATE TABLE IF NOT EXISTS goal_run_hold (
+      id     INTEGER PRIMARY KEY CHECK (id = 1),
+      until  TEXT NOT NULL,
+      reason TEXT NOT NULL
+    );
   `)
 
   // ── Agent transcripts ───────────────────────────────────────────────────────

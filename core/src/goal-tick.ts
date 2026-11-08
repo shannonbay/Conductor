@@ -14,6 +14,7 @@ import { getGoal, getOpenRun, getRun, listGoals, updateGoal, updateRun, insertRu
 import { archiveResolved, decideTick, failRun, nextIntervalRun, queueRun, recordSkip, GoalError } from './goal-engine.js'
 import { healthDue, runHealthCheck } from './health.js'
 import type { GoalRun, Task } from './types.js'
+import { getRunHold, type RunHold } from './goal-changes.js'
 
 const LEASE_NAME = 'goals'
 /** A holder that misses this long (several 30 s ticks) loses the lease to the next session that asks. */
@@ -138,6 +139,8 @@ export interface PassResult {
   claimed: ClaimedRun[]
   /** Runs marked timed out because nobody finished them. */
   expired: string[]
+  /** Set while goal runs are held (the usage limit is reached): nothing was claimed. */
+  hold?: RunHold
 }
 
 export interface PassOptions {
@@ -164,6 +167,10 @@ export async function schedulerPass(db: Database, opts: PassOptions): Promise<Pa
     if (!healthDue(goal, now)) continue
     await checkHealth(db, goal.plan_id).catch(() => { /* a broken command is recorded as a failed check */ })
   }
+
+  // While the person's usage limit is reached, due runs wait (they stay due) until the reset
+  const hold = getRunHold(db, now)
+  if (hold) return { leader: true, claimed: [], expired, hold }
 
   let running = (db.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get() as { n: number }).n
   const max = opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT

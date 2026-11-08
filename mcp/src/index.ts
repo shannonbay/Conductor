@@ -35,6 +35,8 @@ import {
   CreateGoalSchema,
   DeleteMemorySchema,
   SetScheduleSchema,
+  UpdateGoalSchema,
+  ReportRunEndSchema,
   TodoListSchema,
   TodoAddSchema,
   TodoSetSchema,
@@ -56,7 +58,7 @@ import { verify_task } from './tools/verify_task.js'
 import { list_goals, get_goal_brief, add_item, remember, forget, end_run, run_goal } from './tools/goals.js'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory, set_schedule,
+  create_goal, delete_memory, set_schedule, update_goal, report_run_end,
 } from './tools/goal_runner.js'
 import { todo_list, todo_add, todo_set } from './tools/todos.js'
 import { handleListResources, handleReadResource } from './resources.js'
@@ -220,6 +222,8 @@ const TOOLS = [
     ['create_goal', 'Creates a goal for the human.', CreateGoalSchema, create_goal],
     ['delete_memory', "Deletes one of a goal's memories for the human.", DeleteMemorySchema, delete_memory],
     ['set_schedule', "Sets a goal's schedule (interval, cron, or none) for the human.", SetScheduleSchema, set_schedule],
+    ['update_goal', "Changes a goal's name, objective, instructions, autonomy, tool rules, memory or status, once the human has confirmed.", UpdateGoalSchema, update_goal],
+    ['report_run_end', "Reports how a goal run's agent finished a turn: a usage limit skips the run and holds goal runs until the reset.", ReportRunEndSchema, report_run_end],
   ] as const).map(([name, description, schema, handler]) => ({
     name,
     description: `${description} For the conductor-goals plugin only: agents and the model must not call this.`,

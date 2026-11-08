@@ -48,6 +48,8 @@ Updated just now  Refresh
 - Under each goal's name is one line saying what its agent is doing. While a run is going, that's the agent's latest step: a progress update, an item it added or finished, or a note it saved. Otherwise it says the run is queued, the goal is paused, what the next run will carry out, or the last run's summary. Claude's `goals_status` tool reports the same line.
 - Below that: the last run and when the next automatic one is due (`· next in 12m`), `· one-off`, or `· no schedule` with a **Set schedule** button (it suggests one, as `/goal-new` does).
 - **Your to-do lists** for this project, each collapsed to its name and count (see below).
+- **Discuss**: next to a goal whose last run failed, and in every expanded goal (the goal as a whole, or each run). It brings that goal or run into this conversation: its summary, and the run's agent id so Claude can read what the run actually did. Then talk it over, and Claude makes any changes you agree with `update_goal` (below), asking you to confirm each one.
+- While your Claude usage limit is reached, a line says goal runs are on hold until it resets. A run that hit the limit is recorded as skipped, not failed, and due runs start after the reset.
 - **Done (n)** at the bottom, collapsed: one-off goals that have finished, each with its last run's summary and **Run again**.
 - **Approve** or **Reject…** each proposal. Rejecting asks what should change, and your answer is saved to the goal's memory.
 - **Run now**, **Cancel run** (asks you to confirm), **Pause** and **Resume**.
@@ -77,7 +79,7 @@ Long conversations produce ideas and decisions to come back to, and a context co
 - `/todo <text>` adds to this project's **To do** list (made the first time). Or ask Claude: "add that to the list". Claude only adds when asked, or offers when an idea is clearly being put off.
 - In the pane, open a list to see its open to-dos, each with its id (`☐ 1.3 Set autonomy…`). Press ☐ to tick one off; a toast says how to undo. **n done** shows the ticked ones, and pressing one puts it back.
 - Press a to-do's text to expand it: the full text, any notes, and **Ask**, **Plan** and **Start**. All three bring it into this conversation, where Claude can ask you things. **Ask** gets Claude's opinion and trade-offs with nothing changed (if you've started typing a prompt, it adds the to-do to your draft instead of sending). **Plan** asks Claude to plan it in plan mode for you to review. **Start** asks it to begin. The to-do shows ◐ until it's ticked off (Claude ticks it with `complete_todo` when it's done). To-dos don't run in the background; goals do.
-- Add a to-do with the box under a list.
+- **+ Add** under an open list opens a box (already focused): type the to-do and press Enter. Or use `/todo <text>`.
 - After a compaction, say "check my list": Claude reads it with the `todos` tool. Nothing is added to the conversation otherwise: no hooks, no reminders.
 
 A list is any active Conductor plan in the project's directory, and its to-dos are the plan's tasks, so a plan made earlier (like a roadmap) shows up as a list. A plan with one top task over several (`1` over `1.1`, `1.2`, ...) shows the inner ones. Archive a plan to remove its list.
@@ -97,6 +99,7 @@ A **one-off** goal runs once, straight away. When its run ends with nothing left
 | `approve_item`, `reject_item` | Approve or reject a proposal. **Asks you first.** |
 | `run_goal` | Queue a run. **Asks you first.** |
 | `todos`, `add_todo`, `complete_todo` | Read your to-do lists, add to one (when you ask, or after offering), tick one off (when you say it's done). |
+| `update_goal` | Change a goal's name, objective, standing instructions, autonomy per category, tool rules, memory, or pause it. **Shows you each change and asks you first.** Runs can't use it. |
 | `set_schedule` | Set or clear a goal's schedule (same forms as `/goal-schedule`). **Asks you first.** |
 
 Ask things like "what do my goals need?" or "approve the Alice reply".

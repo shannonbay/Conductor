@@ -7,7 +7,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { Schedule, TodoList } from '../types'
-import type { OverviewGoal } from './model'
+import type { GoalChanges, OverviewGoal } from './model'
 
 type $ = EngineInterface
 
@@ -64,10 +64,17 @@ async function call<T>($: $, name: string, input: Record<string, unknown> = {}):
 }
 
 /** The overview; `{ changed: false }` when it matches `etag`. */
-export async function fetchOverview($: $, etag: string | null): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null }> {
-  const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[] }>($, 'goals_overview', etag ? { etag } : {})
+export type Hold = { until: string; reason: string }
+
+export async function fetchOverview($: $, etag: string | null): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null }> {
+  const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[]; hold?: Hold | null }>($, 'goals_overview', etag ? { etag } : {})
   if (!res.changed) return { changed: false }
-  return { changed: true, goals: res.goals ?? [], etag: res.etag }
+  return { changed: true, goals: res.goals ?? [], etag: res.etag, hold: res.hold ?? null }
+}
+
+/** Applies goal changes the person has confirmed; answers what changed. */
+export async function updateGoal($: $, goalId: string, changes: GoalChanges): Promise<string[]> {
+  return (await call<{ changed: string[] }>($, 'update_goal', { goal_id: goalId, ...changes })).changed
 }
 
 export async function approve($: $, goalId: string, itemId: string): Promise<void> {

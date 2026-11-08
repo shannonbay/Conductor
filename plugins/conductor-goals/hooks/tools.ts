@@ -6,8 +6,8 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
-import { addTodo, approve, createGoal, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo } from './api'
-import { ago, describe, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize } from './model'
+import { addTodo, approve, createGoal, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
+import { ago, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize, type GoalChanges } from './model'
 import { kick } from './runner'
 import { askSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
@@ -65,6 +65,28 @@ export const TOOLS = [
       type: 'object',
       properties: { item: { type: 'string', description: 'The to-do id from the todos tool, e.g. 3 or 1.4' }, list: { type: 'string', description: 'A list name or id, when more than one list has that id' } },
       required: ['item'],
+    },
+  },
+  {
+    name: 'update_goal',
+    description: "Changes a Conductor goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), or pause / resume. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        goal: GOAL,
+        name: { type: 'string' },
+        objective: { type: 'string' },
+        instructions: { type: 'string', description: 'The new standing instructions in full; "" clears them' },
+        autonomy: { type: 'object', additionalProperties: { type: ['string', 'null'], enum: ['off', 'propose', 'auto', null] } },
+        tool_map: { type: 'object', additionalProperties: { type: ['string', 'null'] } },
+        add_memory: {
+          type: 'array',
+          items: { type: 'object', properties: { kind: { type: 'string', enum: ['fact', 'rule', 'preference'] }, text: { type: 'string' }, pinned: { type: 'boolean' } }, required: ['kind', 'text'] },
+        },
+        forget_memory: { type: 'array', items: { type: 'string' }, description: 'Memory ids' },
+        status: { type: 'string', enum: ['active', 'paused'] },
+      },
+      required: ['goal'],
     },
   },
   {
@@ -126,6 +148,20 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
   const { goal } = found
 
   if (name === 'goal_detail') return { text: describe(goal, now), isError: false }
+
+  if (name === 'update_goal') {
+    // Only the change fields: the call also carries the engine's own (tool, tool_use_id)
+    const keys = ['name', 'objective', 'instructions', 'autonomy', 'tool_map', 'add_memory', 'forget_memory', 'status'] as const
+    const changes = Object.fromEntries(keys.filter((k) => input[k] !== undefined).map((k) => [k, input[k]])) as GoalChanges
+    const lines = describeGoalChanges(goal, changes)
+    if (lines.length === 0) return fail(`Nothing to change in ${goal.name}: give at least one new value.`)
+    if (!(await confirmWith($, `Change the goal "${goal.name}"?\n${lines.map((l) => `• ${l}`).join('\n')}`, 'Apply changes'))) return fail('The person declined; the goal is unchanged.')
+    let changed: string[] = []
+    const ok = await act($, `update:${goal.id}`, 'change the goal', async () => {
+      changed = await updateGoal($, goal.id, changes)
+    })
+    return ok ? { text: `Changed ${goal.name}: ${changed.join('; ') || 'nothing (already so)'}.`, isError: false } : fail("The change didn't go through; see the Goals pane.")
+  }
 
   if (name === 'set_schedule') {
     const parsed = parseSchedule(String(input.schedule ?? ''))

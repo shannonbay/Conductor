@@ -7,11 +7,11 @@
 import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
   getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory,
-  setSchedule, getSchedule, nextScheduledRun, queueRun,
+  setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
-  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema,
+  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema,
 } from '../schema.js'
 import { existsSync } from 'fs'
 import { nanoid } from 'nanoid'
@@ -152,4 +152,25 @@ function applySchedule(goalId: string, schedule: Parameters<typeof setSchedule>[
   const next_run_at = !s ? null : s.kind === 'interval' ? new Date().toISOString() : nextScheduledRun(goalId)
   updateGoal(goalId, { next_run_at })
   return { schedule: s, next_run_at }
+}
+
+/** Changes a goal's settings, once the person has confirmed them (the conductor-goals plugin asks). */
+export async function update_goal(args: unknown) {
+  const { goal_id, ...changes } = UpdateGoalSchema.parse(args)
+  if (!getGoal(goal_id)) throw new Error(`Goal ${goal_id} not found.`)
+  const changed = applyGoalChanges(goal_id, changes)
+  if (changed.length) record(goal_id, goal_id, 'goal_updated', { changes: changed }, human)
+  touchPlan(goal_id)
+  return { goal_id, changed }
+}
+
+/** A run's agent finished a turn (reported by the guard plugin): skips a run that hit the usage limit and holds goal runs. */
+export async function report_run_end(args: unknown) {
+  const input = ReportRunEndSchema.parse(args)
+  const run = getRun(input.run_id)
+  const r = reportRunEnd(input.run_id, { answer: input.answer, reason: input.reason })
+  if (run && r.outcome !== 'unchanged') {
+    record(run.plan_id, run.plan_id, r.outcome === 'held' ? 'run_skipped' : 'agent_failed', { run_id: run.id, ...(r.hold && { hold_until: r.hold.until }), reason: input.answer.slice(0, 200) }, { via: 'plugin' })
+  }
+  return r
 }

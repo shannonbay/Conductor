@@ -73,6 +73,8 @@ export const setSchedule = (planId: string, schedule: core.Schedule | null) => c
 export const getSchedule = (planId: string) => core.getSchedule(db, planId)
 export const nextScheduledRun = (planId: string) => core.nextScheduledRun(db, planId)
 export const reviveIfDone = (planId: string) => core.reviveIfDone(db, planId)
+export const applyGoalChanges = (planId: string, changes: core.GoalChanges) => core.applyGoalChanges(db, planId, changes)
+export const reportRunEnd = (runId: string, input: { answer: string; reason?: string }) => core.reportRunEnd(db, runId, input)
 export const todoLists = (workingDir: string) => core.todoLists(db, workingDir)
 export const addTodo = (input: Parameters<typeof core.addTodo>[1]) => core.addTodo(db, input)
 export const setTodo = (listId: string, itemId: string, status: 'pending' | 'active' | 'completed', notes?: string) => core.setTodo(db, listId, itemId, status, notes)
