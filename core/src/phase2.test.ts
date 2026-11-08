@@ -150,18 +150,18 @@ describe('goal guard', () => {
     expect(guardToolCall(db, 'cc_1', 'mcp__gmail__archive_thread')).toMatchObject({ decision: 'allow', category: 'email.archive' })
   })
 
-  it('allows a propose category once per approved proposal', () => {
+  it('allows a propose category while an approved proposal is being carried out, however many calls it takes', () => {
     const run = runWithSession()
     expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/needs approval/) })
 
     const item = addItem(db, 'g1', run.id, { goal: 'Reply to Alice', action: { category: 'email.send', summary: 'send' } }).task
     approveTask(db, 'g1', item.id)
     expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message').decision).toBe('allow')
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/already been used/) })
+    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message').decision).toBe('allow') // the same action, a second call
 
-    updateTask(db, 'g1', item.id, { status: 'completed' })
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message').decision).toBe('deny')
-    expect(listToolCalls(db, 'g1').map((c) => c.decision)).toEqual(['deny', 'deny', 'allow', 'deny'])
+    updateTask(db, 'g1', item.id, { status: 'completed' }) // carried out: the approval is used up
+    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/needs approval/) })
+    expect(listToolCalls(db, 'g1').map((c) => c.decision)).toEqual(['deny', 'allow', 'allow', 'deny']) // newest first
   })
 
   it('stops guarding once the run has ended', () => {

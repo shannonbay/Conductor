@@ -5,8 +5,10 @@
  *
  *   off     → denied
  *   auto    → allowed
- *   propose → allowed only while an approved proposal for that category is
- *             waiting to be carried out (one call per approved proposal)
+ *   propose → allowed while an approved proposal for that category is being
+ *             carried out: as many calls as the action needs (trashing a
+ *             sender's 40 threads, the clicks of an unsubscribe page), until
+ *             the run marks the item done. Every call is still recorded.
  *
  * Calls outside goal runs, or to tools not in the map, are always allowed.
  */
@@ -79,23 +81,18 @@ function guardRun(db: Database, run: GoalRun, toolName: string): GuardDecision {
     return { decision: 'deny', category, run_id: run.id, reason }
   }
 
-  // propose: one call per approved proposal that is still waiting to be carried out
-  const approved = db.prepare(`
-    SELECT COUNT(*) AS n, MIN(approved_at) AS since FROM tasks
+  // propose: allowed while an approved proposal for this category is still being carried out
+  // (active and not done). One action can take many calls; completing the item ends it.
+  const approved = (db.prepare(`
+    SELECT COUNT(*) AS n FROM tasks
     WHERE plan_id = ? AND status = 'active' AND archived_at IS NULL AND approved_at IS NOT NULL
       AND json_extract(state, '$.action.category') = ?
-  `).get(run.plan_id, category) as { n: number; since: string | null }
-  const used = approved.since
-    ? (db.prepare("SELECT COUNT(*) AS n FROM goal_tool_calls WHERE plan_id = ? AND category = ? AND decision = 'allow' AND created_at >= ?")
-        .get(run.plan_id, category, approved.since) as { n: number }).n
-    : 0
-  if (used < approved.n) {
+  `).get(run.plan_id, category) as { n: number }).n
+  if (approved > 0) {
     record(db, run, toolName, category, 'allow', null)
     return { decision: 'allow', category, run_id: run.id }
   }
-  const reason = approved.n === 0
-    ? `Conductor goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute.`
-    : `Conductor goal guard: all ${approved.n} approved "${category}" action(s) have already been used. Complete those items, and propose any further action with add_item.`
+  const reason = `Conductor goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`
   record(db, run, toolName, category, 'deny', reason)
   return { decision: 'deny', category, run_id: run.id, reason }
 }
