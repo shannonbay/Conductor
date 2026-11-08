@@ -6,6 +6,8 @@ An agent session ends; the work doesn't. Conductor keeps everything a long-lived
 
 It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `conductor-goals` runs goals and shows the Goals pane, and `conductor-goals-guard` keeps each run within its goal. An optional **web app** adds goal pages in a browser, webhook triggers and a UI for plans. Everything lives in one local SQLite database.
 
+What a scheduled prompt (Claude Code's `/schedule`) can't give you: a goal remembers between runs (its items, memory and your past decisions), and it can't act beyond what you've approved, because the approval gate is enforced outside the model, not just asked for in the prompt.
+
 ![The Goals pane beside a Claude Code chat: three goals with their last and next runs, the to-do lists, and an expanded to-do with Ask, Plan and Start](docs/goals-pane.png)
 
 ## Persistent goals
