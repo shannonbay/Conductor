@@ -55,7 +55,7 @@ test('/goal-new creates a goal in the session directory; /goal-pause pauses it',
   const fake = fakeConductor(on, goals)
   await $.session.start(START)
 
-  const usage = await $.command.run(typed('goal-new', 'Inbox'))
+  const usage = await $.command.run(typed('goal-new', '  '))
   expect(usage.text).toContain('Usage')
 
   const made = await $.command.run(typed('goal-new', 'Inbox: keep my inbox under 20 unread'))
@@ -146,4 +146,22 @@ test('/goal-new falls back to keyword rules when the model is unavailable', asyn
   await $.session.start(START)
   await $.command.run(typed('goal-new', 'maintain-github-profile: monitor my github for contributions'))
   expect(asked[0]).toContain('Suggested: every 6 hours (it watches for changes)')
+})
+
+test('/goal-new without a name takes the title the model suggests, or one from the objective', async ($, on) => {
+  const { asked } = engine(on, { suggestion: '{"choice": "hourly", "reason": "new mail arrives all the time", "title": "Inbox Under Control."}' })
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', 'keep my inbox under 20 unread: archive newsletters, flag invoices'))
+  expect(asked[0]).toContain('How often should "Inbox Under Control" run? Suggested: every hour')
+  expect(made.text).toContain('Created the goal "Inbox Under Control"')
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({ name: 'Inbox Under Control', objective: 'keep my inbox under 20 unread: archive newsletters, flag invoices' })
+})
+
+test('/goal-new without a name, with the model unavailable, names it from the objective', async ($, on) => {
+  engine(on, { suggestion: null })
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', 'monitor my github for new stars and issues'))
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({ name: 'Monitor github new stars issues', objective: 'monitor my github for new stars and issues' })
 })

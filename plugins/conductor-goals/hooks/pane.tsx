@@ -82,7 +82,7 @@ export async function renderPane($: $, e: E) {
       {current.length === 0 && (
         <Box flexDirection="column">
           <Text dimColor>No goals yet.</Text>
-          <Text dimColor>Create one with /goal-new &lt;name&gt;: &lt;objective&gt;, or in the web app.</Text>
+          <Text dimColor>Create one with /goal-new &lt;objective&gt;, or in the web app.</Text>
         </Box>
       )}
       {current.map((g, i) => goalCard($, e, view, g, i))}

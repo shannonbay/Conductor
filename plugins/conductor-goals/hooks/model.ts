@@ -244,7 +244,7 @@ export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt'
 
 export type ChoiceKey = 'hourly' | '6h' | 'daily' | 'weekly' | 'one-off' | 'on-demand' | 'custom'
 export type ScheduleChoice = { key: ChoiceKey; label: string; schedule: Schedule | null; oneOff: boolean }
-export type Suggestion = { choice: Exclude<ChoiceKey, 'on-demand'>; reason: string }
+export type Suggestion = { choice: Exclude<ChoiceKey, 'on-demand'>; reason: string; /** A short name for a goal created without one. */ title?: string }
 
 /** The choices offered when a goal is created or given a schedule. */
 export const SCHEDULE_CHOICES: readonly ScheduleChoice[] = [
@@ -303,12 +303,48 @@ export function parseSuggestion(text: string): Suggestion | null {
   const json = /\{[\s\S]*\}/.exec(text)?.[0]
   if (!json) return null
   try {
-    const v = JSON.parse(json) as { choice?: unknown; reason?: unknown }
+    const v = JSON.parse(json) as { choice?: unknown; reason?: unknown; title?: unknown }
     const choice = SCHEDULE_CHOICES.find((c) => c.key === v.choice && c.key !== 'on-demand')
     if (!choice) return null
     const reason = typeof v.reason === 'string' && v.reason.trim() ? v.reason.trim().replace(/\.$/, '') : 'suggested from its objective'
-    return { choice: choice.key as Suggestion['choice'], reason }
+    const title = typeof v.title === 'string' ? cleanTitle(v.title) : ''
+    return { choice: choice.key as Suggestion['choice'], reason, ...(title && { title }) }
   } catch {
     return null
   }
+}
+
+// ── Goal titles ───────────────────────────────────────────────────────────────
+
+const TITLE_MAX = 40
+
+/** A title as a goal name: one line, no quotes or trailing full stop, at most 40 characters. */
+export function cleanTitle(text: string): string {
+  const t = text.replace(/\s+/g, ' ').trim().replace(/^["'`]+|["'`.]+$/g, '').trim()
+  return t.length > TITLE_MAX ? clip(t, TITLE_MAX) : t
+}
+
+const FILLER = new Set(['a', 'an', 'the', 'my', 'our', 'to', 'please', 'and', 'of', 'for', 'in', 'on', 'that', 'so', 'it', 'is'])
+
+/** A title from the objective's first words, for when the model can't suggest one. */
+export function fallbackTitle(objective: string): string {
+  const words = objective.replace(/[^\p{L}\p{N}\s'-]/gu, ' ').split(/\s+/).filter((w) => w && !FILLER.has(w.toLowerCase()))
+  const title = words.slice(0, 5).join(' ')
+  return cleanTitle(title ? title[0]!.toUpperCase() + title.slice(1) : 'New goal')
+}
+
+/**
+ * /goal-new's argument: "<name>: <objective>" when the part before the first
+ * colon is short enough to be a name (up to 5 words, 40 characters), otherwise
+ * all of it is the objective and the name is suggested.
+ */
+export function splitGoalArgs(args: string): { name: string | null; objective: string } {
+  const text = args.trim()
+  const at = text.indexOf(':')
+  if (at > 0) {
+    const name = text.slice(0, at).trim()
+    const objective = text.slice(at + 1).trim()
+    if (objective && name.length <= TITLE_MAX && name.split(/\s+/).length <= 5) return { name, objective }
+  }
+  return { name: null, objective: text }
 }

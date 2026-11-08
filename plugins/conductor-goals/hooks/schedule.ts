@@ -8,26 +8,30 @@ import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
 import { setSchedule } from './api'
-import { choiceFromAnswer, choiceOptions, parseSuggestion, SCHEDULE_CHOICES, suggestByKeywords, type ScheduleChoice, type Suggestion } from './model'
+import { choiceFromAnswer, choiceOptions, fallbackTitle, parseSuggestion, SCHEDULE_CHOICES, suggestByKeywords, type ScheduleChoice, type Suggestion } from './model'
 
 type $ = EngineInterface
 
 const SYSTEM = `You choose how often a standing goal for an AI agent should run. Most goals are ongoing work (keeping, maintaining, monitoring, triaging, checking, tidying) and should run on a schedule; pick a one-off only when the goal is clearly a single task that is finished once done (install, set up, migrate, fix this one thing).
-Answer with JSON only: {"choice": "hourly" | "6h" | "daily" | "weekly" | "one-off", "reason": "<one short sentence>"}.
+Answer with JSON only: {"choice": "hourly" | "6h" | "daily" | "weekly" | "one-off", "reason": "<one short sentence>"}, adding "title": "<2-5 word name, Title Case>" when the goal has no name yet.
 Guide: inboxes, alerts and triage hourly; monitoring and watching every 6 hours; maintaining, keeping current and checking daily; reports, digests and reviews weekly.`
 
-/** How often the goal should run, from a small model, or keyword rules when it can't answer. */
-export async function suggestSchedule($: $, name: string, objective: string): Promise<Suggestion> {
+/**
+ * How often the goal should run (and, for a goal with no name, a title), from
+ * a small model in one call; keyword rules and the objective's first words
+ * stand in when it can't answer.
+ */
+export async function suggestSchedule($: $, name: string | null, objective: string): Promise<Suggestion> {
+  let suggestion: Suggestion | null = null
   try {
-    const r = await $.model.complete({ model: 'haiku', system: SYSTEM, prompt: `Goal name: ${name}\nObjective: ${objective}`, maxTokens: 120, timeoutMs: 15_000 })
-    if (r.isAnswered) {
-      const parsed = parseSuggestion(r.text)
-      if (parsed) return parsed
-    }
+    const prompt = `Goal name: ${name ?? '(none yet: suggest a title)'}\nObjective: ${objective}`
+    const r = await $.model.complete({ model: 'haiku', system: SYSTEM, prompt, maxTokens: 120, timeoutMs: 15_000 })
+    if (r.isAnswered) suggestion = parseSuggestion(r.text)
   } catch {
-    // a blocked model or a host without one: the keyword rules below
+    // a blocked model or a host without one: the rules below
   }
-  return suggestByKeywords(name, objective)
+  suggestion ??= suggestByKeywords(name ?? '', objective)
+  return name ? suggestion : { ...suggestion, title: suggestion.title ?? fallbackTitle(objective) }
 }
 
 /** Asks how often the goal runs, the suggestion first. A dismissed question takes the suggestion. */

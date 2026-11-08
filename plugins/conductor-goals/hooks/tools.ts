@@ -7,7 +7,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
 import { addTodo, approve, createGoal, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo } from './api'
-import { ago, describe, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, summarize } from './model'
+import { ago, describe, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize } from './model'
 import { kick } from './runner'
 import { askSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
@@ -169,7 +169,7 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
 export const COMMANDS = [
   { name: 'goals', description: 'Show Conductor goals in a pane' },
   { name: 'goal-run', description: 'Run a Conductor goal now', argumentHint: '<goal>' },
-  { name: 'goal-new', description: 'Create a Conductor goal in this directory', argumentHint: '<name>: <objective>' },
+  { name: 'goal-new', description: 'Create a Conductor goal in this directory (it suggests a title and a schedule)', argumentHint: '<objective> | <name>: <objective>' },
   { name: 'goal-pause', description: 'Pause a Conductor goal', argumentHint: '<goal>' },
   { name: 'goal-resume', description: 'Resume a paused Conductor goal', argumentHint: '<goal>' },
   { name: 'todo', description: 'Your to-do list for this project: /todo <text> adds, /todo done <id> ticks off, /todo shows it', argumentHint: '<text> | done <id>' },
@@ -200,14 +200,17 @@ export async function goalCommand($: $, command: 'goal-run' | 'goal-pause' | 'go
   return ok(await act($, `${command}:${goal.id}`, `${command === 'goal-pause' ? 'pause' : 'resume'} the goal`, () => setGoalStatus($, goal.id, status)), `${goal.name} is ${status === 'paused' ? 'paused' : 'active again'}.`)
 }
 
-/** /goal-new <name>: <objective>. Asks how often it runs, with a suggestion first. */
+/**
+ * /goal-new <objective> (a title is suggested) or /goal-new <name>: <objective>.
+ * Asks how often it runs, with a suggestion first.
+ */
 export async function newGoal($: $, args: string): Promise<string> {
-  const at = args.indexOf(':')
-  const name = (at === -1 ? args : args.slice(0, at)).trim()
-  const objective = at === -1 ? '' : args.slice(at + 1).trim()
-  if (!name || !objective) return 'Usage: /goal-new <name>: <objective>, e.g. /goal-new Inbox: keep my inbox under 20 unread'
+  const { name: given, objective } = splitGoalArgs(args)
+  if (!objective) return 'Usage: /goal-new <objective>, e.g. /goal-new keep my inbox under 20 unread (or /goal-new <name>: <objective>)'
   const cwd = await $.session.cwd()
-  const choice = await askSchedule($, name, await suggestSchedule($, name, objective))
+  const suggestion = await suggestSchedule($, given, objective)
+  const name = given ?? suggestion.title ?? fallbackTitle(objective)
+  const choice = await askSchedule($, name, suggestion)
   let created
   try {
     created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff })

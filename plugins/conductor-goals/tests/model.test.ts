@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
-  statusText, suggestByKeywords, toCard,
+  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs,
 } from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
@@ -104,4 +104,15 @@ test('choices put the suggestion first, and answers map back to choices', async 
   expect(choiceFromAnswer('off')).toMatchObject({ key: 'custom', schedule: null, oneOff: false })
   expect(choiceFromAnswer('Cancel')).toBeNull()
   expect(choiceFromAnswer(null)).toBeNull()
+})
+
+test('/goal-new arguments: a short name before a colon, otherwise all objective; titles are tidied', async () => {
+  expect(splitGoalArgs('Inbox: keep it under 20')).toEqual({ name: 'Inbox', objective: 'keep it under 20' })
+  expect(splitGoalArgs('keep my inbox under 20 unread please: archive newsletters')).toEqual({ name: null, objective: 'keep my inbox under 20 unread please: archive newsletters' })
+  expect(splitGoalArgs('watch the build')).toEqual({ name: null, objective: 'watch the build' })
+  expect(splitGoalArgs('Inbox:')).toEqual({ name: null, objective: 'Inbox:' })
+  expect(cleanTitle('"Weekly PR Digest."')).toBe('Weekly PR Digest')
+  expect(fallbackTitle('keep my inbox under 20 unread')).toBe('Keep inbox under 20 unread')
+  expect(fallbackTitle('!!!')).toBe('New goal')
+  expect(parseSuggestion('{"choice": "daily", "reason": "x", "title": "Tidy Downloads"}')).toEqual({ choice: 'daily', reason: 'x', title: 'Tidy Downloads' })
 })
