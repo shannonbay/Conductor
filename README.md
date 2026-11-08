@@ -71,7 +71,13 @@ npm install
 cd mcp && npm run build
 ```
 
-Add to your Claude Code MCP config (`~/.claude/claude_desktop_config.json` or project `.mcp.json`):
+Add the server for your user, so goals work in every Claude Code session, whatever folder it starts in:
+
+```bash
+claude mcp add --scope user conductor -- node /path/to/Conductor/mcp/dist/index.js
+```
+
+Or add it to one project's `.mcp.json`. Goals then work only in sessions started in that project:
 
 ```json
 {
@@ -146,7 +152,7 @@ Open [http://localhost:3000](http://localhost:3000) for goal pages and webhooks.
 npm run doctor
 ```
 
-Rebuilds `core/` and `mcp/`, then checks Node.js, the SQLite native module, the database and schema, `.mcp.json`, leftover hooks from older versions, both goal plugins, the optional web app, and whether your active goals can run. Anything wrong comes with the command to fix it.
+Rebuilds `core/` and `mcp/`, then checks Node.js, the SQLite native module, the database and schema, `.mcp.json` and whether `conductor` is added for your user, leftover hooks from older versions, both goal plugins, the optional web app, and whether your active goals can run. Anything wrong comes with the command to fix it.
 
 ## Database
 

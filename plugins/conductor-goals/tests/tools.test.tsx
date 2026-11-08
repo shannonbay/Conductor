@@ -165,3 +165,11 @@ test('/goal-new without a name, with the model unavailable, names it from the ob
   await $.command.run(typed('goal-new', 'monitor my github for new stars and issues'))
   expect(fake.of('create_goal')[0]?.input).toMatchObject({ name: 'Monitor github new stars issues', objective: 'monitor my github for new stars and issues' })
 })
+
+test('/goal-new without the conductor server says how to add it', async ($, on) => {
+  engine(on)
+  fakeConductor(on, [], { fail: true })
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', 'Inbox: keep my inbox under 20 unread'))
+  expect(made.text).toContain('claude mcp add --scope user conductor')
+})

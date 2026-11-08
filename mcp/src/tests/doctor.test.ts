@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkDatabase, formatResults,
+  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkDatabase, checkUserScope, formatResults,
   type DoctorOptions,
 } from '../doctor.js'
 
@@ -87,6 +87,14 @@ describe('doctor', () => {
       expect(checkMcpConfig(o).some((r) => r.name.includes('conductor-channel'))).toBe(false)
       write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: [] }, 'conductor-channel': { command: 'node', args: [] } } }))
       expect(checkMcpConfig(o).some((r) => r.name.includes('conductor-channel') && r.level === 'warn')).toBe(true)
+    })
+  })
+
+  describe('checkUserScope', () => {
+    it('warns until conductor is added for the user, with the command', () => {
+      expect(checkUserScope(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude mcp add --scope user conductor -- node ') })
+      write(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: ['x.js'] } } }))
+      expect(checkUserScope(o)).toMatchObject({ level: 'ok' })
     })
   })
 

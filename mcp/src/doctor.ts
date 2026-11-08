@@ -112,6 +112,25 @@ export function checkBuild(o: DoctorOptions, pkg: 'core' | 'mcp'): CheckResult {
     : ok(name, 'up to date')
 }
 
+/**
+ * Goals work in every session only when `conductor` is added for the user
+ * (~/.claude.json). A repo .mcp.json loads only in sessions started in the repo,
+ * so elsewhere the plugins find no conductor tools.
+ */
+export function checkUserScope(o: DoctorOptions): CheckResult {
+  const name = 'conductor in every project'
+  let servers: Record<string, unknown> = {}
+  try {
+    servers = JSON.parse(readFileSync(join(o.home, '.claude.json'), 'utf8')).mcpServers ?? {}
+  } catch {
+    // no user config yet: treated as not added
+  }
+  if (servers.conductor) return ok(name, 'added for your user')
+  const script = join(o.repoRoot, 'mcp', 'dist', 'index.js').replace(/\\/g, '/')
+  return warn(name, "only in this repo's .mcp.json, so goals, the Goals pane and /goal-new work only in sessions started here",
+    `Run \`claude mcp add --scope user conductor -- node ${script}\`, then restart Claude Code.`)
+}
+
 export function checkMcpConfig(o: DoctorOptions): CheckResult[] {
   const file = [join(o.cwd, '.mcp.json'), join(o.repoRoot, '.mcp.json')].find((f) => existsSync(f))
   if (!file) {
@@ -234,6 +253,7 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
     checkBuild(o, 'core'),
     checkBuild(o, 'mcp'),
     ...checkMcpConfig(o),
+    checkUserScope(o),
     checkHooks(o),
     plugins,
     web,

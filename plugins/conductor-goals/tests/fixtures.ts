@@ -105,7 +105,7 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
     on('tool.call', { tool: `mcp__conductor__${name}` }, (_, e) => {
       // Record only the plugin's own arguments, not the fields the engine sets on every call
       const { tool: _t, tool_use_id: _u, agentId: _a, ...input } = e as unknown as Record<string, unknown>
-      if (opts.fail) throw new Error('No such tool available: mcp__conductor__' + name)
+      if (opts.fail) throw new Error(`$.tool.call: no tool named "mcp__conductor__${name}" in this session`)
       calls.push({ tool: name, input })
       const error = opts.errors?.[name]
       if (error) return { result: `Error: ${error}`, isError: true } as never

@@ -1,8 +1,8 @@
 /**
  * Conductor as this plugin uses it: the `conductor` MCP server's tools,
  * called through `$.tool.call`. No web app is needed. An error answer throws
- * with the server's own message; a missing server throws too (the tool isn't
- * there), which the pane shows as "not connected".
+ * with the server's own message; a missing server throws NOT_LOADED, which
+ * the pane and commands show.
  */
 import type { EngineInterface } from 'claude-code'
 
@@ -50,11 +50,38 @@ function resultText(r: { text?: string; result?: unknown }): string {
   return JSON.stringify(res ?? null)
 }
 
+/**
+ * Why a call fails when the session has no `conductor` server: usually it was
+ * set up only in the Conductor repo's .mcp.json, and this session runs elsewhere.
+ */
+export const NOT_LOADED = "The conductor MCP server isn't loaded in this session. To use goals in every project, add it for your user: claude mcp add --scope user conductor -- node <path to Conductor>/mcp/dist/index.js, then restart Claude Code (or reconnect with /mcp)."
+
+/** True for the engine's answer when no `mcp__conductor__*` tool exists in the session. */
+export function isNotLoaded(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /no tool named "mcp__conductor__|no such tool available: mcp__conductor__/i.test(msg)
+}
+
+/** Whether the session has any `conductor` tool (asked only after a call failed). */
+async function conductorListed($: $): Promise<boolean> {
+  try {
+    return (await $.tool.list()).some((t) => t.name.startsWith('mcp__conductor__'))
+  } catch {
+    return true // can't tell: keep the original error
+  }
+}
+
 /** Calls one `conductor` MCP tool and returns its JSON answer. */
 async function call<T>($: $, name: string, input: Record<string, unknown> = {}): Promise<T> {
-  const r = await $.tool.call({ tool: `mcp__conductor__${name}`, ...input } as never)
+  let r: Awaited<ReturnType<$['tool']['call']>>
+  try {
+    r = await $.tool.call({ tool: `mcp__conductor__${name}`, ...input } as never)
+  } catch (err) {
+    throw isNotLoaded(err) || !(await conductorListed($)) ? new Error(NOT_LOADED) : err
+  }
   if (r.deny !== undefined) throw new Error(r.deny)
   const text = resultText(r)
+  if (isNotLoaded(text)) throw new Error(NOT_LOADED)
   if (r.isError === true || text.startsWith('Error:')) throw new Error(text.replace(/^Error:\s*/, '').replace(/^<tool_use_error>|<\/tool_use_error>$/g, ''))
   try {
     return JSON.parse(text) as T
