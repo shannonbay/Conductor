@@ -76,7 +76,7 @@ Long conversations produce ideas and decisions to come back to, and a context co
 
 - `/todo <text>` adds to this project's **To do** list (made the first time). Or ask Claude: "add that to the list". Claude only adds when asked, or offers when an idea is clearly being put off.
 - In the pane, open a list to see its open to-dos, each with its id (`☐ 1.3 Set autonomy…`). Press ☐ to tick one off; a toast says how to undo. **n done** shows the ticked ones, and pressing one puts it back.
-- Press a to-do's text to expand it: the full text, any notes, and **Plan** / **Start**. Both bring it into this conversation, where Claude can ask you things: **Plan** asks Claude to plan it in plan mode for you to review, **Start** to begin. The to-do shows ◐ until it's ticked off (Claude ticks it with `complete_todo` when it's done). To-dos don't run in the background; goals do.
+- Press a to-do's text to expand it: the full text, any notes, and **Ask**, **Plan** and **Start**. All three bring it into this conversation, where Claude can ask you things. **Ask** gets Claude's opinion and trade-offs with nothing changed (if you've started typing a prompt, it adds the to-do to your draft instead of sending). **Plan** asks Claude to plan it in plan mode for you to review. **Start** asks it to begin. The to-do shows ◐ until it's ticked off (Claude ticks it with `complete_todo` when it's done). To-dos don't run in the background; goals do.
 - Add a to-do with the box under a list.
 - After a compaction, say "check my list": Claude reads it with the `todos` tool. Nothing is added to the conversation otherwise: no hooks, no reminders.
 

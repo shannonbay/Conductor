@@ -110,3 +110,24 @@ test("Claude's to-do tools: list, add (as the agent), tick off", async ($, on) =
   const nope = await $.tool.call({ tool: 'mcp__conductor-goals__add_todo', text: 'x', list: 'nowhere' } as never)
   expect(String(nope.result)).toContain('No list "nowhere"')
 })
+
+test('Ask sends a question about the to-do, or adds it to a draft the person has started', async ($, on) => {
+  const { prompts, box, toasts } = engine(on)
+  const fake = fakeConductor(on, [], { todos: [roadmap()] })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo-toggle-p1' })
+  await ui.press({ key: 'todo-open-p1/1.3' })
+
+  await ui.press({ key: 'todo-ask-p1/1.3' })
+  expect(prompts).toEqual([expect.stringContaining('What do you think of to-do 1.3 on my list "Goals roadmap"?')])
+  expect(prompts[0]).toContain("Don't change anything or start work on it.")
+  expect(fake.of('todo_set')).toEqual([]) // asking isn't starting
+
+  box.draft = 'Is this worth doing before 1.6'
+  await ui.press({ key: 'todo-ask-p1/1.3' })
+  expect(prompts).toHaveLength(1)
+  expect(box.draft).toBe('Is this worth doing before 1.6 (about to-do 1.3 on "Goals roadmap": Set autonomy from Claude Code)')
+  expect(toasts.at(-1)).toBe('Added to-do 1.3 to your prompt: press Enter to send it.')
+  await ui.unmount()
+})

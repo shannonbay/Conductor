@@ -37,7 +37,7 @@ export function findTodo(lists: TodoList[], itemId: string, listId?: string): { 
 
 /** /todo <text> adds; /todo done <id> ticks off; /todo alone shows the lists. */
 export async function todoCommand($: $, args: string): Promise<string> {
-  const dir = await $.session.cwd()
+  const dir = await $.session.root()
   const text = args.trim()
   if (!text) {
     const lists = await fetchTodos($, dir)
@@ -63,7 +63,10 @@ export async function todoCommand($: $, args: string): Promise<string> {
  * on a to-do happens here, where Claude can ask questions, not in a
  * background run (background runs are for goals).
  */
-export function todoPrompt(list: TodoList, item: TodoItem, mode: 'plan' | 'start'): string {
+export function todoPrompt(list: TodoList, item: TodoItem, mode: 'plan' | 'start' | 'ask'): string {
+  if (mode === 'ask') {
+    return `What do you think of to-do ${item.id} on my list "${list.name}"?\n\n${item.text}${item.notes ? `\n\n(Notes: ${item.notes})` : ''}\n\nGive me your opinion and the trade-offs. Don't change anything or start work on it.`
+  }
   const from = `From my to-do list "${list.name}", item ${item.id}:\n\n${item.text}${item.notes ? `\n\n(Notes: ${item.notes})` : ''}`
   const end = `When it's done, tick it off with complete_todo (item ${item.id}${list.name !== 'To do' ? `, list "${list.name}"` : ''}).`
   return mode === 'plan'
@@ -77,6 +80,24 @@ export async function workOnTodo($: $, list: TodoList, item: TodoItem, mode: 'pl
   await $.prompt.submit({ text: todoPrompt(list, item, mode) })
 }
 
+/**
+ * Ask: Claude's opinion on a to-do, with nothing changed. Sent at once, unless
+ * the person has started typing in the prompt box: then the to-do is added to
+ * their draft, so they can ask their own question about it.
+ */
+export async function askAboutTodo($: $, list: TodoList, item: TodoItem): Promise<'sent' | 'added'> {
+  const { text: draft } = await $.prompt.read()
+  if (draft.trim()) {
+    const filled = await $.prompt.fill({ text: ` (about to-do ${item.id} on "${list.name}": ${item.text})`, mode: 'append' })
+    if (filled.isFilled) {
+      $.ui.toast(`Added to-do ${item.id} to your prompt: press Enter to send it.`)
+      return 'added'
+    }
+  }
+  await $.prompt.submit({ text: todoPrompt(list, item, 'ask') })
+  return 'sent'
+}
+
 /** The pane's actions, through the shared busy/notice/re-read wrapper. */
 export async function toggleTodo($: $, list: TodoList, item: TodoItem): Promise<boolean> {
   const ticking = !isDone(item)
@@ -86,6 +107,9 @@ export async function toggleTodo($: $, list: TodoList, item: TodoItem): Promise<
 }
 export function addFromPane($: $, dir: string, list: TodoList, text: string): Promise<boolean> {
   return act($, `todo-add:${list.id}`, 'add the to-do', async () => void (await addTodo($, { dir, text, listId: list.id })))
+}
+export function askFromPane($: $, list: TodoList, item: TodoItem): Promise<boolean> {
+  return act($, `todo-ask:${list.id}/${item.id}`, 'ask about it', async () => void (await askAboutTodo($, list, item)))
 }
 export function workFromPane($: $, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<boolean> {
   return act($, `todo-${mode}:${list.id}/${item.id}`, mode === 'plan' ? 'plan it' : 'start it', () => workOnTodo($, list, item, mode))

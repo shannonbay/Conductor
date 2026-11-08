@@ -98,10 +98,10 @@ export async function act($: $, key: string, label: string, run: () => Promise<v
   return ok
 }
 
-/** Re-reads this project's to-do lists (a failed read keeps the last one). */
+/** Re-reads this project's to-do lists (a failed read keeps the last one). The project is the session's root: a shell `cd` into a subfolder doesn't move it. */
 export async function refreshTodos($: $): Promise<void> {
   try {
-    const dir = await $.session.cwd()
+    const dir = await $.session.root()
     await setTodos($, { dir, lists: await fetchTodos($, dir) })
   } catch {
     // not connected: the pane says so for the goals

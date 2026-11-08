@@ -14,7 +14,7 @@ import { cancelRun } from './runner'
 import { chooseSchedule } from './schedule'
 import { ago, clip, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
 import { getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setConfirm, setRejecting, toggleExpanded } from './state'
-import { addFromPane, toggleTodo, workFromPane } from './todos'
+import { addFromPane, askFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
 
@@ -343,7 +343,7 @@ function doneSection($: $, e: E, view: View, done: GoalCard[]) {
 /**
  * The person's to-do lists, each collapsed to its name and open count. Open,
  * a list shows its to-dos: ☐ ticks one off, pressing the text expands it (the
- * full text, Plan and Start), and "n done" shows the ticked ones, each of
+ * full text, Ask, Plan and Start), and "n done" shows the ticked ones, each of
  * which goes back on the list when pressed.
  */
 function todoSection($: $, e: E, view: View, todos: Todos) {
@@ -384,6 +384,8 @@ function todoSection($: $, e: E, view: View, todos: Todos) {
                       {item.notes && <Text dimColor>{indent}    {item.notes}</Text>}
                       <Box>
                         <Text>{indent}    </Text>
+                        <Button key={`todo-ask-${list.id}/${item.id}`} plain label={view.doing === `todo-ask:${list.id}/${item.id}` ? 'Asking…' : 'Ask'} onPress={() => void askFromPane($, list, item)} />
+                        <Text> </Text>
                         <Button key={`todo-plan-${list.id}/${item.id}`} label={view.doing === `todo-plan:${list.id}/${item.id}` ? 'Sending…' : 'Plan'} onPress={() => void workFromPane($, list, item, 'plan')} />
                         <Text> </Text>
                         <Button key={`todo-start-${list.id}/${item.id}`} plain label={view.doing === `todo-start:${list.id}/${item.id}` ? 'Sending…' : 'Start'} onPress={() => void workFromPane($, list, item, 'start')} />

@@ -207,7 +207,7 @@ export async function goalCommand($: $, command: 'goal-run' | 'goal-pause' | 'go
 export async function newGoal($: $, args: string): Promise<string> {
   const { name: given, objective } = splitGoalArgs(args)
   if (!objective) return 'Usage: /goal-new <objective>, e.g. /goal-new keep my inbox under 20 unread (or /goal-new <name>: <objective>)'
-  const cwd = await $.session.cwd()
+  const cwd = await $.session.root()
   const suggestion = await suggestSchedule($, given, objective)
   const name = given ?? suggestion.title ?? fallbackTitle(objective)
   const choice = await askSchedule($, name, suggestion)
@@ -252,7 +252,7 @@ export async function scheduleCommand($: $, args: string): Promise<string> {
 
 /** The to-do tools: no confirm, since the person asked and every change is undone with one press. */
 async function todoTool($: $, name: 'todos' | 'add_todo' | 'complete_todo', input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
-  const dir = await $.session.cwd()
+  const dir = await $.session.root()
   const lists = await fetchTodos($, dir)
   const listArg = typeof input.list === 'string' && input.list.trim() ? input.list.trim() : undefined
   if (name === 'todos') return { text: describeTodos(lists, { withDone: input.include_done === true }), isError: false }

@@ -220,7 +220,8 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean; sugge
   on('command.register', (_, e) => ({ value: { command: e.name } }))
   on('tool.register', (_, e) => ({ value: { tool: `mcp__conductor-goals__${e.name}` } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
-  on('session.cwd', () => ({ value: '/work/project' }))
+  on('session.cwd', () => ({ value: '/work/project/web' })) // the shell has cd'd into a subfolder
+  on('session.root', () => ({ value: '/work/project' })) // the project root: goals and to-do lists use this
   on('ui.toast', (_, e) => {
     toasts.push(e.text)
     return { value: undefined }
@@ -246,6 +247,13 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean; sugge
   on('prompt.submit', (_, e) => {
     prompts.push(e.text)
     return { text: e.text }
+  })
+  // The prompt box: what the person has typed so far, and what plugins add to it
+  const box = { draft: '' }
+  on('prompt.read', () => ({ value: { text: box.draft, cursor: box.draft.length } }) as never)
+  on('prompt.fill', (_, e) => {
+    box.draft = e.mode === 'append' ? box.draft + e.text : e.text
+    return { isFilled: true, text: box.draft, cursor: box.draft.length } as never
   })
   // The small model that suggests schedules: a JSON answer, or (null) unavailable
   const suggestion = opts.suggestion === undefined ? '{"choice": "daily", "reason": "it is ongoing upkeep"}' : opts.suggestion
@@ -277,7 +285,7 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean; sugge
     return { result: { message: `stopped ${id}` } } as never
   })
   return {
-    toasts, notifications, statuses, asked, clock, agents, spawned, stopped, prompts,
+    toasts, notifications, statuses, asked, clock, agents, spawned, stopped, prompts, box,
     /** Loads or unloads the guard plugin (its status tool). */
     setGuarded: (on: boolean) => {
       tools = on ? [GUARD] : []
