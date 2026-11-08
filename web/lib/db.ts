@@ -112,41 +112,20 @@ export const healthDue = core.healthDue
 export const listToolCalls = (planId: string, limit?: number) => core.listToolCalls(getDb(), planId, limit)
 
 /** Number of recent decisions per category, and the suggestion threshold. */
-export const PROMOTE_AFTER = 10
+export const PROMOTE_AFTER = core.PROMOTE_AFTER
 
-/**
- * Categories still at "propose" whose last PROMOTE_AFTER human decisions were all
- * approvals — candidates to switch to "auto".
- */
-export function getAutonomySuggestions(planId: string): { category: string; approved_in_a_row: number }[] {
-  const goal = core.getGoal(getDb(), planId)
-  if (!goal) return []
-  const rows = getDb().prepare(`
-    SELECT json_extract(t.state, '$.action.category') AS category, v.passed
-    FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
-    WHERE v.plan_id = ? AND v.gate = 'approval' AND json_extract(t.state, '$.action.category') IS NOT NULL
-    ORDER BY v.created_at DESC, v.rowid DESC
-  `).all(planId) as { category: string; passed: number }[]
-  const streak = new Map<string, { n: number; broken: boolean }>()
-  for (const r of rows) {
-    const s = streak.get(r.category) ?? { n: 0, broken: false }
-    if (!s.broken) { if (r.passed) s.n++; else s.broken = true }
-    streak.set(r.category, s)
-  }
-  return [...streak.entries()]
-    .filter(([c, s]) => s.n >= PROMOTE_AFTER && core.autonomyFor(goal, c) === 'propose')
-    .map(([category, s]) => ({ category, approved_in_a_row: s.n }))
-}
+/** Categories still at "propose" whose last PROMOTE_AFTER decisions were all approvals. */
+export const getAutonomySuggestions = (planId: string) => core.getAutonomySuggestions(getDb(), planId)
+/** A human approves or rejects an item; approving a goal proposal queues a run. */
+export const decideItem = (planId: string, taskId: string, input: Parameters<typeof core.decideItem>[3]) => core.decideItem(getDb(), planId, taskId, input)
+export const overviewWithEtag = () => core.overviewWithEtag(getDb())
 export const getMemory = (id: string) => core.getMemory(getDb(), id)
 export const insertMemory = (m: Parameters<typeof core.insertMemory>[1]) => core.insertMemory(getDb(), m)
 export const updateMemory = (id: string, fields: Parameters<typeof core.updateMemory>[2]) => core.updateMemory(getDb(), id, fields)
 export const deleteMemory = (id: string) => core.deleteMemory(getDb(), id)
 
 /** Work items of a goal that are not archived, in tree order. */
-export function getGoalItems(planId: string): Task[] {
-  const rows = getDb().prepare('SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL').all(planId) as Record<string, unknown>[]
-  return rows.map(deserializeTask).sort((a, b) => core.compareTaskIds(a.id, b.id))
-}
+export const getGoalItems = (planId: string): Task[] => core.getGoalItems(getDb(), planId)
 
 /** Approved/rejected counts per action category — evidence for promoting a category to auto. */
 export function getApprovalStats(planId: string): Record<string, { approved: number; rejected: number }> {

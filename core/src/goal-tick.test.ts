@@ -1,0 +1,144 @@
+import { describe, it, expect, beforeEach } from 'vitest'
+import type Database from 'better-sqlite3'
+import {
+  openDatabase, createGoal, updateGoal, getGoal, queueRun, getRun, updateRun, addItem, getTask, listMemory, listRuns,
+  takeLease, releaseLease, claimRun, schedulerPass, expireStaleRuns, decideItem, attachAgent, guardToolCallForRun,
+  buildOverview, overviewWithEtag, LEASE_MS, insertRun,
+} from './index.js'
+
+let db: Database.Database
+const now = new Date().toISOString()
+const plan = { id: 'g1', name: 'Inbox', description: null, status: 'active' as const, working_dir: '/tmp/inbox', created_at: now, updated_at: now }
+
+beforeEach(() => {
+  db = openDatabase(':memory:')
+  createGoal(db, plan, { objective: 'Inbox zero', instructions: '', autonomy: { 'email.archive': 'auto', 'email.delete': 'off' } })
+})
+
+describe('scheduler lease', () => {
+  it('lets one holder at a time take it, and another once it expires or is released', () => {
+    const t = new Date()
+    expect(takeLease(db, 'A', t)).toBe(true)
+    expect(takeLease(db, 'B', t)).toBe(false)
+    expect(takeLease(db, 'A', new Date(t.getTime() + 1000))).toBe(true) // renew
+    expect(takeLease(db, 'B', new Date(t.getTime() + 1000 + LEASE_MS + 1))).toBe(true)
+    expect(takeLease(db, 'A', new Date(t.getTime() + 1000 + LEASE_MS + 2))).toBe(false)
+    releaseLease(db, 'B')
+    expect(takeLease(db, 'A', new Date(t.getTime() + 1000 + LEASE_MS + 3))).toBe(true)
+  })
+})
+
+describe('claimRun', () => {
+  it('claims a queued run once, with a prompt naming the goal and run', () => {
+    const q = queueRun(db, 'g1')
+    const claimed = claimRun(db, 'g1', { holder: 'A', queuedRunId: q.id })
+    expect(claimed).toMatchObject({ run_id: q.id, goal_id: 'g1', name: 'Inbox', working_dir: '/tmp/inbox', max_run_minutes: 15 })
+    expect(claimed!.prompt).toContain(`run_id "${q.id}"`)
+    expect(getRun(db, q.id)).toMatchObject({ status: 'running', holder: 'A' })
+    expect(getGoal(db, 'g1')!.last_run_at).not.toBeNull()
+    expect(claimRun(db, 'g1', { holder: 'B', queuedRunId: q.id })).toBeNull()
+  })
+
+  it('creates and claims a run when none is queued', () => {
+    const claimed = claimRun(db, 'g1', { holder: 'A', trigger: 'interval' })
+    expect(getRun(db, claimed!.run_id)).toMatchObject({ status: 'running', trigger: 'interval', holder: 'A' })
+  })
+
+  it('records the subagent doing the run', () => {
+    const claimed = claimRun(db, 'g1', { holder: 'A' })!
+    attachAgent(db, claimed.run_id, 'agent-1')
+    expect(getRun(db, claimed.run_id)!.agent_id).toBe('agent-1')
+  })
+})
+
+describe('schedulerPass', () => {
+  it('claims queued runs for the lease holder only', async () => {
+    const q = queueRun(db, 'g1')
+    const other = await schedulerPass(db, { holder: 'B', now: new Date() }).then(() => schedulerPass(db, { holder: 'A' }))
+    expect(other).toEqual({ leader: false, claimed: [], expired: [] })
+    // B took the lease first and claimed the run
+    expect(getRun(db, q.id)).toMatchObject({ status: 'running', holder: 'B' })
+  })
+
+  it('claims a due interval run and moves next_run_at forward', async () => {
+    createGoal(db, { ...plan, id: 'g2', name: 'Every half hour' }, { objective: 'x' }, { minutes: 30 })
+    const t = new Date(Date.now() + 1000)
+    const r = await schedulerPass(db, { holder: 'A', now: t })
+    expect(r.claimed.map((c) => [c.goal_id, c.trigger])).toEqual([['g2', 'interval']])
+    expect(getGoal(db, 'g2')!.next_run_at! > t.toISOString()).toBe(true)
+  })
+
+  it('starts no more than maxConcurrent runs at once', async () => {
+    createGoal(db, { ...plan, id: 'g2', name: 'B' }, { objective: 'x' })
+    createGoal(db, { ...plan, id: 'g3', name: 'C' }, { objective: 'x' })
+    for (const id of ['g1', 'g2', 'g3']) queueRun(db, id)
+    const first = await schedulerPass(db, { holder: 'A', maxConcurrent: 2 })
+    expect(first.claimed).toHaveLength(2)
+    expect((await schedulerPass(db, { holder: 'A', maxConcurrent: 2 })).claimed).toHaveLength(0)
+    updateRun(db, first.claimed[0]!.run_id, { status: 'completed' })
+    expect((await schedulerPass(db, { holder: 'A', maxConcurrent: 2 })).claimed).toHaveLength(1)
+  })
+
+  it('skips a queued run past the daily limit', async () => {
+    updateGoal(db, 'g1', { limits: { max_runs_per_day: 1 } })
+    insertRun(db, 'g1', 'manual', 'completed')
+    const q = queueRun(db, 'g1')
+    expect((await schedulerPass(db, { holder: 'A' })).claimed).toEqual([])
+    expect(getRun(db, q.id)).toMatchObject({ status: 'skipped', skip_reason: expect.stringMatching(/daily run limit/) })
+  })
+})
+
+describe('expireStaleRuns', () => {
+  it('times out runs well past their limit, except ones the caller tracks', () => {
+    const a = claimRun(db, 'g1', { holder: 'A' })!
+    const later = new Date(Date.now() + 25 * 60_000)
+    expect(expireStaleRuns(db, later, { skipRunIds: new Set([a.run_id]) })).toEqual([])
+    expect(expireStaleRuns(db, new Date(Date.now() + 5 * 60_000))).toEqual([])
+    expect(expireStaleRuns(db, later)).toEqual([a.run_id])
+    expect(getRun(db, a.run_id)!.status).toBe('timed_out')
+  })
+})
+
+describe('decideItem', () => {
+  it('approving a proposal keeps it active and queues a run', () => {
+    addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply' } })
+    const r = decideItem(db, 'g1', '1', { decision: 'approve' })
+    expect(r.task).toMatchObject({ status: 'active', approved_by: 'human' })
+    expect(r.queuedRun).toMatchObject({ status: 'queued', trigger: 'manual' })
+  })
+
+  it('rejecting saves the feedback as goal memory', () => {
+    addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply' } })
+    const r = decideItem(db, 'g1', '1', { decision: 'reject', feedback: 'too formal' })
+    expect(r.queuedRun).toBeNull()
+    expect(getTask(db, 'g1', '1')!.review_requested_at).toBeNull()
+    expect(listMemory(db, 'g1').map((m) => m.text)).toContain('Feedback on "Reply to Bob": too formal')
+  })
+
+  it('refuses an unknown item', () => {
+    expect(() => decideItem(db, 'g1', '9', { decision: 'approve' })).toThrow(/not found/)
+  })
+})
+
+describe('guardToolCallForRun', () => {
+  it('applies the goal autonomy to a running run, and allows anything outside runs', () => {
+    updateGoal(db, 'g1', { tool_map: { 'mcp__gmail__send*': 'email.send', 'mcp__gmail__delete': 'email.delete' } })
+    const run = claimRun(db, 'g1', { holder: 'A' })!
+    expect(guardToolCallForRun(db, run.run_id, 'mcp__gmail__delete')).toMatchObject({ decision: 'deny', category: 'email.delete' })
+    expect(guardToolCallForRun(db, run.run_id, 'mcp__gmail__send_reply')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/needs approval/) })
+    expect(guardToolCallForRun(db, run.run_id, 'Read')).toEqual({ decision: 'allow', run_id: run.run_id })
+    expect(guardToolCallForRun(db, 'run_nope', 'mcp__gmail__delete')).toEqual({ decision: 'allow' })
+  })
+})
+
+describe('buildOverview', () => {
+  it('lists goals with items waiting for review, and an etag that changes with them', () => {
+    const before = overviewWithEtag(db).etag
+    addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply' } })
+    const o = buildOverview(db)
+    expect(o.goals).toHaveLength(1)
+    expect(o.goals[0]).toMatchObject({ id: 'g1', name: 'Inbox', needs_you: [{ id: '1', awaiting_review: true }] })
+    expect(overviewWithEtag(db).etag).not.toBe(before)
+    expect(listRuns(db, 'g1')).toEqual([])
+  })
+})

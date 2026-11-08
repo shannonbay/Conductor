@@ -58,6 +58,18 @@ export const countItems = (planId: string) => db.prepare(
   "SELECT SUM(CASE WHEN status IN ('pending','active') THEN 1 ELSE 0 END) AS open, SUM(CASE WHEN review_requested_at IS NOT NULL THEN 1 ELSE 0 END) AS awaiting_review FROM tasks WHERE plan_id = ? AND archived_at IS NULL",
 ).get(planId) as { open: number | null; awaiting_review: number | null }
 
+// Goal runner (the conductor-goals plugin drives runs through these)
+export const schedulerPass = (opts: core.PassOptions) => core.schedulerPass(db, opts)
+export const releaseLease = (holder: string) => core.releaseLease(db, holder)
+export const overviewWithEtag = () => core.overviewWithEtag(db)
+export const decideItem = (planId: string, taskId: string, input: Parameters<typeof core.decideItem>[3]) => core.decideItem(db, planId, taskId, input)
+export const failRun = (runId: string, status: 'failed' | 'timed_out', reason: string) => core.failRun(db, runId, status, reason)
+export const attachAgent = (runId: string, agentId: string) => core.attachAgent(db, runId, agentId)
+export const guardToolCallForRun = (runId: string, tool: string) => core.guardToolCallForRun(db, runId, tool)
+export const updateGoal = (planId: string, fields: Parameters<typeof core.updateGoal>[2]) => core.updateGoal(db, planId, fields)
+
+export const deleteMemory = (id: string) => core.deleteMemory(db, id)
+
 export const clearAllData = () => core.clearAllData(db)
 
 export function runTransaction<T>(fn: () => T): T {

@@ -105,7 +105,7 @@ describe('GET /api/goals/overview', () => {
 
       await PATCHGoal(req('PATCH', { status: 'active' }), p(id))
       core.queueRun(getDb(), id)
-      expect(await activityOf(id)).toMatchObject({ state: 'queued', text: 'Queued (manual) — starts when Claude Code is free' })
+      expect(await activityOf(id)).toMatchObject({ state: 'queued', text: 'Queued (manual) — starts within a minute while Claude Code is open' })
     })
   })
 

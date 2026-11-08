@@ -9,7 +9,8 @@
 import type { EngineInterface, RenderInput } from 'claude-code'
 
 import type { Confirm, GoalCard } from '../types'
-import { approve, baseUrl, cancelRun, deleteMemory, reject, runNow, setGoalStatus } from './api'
+import { approve, baseUrl, deleteMemory, reject, runNow, setGoalStatus } from './api'
+import { cancelRun } from './runner'
 import { ago, clip, isFailed, lastRun, spark } from './model'
 import { getBusy, getConfirm, getExpanded, getNotice, getRejecting, getSnapshot, setConfirm, setRejecting, toggleExpanded } from './state'
 import { act, refresh } from './sync'
@@ -45,8 +46,8 @@ export async function renderPane($: $, e: E) {
   if (!s.reachable && s.goals.length === 0) {
     return (
       <Box flexDirection="column">
-        <Text>Conductor isn't reachable at {await baseUrl($)}.</Text>
-        <Text dimColor>Start it with `npm run dev` in Conductor/web, or change the address in /config → conductor-goals.</Text>
+        <Text>Conductor isn't connected.</Text>
+        <Text dimColor>Add the conductor MCP server to .mcp.json (see Conductor's README), then reconnect it with /mcp.</Text>
         {s.error && <Text dimColor>{s.error}</Text>}
         <Button key="retry" label="Retry" hotkey="g" onPress={() => void refresh($)} />
       </Box>

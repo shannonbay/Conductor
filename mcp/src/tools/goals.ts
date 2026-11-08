@@ -121,7 +121,7 @@ export async function end_run(args: unknown) {
   record(planId, planId, 'run_completed', { run_id: runId, summary: ended.summary, items_created: ended.items_created, items_resolved: ended.items_resolved })
   return {
     run: { id: ended.id, status: ended.status, items_created: ended.items_created, items_resolved: ended.items_resolved },
-    message: 'Run ended. If you were started through the Conductor channel, call agent_done now.',
+    message: 'Run ended. Finish with a one-line final message (your summary is saved). If you were started through the Conductor channel, call agent_done now.',
   }
 }
 
@@ -132,7 +132,7 @@ export async function run_goal(args: unknown) {
   return {
     run: { id: run.id, status: run.status },
     message: run.status === 'queued'
-      ? 'Queued. The Conductor web app starts queued runs within about 30 seconds while it and a channel-connected Claude Code session are running.'
+      ? 'Queued. The conductor-goals plugin starts it within about 30 seconds while Claude Code is open (or the web app does, if it runs with CONDUCTOR_WEB_RUNS=1).'
       : 'This goal already has a run in progress.',
   }
 }

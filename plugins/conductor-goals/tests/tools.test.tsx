@@ -22,21 +22,21 @@ test('goals_status summarises every goal for Claude, with item ids', async ($, o
 
 test('approve_item asks first and does nothing when declined', async ($, on) => {
   const { asked } = engine(on, { answer: 'Cancel' })
-  const { requests } = fakeConductor(on, [inbox()])
+  const fake = fakeConductor(on, [inbox()])
   await $.session.start(START)
   const res = await $.tool.call({ tool: 'mcp__conductor-goals__approve_item', goal: 'inbox', item_id: '11' })
   expect(asked).toEqual(['Approve "Reply to Alice" (Send: Reply to Alice) for the goal "Inbox"?'])
   expect(String(res.result)).toContain('declined')
-  expect(requests.some((r) => r.path.endsWith('/approve'))).toBe(false)
+  expect(fake.of('decide_item')).toEqual([])
 })
 
 test('approve_item approves once the person confirms', async ($, on) => {
   engine(on, { answer: 'Approve' })
-  const { requests } = fakeConductor(on, [inbox()])
+  const fake = fakeConductor(on, [inbox()])
   await $.session.start(START)
   const res = await $.tool.call({ tool: 'mcp__conductor-goals__approve_item', goal: 'Inbox', item_id: '11' })
   expect(String(res.result)).toContain('Approved "Reply to Alice"')
-  expect(requests.some((r) => r.path === '/api/plans/g1/tasks/11/approve')).toBe(true)
+  expect(fake.of('decide_item').map((c) => c.input)).toEqual([{ goal_id: 'g1', item_id: '11', decision: 'approve' }])
 })
 
 test('an unknown item or ambiguous goal name is explained', async ($, on) => {
@@ -52,7 +52,7 @@ test('an unknown item or ambiguous goal name is explained', async ($, on) => {
 test('/goal-new creates a goal in the session directory; /goal-pause pauses it', async ($, on) => {
   engine(on)
   const goals: ReturnType<typeof goal>[] = []
-  const { requests } = fakeConductor(on, goals)
+  const fake = fakeConductor(on, goals)
   await $.session.start(START)
 
   const usage = await $.command.run(typed('goal-new', 'Inbox'))
@@ -60,7 +60,7 @@ test('/goal-new creates a goal in the session directory; /goal-pause pauses it',
 
   const made = await $.command.run(typed('goal-new', 'Inbox: keep my inbox under 20 unread'))
   expect(made.text).toContain('Created the goal "Inbox"')
-  expect(JSON.parse(requests.find((r) => r.method === 'POST')!.body!)).toEqual({
+  expect(fake.of('create_goal')[0]?.input).toEqual({
     name: 'Inbox', objective: 'keep my inbox under 20 unread', working_dir: '/work/project',
   })
 

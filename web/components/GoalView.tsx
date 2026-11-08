@@ -111,7 +111,7 @@ export function GoalView({ goalId }: { goalId: string }) {
             </div>
             <p className="text-sm text-gray-600 mt-1">{goal.objective}</p>
             <p className="text-xs text-gray-400 mt-1">
-              {open_run ? (open_run.status === 'running' ? `Run in progress since ${when(open_run.started_at)}` : 'Run queued — starts when Claude Code is free')
+              {open_run ? (open_run.status === 'running' ? `Run in progress since ${when(open_run.started_at)}` : 'Run queued — starts within a minute while Claude Code is open')
                 : data.schedule ? `${data.schedule.kind === 'interval' ? `Every ${data.schedule.minutes} min${data.schedule.active_hours ? ` (${data.schedule.active_hours})` : ''}` : `Cron ${data.schedule.expr}`} · next run ${goal.status === 'active' ? when(goal.next_run_at) : '— paused'}`
                 : 'Runs only when you click Run now'}
             </p>

@@ -104,6 +104,65 @@ export const RunGoalSchema = z.object({
   goal_id: z.string().describe('ID of the goal to run'),
 })
 
+// ── Goal runner (called by the conductor-goals plugin, not by agents) ─────────
+
+export const GoalsTickSchema = z.object({
+  holder: z.string().min(1).describe('The Claude Code session asking (its session id)'),
+  tracked_run_ids: z.array(z.string()).default([]).describe('Runs this holder is tracking itself; never expired by the pass'),
+  max_concurrent: z.number().int().min(1).max(10).optional().describe('Most runs at once across all goals (default 3)'),
+  release: z.boolean().optional().describe('Give the scheduler lease up instead of running a pass (the session is ending)'),
+})
+
+export const GoalsOverviewSchema = z.object({
+  etag: z.string().optional().describe('The etag from the last overview; an unchanged overview answers { changed: false }'),
+})
+
+export const DecideItemSchema = z.object({
+  goal_id: z.string(),
+  item_id: z.string(),
+  decision: z.enum(['approve', 'reject']),
+  feedback: z.string().optional().describe('Required when rejecting'),
+})
+
+export const CancelRunSchema = z.object({
+  goal_id: z.string(),
+  reason: z.string().optional(),
+})
+
+export const SetGoalStatusSchema = z.object({
+  goal_id: z.string(),
+  status: z.enum(['active', 'paused']),
+})
+
+export const AttachAgentSchema = z.object({
+  run_id: z.string(),
+  agent_id: z.string(),
+})
+
+export const FailRunSchema = z.object({
+  run_id: z.string(),
+  status: z.enum(['failed', 'timed_out']).default('failed'),
+  reason: z.string().min(1),
+})
+
+export const GuardCheckSchema = z.object({
+  run_id: z.string(),
+  tool_name: z.string().describe('The tool the run agent is about to call'),
+})
+
+export const CreateGoalSchema = z.object({
+  name: z.string().trim().min(1),
+  objective: z.string().trim().min(1),
+  working_dir: z.string().min(1).describe('Where its runs work'),
+  instructions: z.string().optional(),
+  interval_minutes: z.number().int().min(5).optional().describe('Run every N minutes; left out, the goal runs on demand'),
+})
+
+export const DeleteMemorySchema = z.object({
+  goal_id: z.string(),
+  memory_id: z.string(),
+})
+
 export const VerifyTaskSchema = z.object({
   task_id: z.string().describe('ID of the task whose checks to run'),
 })

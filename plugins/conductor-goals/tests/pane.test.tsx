@@ -2,9 +2,9 @@ import { expect, test } from 'claude-code/testing'
 
 import { engine, fakeConductor, goal, PANE, proposal, START, SURFACES } from './fixtures'
 
-test('the pane shows a proposal with hotkeys, and Approve posts to the web app', async ($, on) => {
+test('the pane shows a proposal with hotkeys, and Approve records it in Conductor', async ($, on) => {
   const { statuses } = engine(on)
-  const { requests } = fakeConductor(on, [
+  const fake = fakeConductor(on, [
     goal({ id: 'g1', name: 'Inbox', needs_you: [proposal('11', 'Reply to Alice')], health: [{ passed: false, value: 7 }, { passed: false, value: 11 }] }),
   ])
   await $.session.start(START)
@@ -22,7 +22,7 @@ test('the pane shows a proposal with hotkeys, and Approve posts to the web app',
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'approve-g1/11' })
-  expect(requests.some((r) => r.method === 'POST' && r.path === '/api/plans/g1/tasks/11/approve')).toBe(true)
+  expect(fake.of('decide_item').map((c) => c.input)).toEqual([{ goal_id: 'g1', item_id: '11', decision: 'approve' }])
   expect(await ui.find({ key: 'approve-g1/11' })).toBeUndefined()
   expect(statuses.at(-1)).toBe('Conductor: all clear')
   await ui.unmount()
@@ -53,24 +53,24 @@ test("each goal shows a line of what its agent is doing, clipped to the pane", a
   }
 })
 
-test('Reject opens a feedback box and shows the web app error', async ($, on) => {
+test("Reject opens a feedback box and shows Conductor's error", async ($, on) => {
   engine(on)
-  const { requests } = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox', needs_you: [proposal('11', 'Reply to Alice')] })], {
-    errors: { 'POST /api/plans/g1/tasks/11/reject': [400, 'Feedback is required when rejecting.'] },
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox', needs_you: [proposal('11', 'Reply to Alice')] })], {
+    errors: { decide_item: 'Feedback is required when rejecting.' },
   })
   await $.session.start(START)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await ui.press({ key: 'reject-g1/11' })
   await ui.input({ key: 'feedback-g1/11', text: 'too formal' })
-  expect(requests.find((r) => r.path.endsWith('/reject'))?.body).toBe(JSON.stringify({ feedback: 'too formal' }))
+  expect(fake.of('decide_item')[0]?.input).toEqual({ goal_id: 'g1', item_id: '11', decision: 'reject', feedback: 'too formal' })
   expect((await ui.find({ type: 'Text', text: /Couldn't reject/ }))?.text).toContain('Feedback is required')
   await ui.unmount()
 })
 
 test('expanding a goal shows open items, runs and memory; memory delete asks first', async ($, on) => {
   engine(on)
-  const { requests } = fakeConductor(on, [
+  const fake = fakeConductor(on, [
     goal({
       id: 'g1',
       name: 'Inbox',
@@ -96,9 +96,9 @@ test('expanding a goal shows open items, runs and memory; memory delete asks fir
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'toggle-g1' })
   await ui.press({ key: 'forget-m1' })
-  expect(requests.some((r) => r.method === 'DELETE')).toBe(false)
+  expect(fake.of('delete_memory')).toEqual([])
   await ui.press({ key: 'forget-yes-m1' })
-  expect(requests.some((r) => r.method === 'DELETE' && r.path === '/api/goals/g1/memory/m1')).toBe(true)
+  expect(fake.of('delete_memory').map((c) => c.input)).toEqual([{ goal_id: 'g1', memory_id: 'm1' }])
   expect(await ui.find({ type: 'Text', text: /Alice likes short replies/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -106,39 +106,39 @@ test('expanding a goal shows open items, runs and memory; memory delete asks fir
 test('pause and resume, and cancel a run only after confirming', async ($, on) => {
   engine(on)
   const goals = [goal({ id: 'g1', name: 'Inbox', open_run: { id: 'r1', status: 'running' } })]
-  const { requests } = fakeConductor(on, goals)
+  const fake = fakeConductor(on, goals)
   await $.session.start(START)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ key: 'run-g1' })).toBeUndefined()
   await ui.press({ key: 'cancel-run-g1' })
-  expect(requests.some((r) => r.method === 'DELETE')).toBe(false)
+  expect(fake.of('cancel_run')).toEqual([])
   await ui.press({ key: 'cancel-run-no-g1' })
   await ui.press({ key: 'cancel-run-g1' })
   await ui.press({ key: 'cancel-run-yes-g1' })
-  expect(requests.some((r) => r.method === 'DELETE' && r.path === '/api/goals/g1/run')).toBe(true)
+  expect(fake.of('cancel_run').map((c) => c.input)).toEqual([{ goal_id: 'g1' }])
   expect((await ui.find({ key: 'run-g1' }))?.props.hotkey).toBe('n')
 
   await ui.press({ key: 'pause-g1' })
-  expect(requests.find((r) => r.method === 'PATCH')?.body).toBe(JSON.stringify({ status: 'paused' }))
+  expect(fake.of('set_goal_status')[0]?.input).toEqual({ goal_id: 'g1', status: 'paused' })
   expect(await ui.find({ key: 'run-g1' })).toBeUndefined()
   await ui.press({ key: 'resume-g1' })
   expect(goals[0]!.status).toBe('active')
   await ui.unmount()
 })
 
-test('an unchanged overview is asked for with its ETag and answers 304', async ($, on) => {
+test('an unchanged overview is asked for with its etag and answers changed: false', async ($, on) => {
   const { clock } = engine(on)
-  const { requests } = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox' })])
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox' })])
   await $.session.start(START)
   await clock.advance(15_000)
   await clock.settle()
-  const polls = requests.filter((r) => r.path === '/api/goals/overview')
+  const polls = fake.of('goals_overview')
   expect(polls).toHaveLength(2)
-  expect(polls[1]!.headers?.['If-None-Match']).toBe('"v0"')
+  expect(polls[1]!.input.etag).toBe('"v0"')
 })
 
-test('without the web app the pane says how to reach it', async ($, on) => {
+test('without the conductor MCP server the pane says how to connect it', async ($, on) => {
   const { statuses } = engine(on)
   fakeConductor(on, [], { fail: true })
   await $.session.start(START)
@@ -146,7 +146,8 @@ test('without the web app the pane says how to reach it', async ($, on) => {
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    expect((await ui.find({ type: 'Text', text: /isn't reachable/ }))?.text).toContain('http://localhost:3000')
+    expect(await ui.find({ type: 'Text', text: /isn't connected/ })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: /\/mcp/ }))?.text).toContain('.mcp.json')
     await ui.unmount()
   }
 })

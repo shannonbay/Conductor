@@ -25,6 +25,12 @@ describe('goal-guard hook', () => {
     expect(await handleHookInput(db, { session_id: 'other', tool_name: 'mcp__gmail__delete_message' })).toBeNull()
   })
 
+  it("doesn't bind the session for a run the plugin tags with run_scope", async () => {
+    const run = core.insertRun(db, 'g', 'manual', 'running')
+    expect(await handleHookInput(db, { session_id: 's1', tool_name: 'mcp__conductor__get_goal_brief', tool_input: { goal_id: 'g', run_id: run.id, run_scope: run.id } })).toBeNull()
+    expect(await handleHookInput(db, { session_id: 's1', tool_name: 'mcp__gmail__delete_message', tool_input: {} })).toBeNull()
+  })
+
   it('ignores malformed input', async () => {
     expect(await handleHookInput(db, {})).toBeNull()
   })

@@ -1,8 +1,8 @@
 # conductor-goals
 
-A Claude Code plugin that puts your Conductor goals beside the chat. You can approve or reject proposals, run, pause and inspect goals, and get alerts, all without leaving Claude Code. Claude can also check on your goals and act on them, always asking you first before it changes anything.
+A Claude Code plugin that runs your Conductor goals and puts them beside the chat. While Claude Code is open it starts each due goal run in a background subagent of its own. You approve or reject proposals, run, pause and inspect goals, and get alerts, all without leaving Claude Code. Claude can also check on your goals and act on them, always asking you first before it changes anything.
 
-It talks only to the Conductor web app (default `http://localhost:3000`), so start that with `npm run dev --prefix web`.
+It needs the `conductor` MCP server (in `.mcp.json`, see Conductor's README) and its companion plugin **conductor-goals-guard**, which keeps each run within its goal. The web app and the channel are optional: the web app gives goal pages in a browser and webhook triggers.
 
 ## Install
 
@@ -11,9 +11,19 @@ From a terminal, with this repository checked out:
 ```bash
 claude plugin marketplace add <path to the Conductor repo>
 claude plugin install conductor-goals@conductor --scope user
+claude plugin install conductor-goals-guard@conductor --scope user
 ```
 
-Claude Code reads the plugin straight from `plugins/conductor-goals`, so after an edit run `/reload-plugins`. `npm run doctor` reports whether it is installed.
+Claude Code reads the plugins straight from `plugins/`, so after an edit run `/reload-plugins`. `npm run doctor` reports whether both are installed. Without the guard plugin no run starts, and the pane says so.
+
+## How runs work
+
+- Every 30 seconds the plugin asks the conductor server for a scheduler pass (`goals_tick`). The pass runs due health checks and claims the runs that are due: scheduled ones, ones you queued with "Run now", and the one an approval queues.
+- Each claimed run starts in a background subagent (`conductor-goals:goal-runner`, hidden from Claude's own Agent tool) in the goal's working directory. Its description is `Goal: <name> (<run id>)`.
+- The run reads its brief, works, and ends with `end_run`. Its summary shows in the pane; it isn't handed back into your chat.
+- A run past its time limit (`max_run_minutes`) is stopped and marked timed out. A run whose agent ends without `end_run` is marked failed. Cancelling a run in the pane stops its agent.
+- Several Claude Code sessions can be open: one at a time holds the scheduler (a lease in the database) and starts runs; the others just show the pane.
+- At most `max_concurrent_runs` runs go at once (default 2).
 
 ## The Goals pane
 
@@ -68,7 +78,7 @@ Ask things like "what do my goals need?" or "approve the Alice reply".
 - The status line shows `Conductor: 2 need you · Inbox running`, or `Conductor: offline`.
 - A toast appears for each new proposal or failed run. If several arrive at once, they become one toast.
 - With system notifications on, you also get a notification through your Claude Code notification channel, at most once a minute per goal.
-- While this session is carrying out a goal run, a band above the prompt shows which goal and run.
+- While goal runs are going, a band above the prompt shows which (`● Goal run: Inbox · in the background`).
 
 ## Settings
 
@@ -76,8 +86,9 @@ Set these in `/config` → conductor-goals, or under `pluginConfigs` in `~/.clau
 
 | Setting | Default | |
 | --- | --- | --- |
-| `url` | `http://localhost:3000` | The web app's address |
-| `poll_seconds` | `15` | How often it checks for changes. It checks every 5 s while a run is open, and backs off to a minute while the web app is unreachable. Each check is one request, and the web app answers `304` when nothing changed. |
+| `url` | `http://localhost:3000` | The web app's address, only for "Open in browser" links |
+| `poll_seconds` | `15` | How often the pane checks for changes. It checks every 5 s while a run is open, and backs off to a minute while Conductor isn't connected. Each check is one `goals_overview` call, answered `changed: false` when nothing changed. |
+| `max_concurrent_runs` | `2` | How many goal runs this session starts at once, each in its own subagent |
 | `alerts` | `all` | `all`, `proposals`, `failures` or `off` |
 | `os_notifications` | `true` | Also send alerts as system notifications |
 
@@ -85,16 +96,19 @@ Set these in `/config` → conductor-goals, or under `pluginConfigs` in `~/.clau
 
 ```
 hooks/register.tsx  wiring: events, commands, tool hooks, pane and band
+hooks/runner.ts     the scheduler tick, starting runs in subagents, time limits, cancelling
 hooks/pane.tsx      the Goals pane
 hooks/tools.ts      tools Claude can call, and the commands
 hooks/sync.ts       reading the overview, polling, running actions
 hooks/alerts.ts     toasts, notifications, status line
-hooks/api.ts        the web app's API and the settings
+hooks/api.ts        the conductor MCP tools it calls, and the settings
 hooks/model.ts      pure functions: cards, matching, alert diffing, formatting
 hooks/state.ts      session state accessors (contract in types/index.d.ts)
 ```
 
-To check it: `claude plugin validate plugins/conductor-goals` and `claude plugin test plugins/conductor-goals`. The tests run each drawing on the terminal and desktop surfaces against a fake web app (`tests/fixtures.ts`).
+To check it: `claude plugin validate plugins/conductor-goals` and `claude plugin test plugins/conductor-goals`. The tests run each drawing on the terminal and desktop surfaces against a fake conductor server and fake subagents (`tests/fixtures.ts`).
+
+What a run may do lives in the guard plugin, not here: the engine never shows a plugin the calls its own timers and buttons cause, so this plugin's hooks can't see a run its scheduler started.
 
 ## License
 

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getPlan, getTask, approveTask, GateError, getGoal, isProposal, queueRun } from '@/lib/db'
+import { getPlan, getTask, decideItem, GateError } from '@/lib/db'
 import { kickScheduler } from '@/lib/goal-scheduler'
 import { recordEvent } from '@/lib/event-log'
 import { ok, err, notFound, serverError } from '@/lib/api-utils'
@@ -14,15 +14,11 @@ export async function POST(_req: NextRequest, { params }: Params) {
     const task = getTask(planId, taskId)
     if (!task) return notFound('Task')
 
-    approveTask(planId, taskId)
+    // An approved goal proposal is carried out by a run: decideItem queues one if the goal is active
+    const { task: decided, queuedRun } = decideItem(planId, taskId, { decision: 'approve' })
     recordEvent({ planId, taskId, eventType: 'approval_granted', actor: 'human' })
-
-    // An approved goal proposal is carried out by a run: start one now if the goal is active
-    if (isProposal(task) && getGoal(planId)?.status === 'active') {
-      queueRun(planId)
-      kickScheduler()
-    }
-    return ok({ task: getTask(planId, taskId) })
+    if (queuedRun) kickScheduler()
+    return ok({ task: decided })
   } catch (e) {
     if (e instanceof GateError) return err(e.message, 409)
     return serverError(e)

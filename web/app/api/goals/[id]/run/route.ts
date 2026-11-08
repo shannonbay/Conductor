@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server'
-import { getGoal, queueRun, GoalError } from '@/lib/db'
+import { getGoal, queueRun, getOpenRun, failRun, GoalError } from '@/lib/db'
 import { cancelGoalRun, isGoalRunActive } from '@/lib/goal-runner'
 import { kickScheduler } from '@/lib/goal-scheduler'
 import { ok, err, notFound, serverError } from '@/lib/api-utils'
@@ -25,8 +25,14 @@ export async function DELETE(_req: NextRequest, { params }: Params) {
   try {
     const { id } = await params
     if (!getGoal(id)) return notFound('Goal')
-    if (!isGoalRunActive(id)) return err('This goal has no run in progress.', 409)
-    await cancelGoalRun(id)
+    if (isGoalRunActive(id)) {
+      await cancelGoalRun(id)
+      return ok({ cancelled: true })
+    }
+    // A run the conductor-goals plugin is doing: mark it; the plugin stops its agent at its next tick
+    const open = getOpenRun(id)
+    if (!open) return err('This goal has no run in progress.', 409)
+    failRun(open.id, 'failed', 'Cancelled by you')
     return ok({ cancelled: true })
   } catch (e) {
     return serverError(e)

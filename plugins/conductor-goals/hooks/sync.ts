@@ -8,6 +8,7 @@ import type { Snapshot } from '../types'
 import { announce, showStatus } from './alerts'
 import { fetchOverview, settings } from './api'
 import { toCard } from './model'
+import { kick } from './runner'
 import { getSnapshot, setBusy, setNotice, setSnapshot } from './state'
 
 type $ = EngineInterface
@@ -84,6 +85,7 @@ export async function act($: $, key: string, label: string, run: () => Promise<v
     await run()
     await setNotice($, null)
     ok = true
+    await kick($) // an approval or "Run now" queued a run: start it now
   } catch (err) {
     await setNotice($, `Couldn't ${label}: ${err instanceof Error ? err.message : String(err)}`)
   }

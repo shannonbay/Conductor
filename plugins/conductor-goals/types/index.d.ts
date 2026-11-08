@@ -66,6 +66,17 @@ export type Confirm =
 /** The goal run this Claude Code session is carrying out. */
 export type ActiveRun = { goalId: string; runId: string; startedAt: number }
 
+/** A goal run this plugin started in a subagent. */
+export type RunEntry = {
+  runId: string
+  goalId: string
+  name: string
+  startedAt: number
+  /** When the run is stopped and marked timed out. */
+  deadline: number
+  maxMinutes: number
+}
+
 declare module 'claude-code' {
   interface PluginState {
     'conductor-goals': {
@@ -80,6 +91,8 @@ declare module 'claude-code' {
       expanded: string[]
       confirm: Confirm | null
       activeRun: ActiveRun | null
+      /** Runs this session's plugin started, by subagent id. */
+      runs: Record<string, RunEntry>
     }
   }
 }

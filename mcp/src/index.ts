@@ -24,6 +24,16 @@ import {
   ForgetSchema,
   EndRunSchema,
   RunGoalSchema,
+  GoalsTickSchema,
+  GoalsOverviewSchema,
+  DecideItemSchema,
+  CancelRunSchema,
+  SetGoalStatusSchema,
+  AttachAgentSchema,
+  FailRunSchema,
+  GuardCheckSchema,
+  CreateGoalSchema,
+  DeleteMemorySchema,
 } from './schema.js'
 
 import { create_plan } from './tools/create_plan.js'
@@ -40,7 +50,13 @@ import { next_task } from './tools/next_task.js'
 import { get_history } from './tools/get_history.js'
 import { verify_task } from './tools/verify_task.js'
 import { list_goals, get_goal_brief, add_item, remember, forget, end_run, run_goal } from './tools/goals.js'
+import {
+  goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
+  create_goal, delete_memory,
+} from './tools/goal_runner.js'
 import { handleListResources, handleReadResource } from './resources.js'
+import { getRun } from './db.js'
+import { withScope } from './session.js'
 
 const TOOLS = [
   {
@@ -159,11 +175,45 @@ const TOOLS = [
   },
   {
     name: 'run_goal',
-    description: 'Queue a run of a goal now (e.g. after changing its instructions). The Conductor web app starts it shortly.',
+    description: 'Queue a run of a goal now (e.g. after changing its instructions). It starts within about 30 seconds while Claude Code is open with the conductor-goals plugin.',
     inputSchema: zodToJsonSchema(RunGoalSchema),
     handler: run_goal,
   },
+  {
+    name: 'goals_overview',
+    description: 'Every goal that is not retired, with items waiting for the human, open items, recent runs, health and memory, in one call. Pass the last etag to get { changed: false } when nothing changed.',
+    inputSchema: zodToJsonSchema(GoalsOverviewSchema),
+    handler: goals_overview,
+  },
+  // Used by the conductor-goals plugin to drive runs; agents must not call these.
+  ...([
+    ['goals_tick', 'Runs one goal scheduler pass and claims the runs that are due.', GoalsTickSchema, goals_tick],
+    ['decide_item', "Records the human's approval or rejection of a goal item.", DecideItemSchema, decide_item],
+    ['cancel_run', "Cancels a goal's run in progress.", CancelRunSchema, cancel_run],
+    ['set_goal_status', 'Pauses or resumes a goal.', SetGoalStatusSchema, set_goal_status],
+    ['attach_agent', 'Records which subagent is doing a goal run.', AttachAgentSchema, attach_agent],
+    ['fail_run', 'Marks a goal run failed or timed out.', FailRunSchema, fail_run],
+    ['guard_check', "Applies a goal's autonomy to a tool call made during a run.", GuardCheckSchema, guard_check],
+    ['create_goal', 'Creates a goal for the human.', CreateGoalSchema, create_goal],
+    ['delete_memory', "Deletes one of a goal's memories for the human.", DeleteMemorySchema, delete_memory],
+  ] as const).map(([name, description, schema, handler]) => ({
+    name,
+    description: `${description} For the conductor-goals plugin only: agents and the model must not call this.`,
+    inputSchema: zodToJsonSchema(schema),
+    handler: handler as (args: unknown) => Promise<unknown>,
+  })),
 ]
+
+/** Set by the conductor-goals plugin on calls from a goal run's subagent: the call acts on that run's goal. */
+const RUN_SCOPE = {
+  type: 'string',
+  description: 'Set automatically for goal runs; leave it out.',
+}
+
+function withRunScopeProperty(schema: object): object {
+  const s = schema as { properties?: Record<string, unknown> }
+  return s.properties ? { ...s, properties: { ...s.properties, run_scope: RUN_SCOPE } } : schema
+}
 
 const server = new Server(
   { name: 'conductor', version: '1.0.0' },
@@ -171,7 +221,7 @@ const server = new Server(
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+  tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema: withRunScopeProperty(inputSchema) })),
 }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
@@ -184,7 +234,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   try {
-    const result = await tool.handler(request.params.arguments ?? {})
+    const { run_scope: runScope, ...args } = (request.params.arguments ?? {}) as Record<string, unknown>
+    const result = typeof runScope === 'string' && runScope
+      ? await withScope({ planId: getRun(runScope)?.plan_id ?? null, runId: runScope }, () => tool.handler(args))
+      : await tool.handler(args)
     return {
       content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
     }

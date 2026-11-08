@@ -6,7 +6,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
-import { approve, baseUrl, createGoal, reject, runNow, setGoalStatus } from './api'
+import { approve, createGoal, reject, runNow, setGoalStatus } from './api'
 import { describe, findGoal, noMatch, summarize } from './model'
 import { act, refresh } from './sync'
 
@@ -59,7 +59,7 @@ type Resolved = { goal: GoalCard } | { error: string }
 
 async function resolveGoal($: $, query: unknown): Promise<Resolved> {
   const s = await refresh($)
-  if (!s.reachable) return { error: `Conductor isn't reachable at ${await baseUrl($)}${s.error ? ` (${s.error})` : ''}.` }
+  if (!s.reachable) return { error: `Conductor isn't connected${s.error ? ` (${s.error})` : ''}. Check the conductor MCP server with /mcp.` }
   const found = findGoal(s.goals, typeof query === 'string' ? query : '')
   return 'goal' in found ? found : { error: noMatch(s.goals, String(query ?? ''), found.matches) }
 }
@@ -80,7 +80,7 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
 
   if (name === 'goals_status') {
     const s = await refresh($)
-    if (!s.reachable) return fail(`Conductor isn't reachable at ${await baseUrl($)}.`)
+    if (!s.reachable) return fail(`Conductor isn't connected${s.error ? ` (${s.error})` : ''}. Check the conductor MCP server with /mcp.`)
     return { text: summarize(s.goals, now), isError: false }
   }
 

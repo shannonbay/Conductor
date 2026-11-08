@@ -1,7 +1,8 @@
 /**
  * Conductor goals beside the chat. Wiring only: settings, start-up, polling,
- * commands, tools Claude can call, the Goals pane and the band shown while
- * this session carries out a goal run. See README.md for what each does.
+ * the goal runner (runs in background subagents) and its guard, commands,
+ * tools Claude can call, the Goals pane and the band shown while goal runs
+ * are going. See README.md for what each does.
  */
 import type { EngineInterface, Register } from 'claude-code'
 
@@ -9,7 +10,8 @@ import { resetAlerts } from './alerts'
 import { configure } from './api'
 import { ago } from './model'
 import { renderPane } from './pane'
-import { getActiveRun, getSnapshot, PANE, setActiveRun } from './state'
+import { reconcile, registerRunnerAgent, RUNNER_AGENT, startRunner, stopRunner } from './runner'
+import { getActiveRun, getRuns, getSnapshot, PANE, setActiveRun } from './state'
 import { refresh, startPolling, stopPolling } from './sync'
 import { goalCommand, newGoal, registerCommands, registerTools, runTool, type ToolName } from './tools'
 
@@ -26,8 +28,10 @@ async function start($: $, openPane: boolean): Promise<void> {
   resetAlerts()
   await registerCommands($)
   await registerTools($)
+  await registerRunnerAgent($)
   const first = await refresh($)
   startPolling($, first)
+  startRunner($)
   if (openPane && first.goals.some((g) => g.needsYou.length > 0)) void $.ui.open({ id: PANE, title: 'Goals' })
 }
 
@@ -83,8 +87,28 @@ export const register: Register = (on, options) => {
 
   on('session.end', async ($, e, next) => {
     stopPolling()
+    await stopRunner($)
     started = false
     return next(e)
+  }).catch(passOn)
+
+  // Goal runs: the runner's agent type is the plugin's alone. What a run may do
+  // is the conductor-goals-guard plugin's: this plugin's hooks never see the
+  // calls its own timer causes, so a run started by the scheduler is invisible here.
+
+  on('agent.offer', { agent: RUNNER_AGENT }, () => ({ isOffered: false }))
+
+  // A run's agent ending its work: finish the run now instead of at the next tick
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId && (await getRuns($))[e.agentId]) {
+      $.clock.after(2_000, () => {
+        void reconcile($).then((ended) => {
+          if (ended) void refresh($)
+        })
+      })
+    }
+    return result
   }).catch(passOn)
 
   // Commands
@@ -109,12 +133,13 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'mcp__conductor-goals__reject_item' }, ($, e) => answerTool($, 'reject_item', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__conductor-goals__run_goal' }, ($, e) => answerTool($, 'run_goal', e)).catch(failedTool)
 
-  // A goal run in this session: get_goal_brief with a run_id starts it, end_run ends it.
+  // A goal run in this conversation itself (the old channel path): get_goal_brief
+  // with a run_id starts it, end_run ends it. Runs in subagents are the runner's.
 
   on('tool.call', { tool: 'mcp__conductor__get_goal_brief' }, async ($, e, next) => {
     const result = await next(e)
     const { goalId, runId } = runIds(e)
-    if (goalId && runId && result.deny === undefined && result.isError !== true) {
+    if (!e.agentId && goalId && runId && result.deny === undefined && result.isError !== true) {
       const current = await getActiveRun($)
       if (current?.runId !== runId) await setActiveRun($, { goalId, runId, startedAt: await $.clock.now() })
     }
@@ -124,7 +149,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'mcp__conductor__end_run' }, async ($, e, next) => {
     const result = await next(e)
     if (result.deny === undefined && result.isError !== true) {
-      await setActiveRun($, null)
+      if (!e.agentId) await setActiveRun($, null)
       void refresh($)
     }
     return result
@@ -136,15 +161,26 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const run = await getActiveRun($)
-    if (!run || e.props.hasSurvey) return next(e)
+    const background = Object.values(await getRuns($))
+    if ((!run && background.length === 0) || e.props.hasSurvey) return next(e)
     const { Box, Text } = $.ui.resolve(e)
-    const s = await getSnapshot($)
-    const name = s.goals.find((g) => g.id === run.goalId)?.name ?? run.goalId
     const now = await $.clock.now()
+    if (run) {
+      const s = await getSnapshot($)
+      const name = s.goals.find((g) => g.id === run.goalId)?.name ?? run.goalId
+      return (
+        <Box>
+          <Text color="cyan">● Running goal {name}</Text>
+          <Text dimColor> · run {run.runId} · started {ago(new Date(run.startedAt).toISOString(), now)}</Text>
+        </Box>
+      )
+    }
+    const first = background[0]!
+    const more = background.length > 1 ? ` and ${background.length - 1} more` : ''
     return (
       <Box>
-        <Text color="cyan">● Running goal {name}</Text>
-        <Text dimColor> · run {run.runId} · started {ago(new Date(run.startedAt).toISOString(), now)}</Text>
+        <Text color="cyan">● Goal run: {first.name}{more}</Text>
+        <Text dimColor> · in the background · started {ago(new Date(first.startedAt).toISOString(), now)} · /goals</Text>
       </Box>
     )
   })

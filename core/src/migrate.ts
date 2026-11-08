@@ -323,6 +323,20 @@ export function runMigrations(db: Database): void {
     BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
   `)
 
+  // ── Persistent goals, phase 3: runs started by the Claude Code plugin ──────
+  // holder: the Claude Code session whose plugin claimed the run; agent_id: the subagent doing it
+  for (const col of ['holder', 'agent_id']) {
+    try { db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`) } catch { /* already exists */ }
+  }
+  db.exec(`
+    -- One row per scheduler; only the holder whose lease hasn't expired starts runs
+    CREATE TABLE IF NOT EXISTS scheduler_lease (
+      name       TEXT PRIMARY KEY,
+      holder     TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+  `)
+
   // ── Agent transcripts ───────────────────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS transcript_messages (

@@ -1,6 +1,6 @@
 /**
- * A stand-in for the Conductor web app and the engine nouns the plugin uses,
- * shared by the tests. The fake keeps goals in memory and records requests.
+ * A stand-in for the conductor MCP server and the engine nouns the plugin
+ * uses, shared by the tests. The fake keeps goals in memory and records calls.
  */
 import { mock } from 'claude-code/testing'
 import type { On } from 'claude-code'
@@ -67,67 +67,100 @@ export function proposal(id: string, title: string): Item {
   return { id, goal: title, action: { category: 'email.send', summary: `Send: ${title}` } }
 }
 
-export type Request = { method: string; path: string; body?: string; headers?: Record<string, string> }
+export type Call = { tool: string; input: Record<string, unknown> }
 
-/** The fake web app. `fail` makes every request throw (offline). */
-export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, [number, string]> } = {}) {
-  const requests: Request[] = []
+const TOOLS = [
+  'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'create_goal',
+  'goals_tick', 'attach_agent', 'fail_run', 'guard_check',
+] as const
+
+/**
+ * The fake `conductor` MCP server. `fail` makes every call fail as if the
+ * server were missing; `errors` makes one tool answer an error. Records calls.
+ */
+export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string> } = {}) {
+  const calls: Call[] = []
   let version = 0
+  let runs = 0
   const etag = () => `"v${version}"`
-  const json = (status: number, data: unknown, headers: Record<string, string> = {}) =>
-    ({ value: { status, ok: status < 300, headers, text: data === null ? '' : JSON.stringify(data) } })
+  const ok = (data: unknown) => ({ result: JSON.stringify(data) })
+  const byId = (id: unknown) => goals.find((g) => g.id === id)
+  /** Runs that ended through fail_run, by id. */
+  const ended: Record<string, string> = {}
 
-  on('http.fetch', (_, e) => {
-    if (opts.fail) throw new Error('connect ECONNREFUSED 127.0.0.1:3000')
-    const method = e.init?.method ?? 'GET'
-    const url = new URL(e.url)
-    const path = url.pathname
-    requests.push({ method, path, body: e.init?.body, headers: e.init?.headers })
-    const error = opts.errors?.[`${method} ${path}`]
-    if (error) return json(error[0], { error: error[1] })
-    const byId = (id: string) => goals.find((g) => g.id === decodeURIComponent(id))
-    let m: RegExpMatchArray | null
-
-    if (method === 'GET' && path === '/api/goals/overview') {
-      if (e.init?.headers?.['If-None-Match'] === etag()) return json(304, null, { ETag: etag() })
-      const body = goals.map((g) => ({ ...g, open_item_count: g.open_items.length }))
-      return json(200, { goals: body }, { ETag: etag() })
-    }
-    if (method === 'POST' && (m = path.match(/^\/api\/plans\/([^/]+)\/tasks\/([^/]+)\/(approve|reject)$/))) {
-      const g = byId(m[1]!)!
-      g.needs_you = g.needs_you.filter((t) => t.id !== m![2])
-      version++
-      return json(200, {})
-    }
-    if ((m = path.match(/^\/api\/goals\/([^/]+)\/run$/))) {
-      const g = byId(m[1]!)!
-      g.open_run = method === 'POST' ? { id: 'r-new', status: 'queued' } : null
-      version++
-      return json(method === 'POST' ? 202 : 200, {})
-    }
-    if (method === 'PATCH' && (m = path.match(/^\/api\/goals\/([^/]+)$/))) {
-      byId(m[1]!)!.status = JSON.parse(e.init!.body!).status
-      version++
-      return json(200, {})
-    }
-    if (method === 'DELETE' && (m = path.match(/^\/api\/goals\/([^/]+)\/memory\/([^/]+)$/))) {
-      const g = byId(m[1]!)!
-      g.memory = g.memory.filter((x) => x.id !== m![2])
-      version++
-      return json(200, {})
-    }
-    if (method === 'POST' && path === '/api/goals') {
-      const input = JSON.parse(e.init!.body!)
-      goals.push(goal({ id: `g${goals.length + 1}`, name: input.name, objective: input.objective }))
-      version++
-      return json(201, { id: `g${goals.length}` })
-    }
-    return json(404, { error: 'not found' })
-  })
+  for (const name of TOOLS) {
+    on('tool.call', { tool: `mcp__conductor__${name}` }, (_, e) => {
+      // Record only the plugin's own arguments, not the fields the engine sets on every call
+      const { tool: _t, tool_use_id: _u, agentId: _a, ...input } = e as unknown as Record<string, unknown>
+      if (opts.fail) throw new Error('No such tool available: mcp__conductor__' + name)
+      calls.push({ tool: name, input })
+      const error = opts.errors?.[name]
+      if (error) return { result: `Error: ${error}`, isError: true } as never
+      const g = byId(input.goal_id)
+      switch (name) {
+        case 'goals_overview':
+          if (input.etag === etag()) return ok({ changed: false, etag: etag() }) as never
+          return ok({ changed: true, etag: etag(), goals: goals.map((x) => ({ ...x, open_item_count: x.open_items.length })) }) as never
+        case 'decide_item':
+          g!.needs_you = g!.needs_you.filter((t) => t.id !== input.item_id)
+          version++
+          return ok({ item: { id: input.item_id }, queued_run: null }) as never
+        case 'run_goal':
+          g!.open_run = { id: `r${++runs}`, status: 'queued' }
+          version++
+          return ok({ run: g!.open_run }) as never
+        case 'cancel_run': {
+          const id = g!.open_run?.id
+          g!.open_run = null
+          version++
+          return ok({ cancelled: id, agent_id: null }) as never
+        }
+        case 'set_goal_status':
+          g!.status = String(input.status)
+          version++
+          return ok({ goal_id: g!.id, status: g!.status }) as never
+        case 'delete_memory':
+          g!.memory = g!.memory.filter((x) => x.id !== input.memory_id)
+          version++
+          return ok({ deleted: input.memory_id }) as never
+        case 'create_goal':
+          goals.push(goal({ id: `g${goals.length + 1}`, name: String(input.name), objective: String(input.objective) }))
+          version++
+          return ok({ id: `g${goals.length}` }) as never
+        case 'goals_tick': {
+          if (input.release) return ok({ released: true }) as never
+          const claimed = goals.filter((x) => x.open_run?.status === 'queued').map((x) => {
+            x.open_run = { id: x.open_run!.id, status: 'running' }
+            return { run_id: x.open_run.id, goal_id: x.id, name: x.name, working_dir: '/work/project', trigger: 'manual', max_run_minutes: 15, prompt: `Run ${x.name}` }
+          })
+          if (claimed.length) version++
+          return ok({ leader: true, claimed, expired: [] }) as never
+        }
+        case 'attach_agent':
+          return ok(input) as never
+        case 'fail_run': {
+          const run = goals.find((x) => x.open_run?.id === input.run_id)
+          if (run) {
+            run.open_run = null
+            ended[String(input.run_id)] = String(input.status ?? 'failed')
+            version++
+          }
+          return ok({ run_id: input.run_id, changed: Boolean(run) }) as never
+        }
+        case 'guard_check':
+          return ok(input.tool_name === 'mcp__gmail__delete'
+            ? { decision: 'deny', category: 'email.delete', reason: 'email.delete is off for this goal' }
+            : input.tool_name === 'mcp__gmail__send' ? { decision: 'allow', category: 'email.send' } : { decision: 'allow' }) as never
+      }
+    })
+  }
 
   return {
-    requests,
-    /** Call after changing `goals` directly, as the web app's ETag would change. */
+    calls,
+    /** Calls of one tool, in order. */
+    of: (tool: string) => calls.filter((c) => c.tool === tool),
+    ended,
+    /** Call after changing `goals` directly, as the server's etag would change. */
     bump: () => {
       version++
     },
@@ -135,7 +168,7 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
 }
 
 /** Answers the engine nouns the plugin calls; records what it shows. */
-export function engine(on: On, opts: { answer?: string } = {}) {
+export function engine(on: On, opts: { answer?: string; guarded?: boolean } = {}) {
   const toasts: string[] = []
   const notifications: string[] = []
   const statuses: (string | undefined)[] = []
@@ -165,7 +198,37 @@ export function engine(on: On, opts: { answer?: string } = {}) {
     return { result: { questions: e.questions, answers: { [question]: opts.answer ?? 'Cancel' } } }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
-  return { toasts, notifications, statuses, asked, clock }
+  on('session.id', () => ({ value: 'session-1' }))
+  // The guard plugin's tool: present unless a test says otherwise
+  const tools = opts.guarded === false ? [] : [{ name: 'mcp__conductor-goals-guard__status', description: 'guarded' }]
+  on('tool.list', () => ({ value: tools }) as never)
+  // Subagents: spawned ones are listed as running until a test ends them
+  const agents: { id: string; description: string; type: string; status: string }[] = []
+  const spawned: { prompt: string; subagentType?: string; cwd?: string }[] = []
+  const stopped: string[] = []
+  on('agent.register', (_, e) => ({ value: { agent: `conductor-goals:${e.name}` } }))
+  on('agent.list', () => ({ value: agents.map((a) => ({ ...a })) }) as never)
+  on('agent.spawn', (_, e) => {
+    const agentId = `agent-${spawned.length + 1}`
+    spawned.push({ prompt: e.prompt, subagentType: e.subagentType, cwd: e.cwd })
+    agents.push({ id: agentId, description: e.description, type: e.subagentType, status: 'running' })
+    return { model: 'test-model', agentId }
+  })
+  on('tool.call', { tool: 'TaskStop' }, (_, e) => {
+    const id = String((e as unknown as { task_id: string }).task_id)
+    stopped.push(id)
+    const a = agents.find((x) => x.id === id)
+    if (a) a.status = 'killed'
+    return { result: { message: `stopped ${id}` } } as never
+  })
+  return {
+    toasts, notifications, statuses, asked, clock, agents, spawned, stopped,
+    /** Ends a spawned agent as if it finished its work. */
+    finish: (agentId: string) => {
+      const a = agents.find((x) => x.id === agentId)
+      if (a) a.status = 'completed'
+    },
+  }
 }
 
 export const START = { cwd: '/work/project', surface: 'terminal', isInteractive: true } as const

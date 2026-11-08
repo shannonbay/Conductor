@@ -108,12 +108,14 @@ describe('doctor', () => {
       expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude plugin install conductor-goals@conductor') })
     })
 
-    it('warns when it is disabled, passes when enabled', () => {
+    it('warns when it is disabled, and until the guard plugin is enabled too', () => {
       write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': false } }))
       expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude plugin enable') })
       write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': true } }))
+      expect(checkPlugin(o)).toMatchObject({ level: 'warn', detail: expect.stringContaining('goal runs are paused'), fix: expect.stringContaining('conductor-goals-guard@conductor') })
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': true, 'conductor-goals-guard@conductor': true } }))
       expect(checkPlugin(o).level).toBe('ok')
-    })
+  })
   })
 
   it('checkChannel warns when the channel server is unreachable', async () => {
@@ -139,7 +141,7 @@ describe('checkGoals', () => {
     const warnR = { name: 'x', level: 'warn' as const, detail: '' }
     const dbFile = join(dir, 'goals.db')
     const opts = { ...o, env: { CONDUCTOR_DB: dbFile } }
-    expect(await checkGoals(opts, okR, okR)).toBeNull()
+    expect(await checkGoals(opts, okR)).toBeNull()
 
     const core = await import('@conductor/core')
     const db = core.openDatabase(dbFile)
@@ -147,7 +149,7 @@ describe('checkGoals', () => {
     core.createGoal(db, { id: 'g', name: 'Inbox', description: null, status: 'active', working_dir: dir, created_at: now, updated_at: now }, { objective: 'x' })
     db.close()
 
-    expect(await checkGoals(opts, okR, okR)).toMatchObject({ level: 'ok', detail: expect.stringContaining('Inbox') })
-    expect(await checkGoals(opts, warnR, okR)).toMatchObject({ level: 'warn', detail: expect.stringContaining('channel-connected Claude Code') })
+    expect(await checkGoals(opts, okR)).toMatchObject({ level: 'ok', detail: expect.stringContaining('Inbox') })
+    expect(await checkGoals(opts, { ...warnR, detail: 'conductor-goals-guard@conductor not installed' })).toMatchObject({ level: 'warn', detail: expect.stringContaining('conductor-goals-guard') })
   })
 })

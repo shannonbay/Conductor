@@ -31,6 +31,12 @@ export async function handleHookInput(db: Database, input: HookInput): Promise<H
   const tool = input.tool_name
   if (!session || !tool) return null
 
+  // A run the conductor-goals plugin started in a subagent: the plugin tags its
+  // Conductor calls with run_scope and guards the run itself. Its subagent shares
+  // this session id with the person's conversation, so binding it here would put
+  // the conversation under the goal's rules.
+  if (typeof input.tool_input?.run_scope === 'string') return null
+
   if (tool === 'mcp__conductor__get_goal_brief') {
     const runId = input.tool_input?.run_id
     if (typeof runId === 'string') core.bindSessionToRun(db, runId, session)

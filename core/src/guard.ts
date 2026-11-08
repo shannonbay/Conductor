@@ -50,9 +50,19 @@ function record(db: Database, run: GoalRun, toolName: string, category: string, 
   `).run(newId('tc'), run.plan_id, run.id, toolName, category, decision, reason, new Date().toISOString())
 }
 
+/** Guard for a Claude Code session bound to a run (the PreToolUse goal-guard hook). */
 export function guardToolCall(db: Database, ccSessionId: string, toolName: string): GuardDecision {
   const run = findRunForSession(db, ccSessionId)
-  if (!run) return { decision: 'allow' }
+  return run ? guardRun(db, run, toolName) : { decision: 'allow' }
+}
+
+/** Guard for a run by its id (the conductor-goals plugin, which knows which subagent does which run). */
+export function guardToolCallForRun(db: Database, runId: string, toolName: string): GuardDecision {
+  const run = db.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId) as GoalRun | undefined
+  return run ? guardRun(db, run, toolName) : { decision: 'allow' }
+}
+
+function guardRun(db: Database, run: GoalRun, toolName: string): GuardDecision {
   const goal = getGoal(db, run.plan_id)
   if (!goal) return { decision: 'allow' }
   const category = matchToolCategory(goal.tool_map, toolName)

@@ -1,14 +1,17 @@
 {
   "name": "conductor-goals",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "license": "Apache-2.0",
-  "description": "Conductor goals beside the chat: approve or reject proposals, run, pause and inspect goals, and let Claude check on them",
+  "description": "Runs Conductor goals in background subagents and puts them beside the chat: approve or reject proposals, run, pause and inspect goals, and let Claude check on them",
   "types": "./types/index.d.ts",
+  "dependencies": [
+    "conductor-goals-guard"
+  ],
   "userConfig": {
     "url": {
       "type": "string",
-      "title": "Conductor web app address",
-      "description": "Where the Conductor web app runs.",
+      "title": "Conductor web app address (optional)",
+      "description": "Only for \"Open in browser\" links. Goals run without the web app.",
       "default": "http://localhost:3000"
     },
     "poll_seconds": {
@@ -19,11 +22,24 @@
       "min": 5,
       "max": 600
     },
+    "max_concurrent_runs": {
+      "type": "number",
+      "title": "Goal runs at once",
+      "description": "How many goal runs this session starts at the same time, each in its own background subagent.",
+      "default": 2,
+      "min": 1,
+      "max": 5
+    },
     "alerts": {
       "type": "string",
       "title": "Alerts",
       "description": "Which events raise a toast and notification.",
-      "options": ["all", "proposals", "failures", "off"],
+      "options": [
+        "all",
+        "proposals",
+        "failures",
+        "off"
+      ],
       "default": "all"
     },
     "os_notifications": {

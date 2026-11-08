@@ -6,7 +6,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { ActiveRun, Confirm, Snapshot } from '../types'
+import type { ActiveRun, Confirm, RunEntry, Snapshot } from '../types'
 import { EMPTY } from './model'
 
 type $ = EngineInterface
@@ -20,6 +20,7 @@ const notice = atom({ plugin: 'conductor-goals', key: 'notice' } as const, null)
 const expanded = atom({ plugin: 'conductor-goals', key: 'expanded' } as const, [])
 const confirm = atom({ plugin: 'conductor-goals', key: 'confirm' } as const, null)
 const activeRun = atom({ plugin: 'conductor-goals', key: 'activeRun' } as const, null)
+const runs = atom({ plugin: 'conductor-goals', key: 'runs' } as const, {})
 
 export async function getSnapshot($: $): Promise<Snapshot> {
   return read($, snapshot)
@@ -68,4 +69,17 @@ export async function getActiveRun($: $): Promise<ActiveRun | null> {
 }
 export async function setActiveRun($: $, value: ActiveRun | null): Promise<void> {
   await update($, activeRun, () => value)
+}
+
+export async function getRuns($: $): Promise<Record<string, RunEntry>> {
+  return read($, runs)
+}
+export async function addRun($: $, agentId: string, entry: RunEntry): Promise<void> {
+  await update($, runs, (all) => ({ ...all, [agentId]: entry }))
+}
+export async function removeRun($: $, agentId: string): Promise<void> {
+  await update($, runs, (all) => {
+    const { [agentId]: _gone, ...rest } = all
+    return rest
+  })
 }

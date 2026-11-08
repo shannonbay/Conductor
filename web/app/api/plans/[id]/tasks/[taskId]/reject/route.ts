@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { getPlan, getTask, rejectTask, GateError } from '@/lib/db'
+import { getPlan, getTask, decideItem, GateError } from '@/lib/db'
 import { recordEvent } from '@/lib/event-log'
 import { ok, err, notFound, serverError } from '@/lib/api-utils'
 
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const parsed = RejectSchema.safeParse(await req.json())
     if (!parsed.success) return err(parsed.error.issues[0].message)
 
-    rejectTask(planId, taskId, parsed.data.feedback)
+    decideItem(planId, taskId, { decision: 'reject', feedback: parsed.data.feedback })
     recordEvent({ planId, taskId, eventType: 'review_rejected', actor: 'human', payload: { feedback: parsed.data.feedback } })
     return ok({ task: getTask(planId, taskId) })
   } catch (e) {

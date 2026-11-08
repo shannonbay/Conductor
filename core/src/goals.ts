@@ -123,7 +123,7 @@ export function setIntervalTrigger(db: Database, planId: string, config: Interva
 export function insertRun(db: Database, planId: string, trigger: TriggerKind, status: RunStatus = 'queued', skipReason?: string): GoalRun {
   const now = new Date().toISOString()
   const run: GoalRun = {
-    id: newId('run'), plan_id: planId, trigger, status, session_id: null, cc_session_id: null, summary: null,
+    id: newId('run'), plan_id: planId, trigger, status, session_id: null, cc_session_id: null, holder: null, agent_id: null, summary: null,
     skip_reason: skipReason ?? null, items_created: 0, items_resolved: 0, started_at: now,
     ended_at: status === 'skipped' ? now : null,
   }

@@ -169,20 +169,28 @@ export function checkHooks(o: DoctorOptions): CheckResult {
 }
 
 const PLUGIN = 'conductor-goals@conductor'
+const GUARD_PLUGIN = 'conductor-goals-guard@conductor'
 
-/** The optional Claude Code plugin (plugins/conductor-goals): a Goals pane, alerts and tools beside the chat. */
+/**
+ * The Claude Code plugins that run goals: conductor-goals (Goals pane, the
+ * runner that starts goal runs in subagents) and conductor-goals-guard (keeps
+ * each run within its goal; without it no run starts).
+ */
 export function checkPlugin(o: DoctorOptions): CheckResult {
-  const install = `Run \`claude plugin marketplace add ${o.repoRoot}\` then \`claude plugin install ${PLUGIN} --scope user\`.`
+  const install = (p: string) => `Run \`claude plugin marketplace add ${o.repoRoot}\` then \`claude plugin install ${p} --scope user\`.`
   const file = join(o.home, '.claude', 'settings.json')
-  let enabled: unknown
+  let enabled: Record<string, unknown> = {}
   try {
-    enabled = (JSON.parse(readFileSync(file, 'utf8')) as { enabledPlugins?: Record<string, unknown> }).enabledPlugins?.[PLUGIN]
+    enabled = (JSON.parse(readFileSync(file, 'utf8')) as { enabledPlugins?: Record<string, unknown> }).enabledPlugins ?? {}
   } catch {
-    enabled = undefined // a missing or broken settings file is reported by checkHooks
+    // a missing or broken settings file is reported by checkHooks
   }
-  if (enabled === true) return ok('Claude Code plugin', `${PLUGIN} enabled`)
-  if (enabled === false) return warn('Claude Code plugin', `${PLUGIN} is installed but disabled`, `Run \`claude plugin enable ${PLUGIN}\`.`)
-  return warn('Claude Code plugin', `${PLUGIN} not installed (optional: Goals pane, alerts and goal tools in Claude Code)`, install)
+  const name = 'Claude Code plugins'
+  if (enabled[PLUGIN] === false) return warn(name, `${PLUGIN} is installed but disabled`, `Run \`claude plugin enable ${PLUGIN}\`.`)
+  if (enabled[PLUGIN] !== true) return warn(name, `${PLUGIN} not installed (it runs goals and shows the Goals pane)`, install(PLUGIN))
+  if (enabled[GUARD_PLUGIN] === false) return warn(name, `${GUARD_PLUGIN} is disabled, so goal runs are paused`, `Run \`claude plugin enable ${GUARD_PLUGIN}\`.`)
+  if (enabled[GUARD_PLUGIN] !== true) return warn(name, `${GUARD_PLUGIN} not installed, so goal runs are paused`, install(GUARD_PLUGIN))
+  return ok(name, `${PLUGIN} and ${GUARD_PLUGIN} enabled`)
 }
 
 export async function checkChannel(o: DoctorOptions): Promise<CheckResult> {
@@ -204,9 +212,13 @@ export async function checkWeb(o: DoctorOptions): Promise<CheckResult> {
     : warn('Web UI', 'not running', 'Start it with `npm run dev --prefix web`.')
 }
 
-/** Active goals only run while the web app (scheduler) and a channel-connected Claude Code session are up. */
-export async function checkGoals(o: DoctorOptions, channel: CheckResult, web: CheckResult): Promise<CheckResult | null> {
-  let goals: { plan: { name: string }; goal: { tool_map: Record<string, string> } }[]
+/**
+ * Active goals run while Claude Code is open with both goal plugins (the
+ * conductor-goals runner, guarded by conductor-goals-guard), or from the web
+ * app when it runs with CONDUCTOR_WEB_RUNS=1 (through the channel).
+ */
+export async function checkGoals(o: DoctorOptions, plugins: CheckResult): Promise<CheckResult | null> {
+  let goals: { plan: { name: string } }[]
   try {
     const core = await import('@conductor/core')
     const db = core.openDatabase(o.env.CONDUCTOR_DB ?? join(o.home, '.conductor', 'tasks.db'))
@@ -216,28 +228,17 @@ export async function checkGoals(o: DoctorOptions, channel: CheckResult, web: Ch
   }
   if (goals.length === 0) return null
   const names = goals.map((g) => g.plan.name).join(', ')
-
-  // Goals with tool rules need the goal-guard hook, or the rules aren't enforced
-  const withRules = goals.filter((g) => Object.keys(g.goal.tool_map).length > 0)
-  if (withRules.length > 0) {
-    const settingsFile = join(o.home, '.claude', 'settings.json')
-    const installed = existsSync(settingsFile) && readFileSync(settingsFile, 'utf8').includes('goal-guard')
-    if (!installed) {
-      return warn('Persistent goals', `${withRules.map((g) => g.plan.name).join(', ')} ha${withRules.length === 1 ? 's' : 've'} tool rules, but the goal-guard hook isn't installed, so they aren't enforced`,
-        'Run `npm run setup-hooks --prefix mcp -- --guard`.')
-    }
-  }
-  const missing = [web.level !== 'ok' && 'the web app', channel.level !== 'ok' && 'a channel-connected Claude Code session'].filter(Boolean)
-  return missing.length === 0
-    ? ok('Persistent goals', `${goals.length} active (${names}); scheduler can run them`)
-    : warn('Persistent goals', `${goals.length} active (${names}) but they won't run without ${missing.join(' and ')}`,
-        'Start the web app and Claude Code with the channel (see the Web app and Channel server checks above), or pause the goals.')
+  return plugins.level === 'ok'
+    ? ok('Persistent goals', `${goals.length} active (${names}); they run while Claude Code is open`)
+    : warn('Persistent goals', `${goals.length} active (${names}) but they won't run: ${plugins.detail}`,
+        plugins.fix ?? 'Install the conductor-goals and conductor-goals-guard plugins (see the Claude Code plugins check above).')
 }
 
 // ── Runner ────────────────────────────────────────────────────────────────────
 
 export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<CheckResult[]> {
   const node = checkNode(o)
+  const plugins = checkPlugin(o)
   const [db, channel, web] = await Promise.all([checkDatabase(o), checkChannel(o), checkWeb(o)])
   return [
     node,
@@ -246,10 +247,10 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
     checkBuild(o, 'mcp'),
     ...checkMcpConfig(o),
     checkHooks(o),
-    checkPlugin(o),
+    plugins,
     channel,
     web,
-    ...[await checkGoals(o, channel, web)].filter((r): r is CheckResult => r !== null),
+    ...[await checkGoals(o, plugins)].filter((r): r is CheckResult => r !== null),
   ]
 }
 

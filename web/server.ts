@@ -55,7 +55,12 @@ app.prepare().then(() => {
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`)
     startPoller()
-    startGoalScheduler()
+    // Goal runs are started by the conductor-goals Claude Code plugin. The web
+    // app starts them itself (through the channel) only when asked to.
+    if (process.env.CONDUCTOR_WEB_RUNS === '1') {
+      startGoalScheduler()
+      console.log('> Goal scheduler on (CONDUCTOR_WEB_RUNS=1): runs start through the channel')
+    }
   })
 }).catch((err) => {
   console.error('> Failed to start server:', err)

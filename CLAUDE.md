@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-Conductor runs **persistent goals** for AI agents — standing objectives like "keep my inbox under control" that never finish. A goal's state (instructions, open work items, memory, human decisions, run history) lives in SQLite outside any agent; a scheduler in the web app starts fresh Claude Code runs through the channel, each run reads a one-call brief (`get_goal_brief`) and ends with a summary (`end_run`), and a human approves proposed actions from the goal page. The main use case is goals; **plans** (finite task trees with verification gates) are the underlying building block and still work on their own for long multi-session projects.
+Conductor runs **persistent goals** for AI agents — standing objectives like "keep my inbox under control" that never finish. A goal's state (instructions, open work items, memory, human decisions, run history) lives in SQLite outside any agent; the conductor-goals Claude Code plugin starts each due run in a background subagent, each run reads a one-call brief (`get_goal_brief`) and ends with a summary (`end_run`), and a human approves proposed actions from the Goals pane (or the goal page in the web app). The main use case is goals; **plans** (finite task trees with verification gates) are the underlying building block and still work on their own for long multi-session projects.
 
-Three parts: an **MCP server** (`mcp/`, the tools agents call), a **Next.js web app** (`web/`, goal pages, approvals, scheduler, runner), and a **channel server** (`channel/`, bridges the web app into a running Claude Code session). Shared schema and logic live in `core/`. Design spec: `specs/persistent-goals.md` (phases 1 and 2 built).
+Parts: an **MCP server** (`mcp/`, the tools agents and the plugins call), two **Claude Code plugins** (`plugins/conductor-goals` runs goals and shows the Goals pane; `plugins/conductor-goals-guard` keeps each run within its goal), a **Next.js web app** (`web/`, optional: goal pages, webhooks, plan UI), and a **channel server** (`channel/`, bridges the web app into a running Claude Code session for plan AI features). Shared schema and logic live in `core/`. Design spec: `specs/persistent-goals.md` (phases 1, 2 and 2.5 built).
 
 ## Repository Structure
 
@@ -42,7 +42,8 @@ Conductor/
     package.json
     tsconfig.json
     vitest.config.ts
-  plugins/conductor-goals/ — Claude Code plugin: Goals pane, alerts, /goal* commands, tools for Claude
+  plugins/conductor-goals/ — Claude Code plugin: goal runner (runs in subagents), Goals pane, alerts, /goal* commands, tools for Claude
+  plugins/conductor-goals-guard/ — Claude Code plugin: what a goal run may do (run tagging, autonomy guard, reports out of the chat)
   .claude-plugin/marketplace.json — makes the repo a plugin marketplace ("conductor")
   specs/
 ```
@@ -145,7 +146,7 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **`getChildren()` uses a LIKE query** on the ID prefix, then filters to the exact depth. IDs are structural and permanent — renaming/moving tasks is not supported.
 
-**Session state is in-memory only** (`mcp/src/session.ts`). If the MCP server restarts, the client must call `open_plan` again to re-register the open plan.
+**Session state is in-memory only** (`mcp/src/session.ts`). If the MCP server restarts, the client must call `open_plan` again to re-register the open plan. One MCP server serves the whole Claude Code session, subagents included, so a call with `run_scope` (added to every tool's schema; the guard plugin sets it on a goal run's calls) runs in a scope of its own, holding that run's plan and run, and never touches the process-wide open plan.
 
 **`state` updates are shallow-merge patches.** `update_task` with `state_patch` merges at the top level.
 
@@ -165,11 +166,13 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **Using gates in this repo:** when you plan work here, give tasks a `verify_command` where one exists (e.g. `npm test --prefix mcp -- src/tests/tools/gates.test.ts`, `npm run typecheck --prefix web`) and acceptance criteria for behaviour you'll need to show. Run `verify_task` before completing.
 
-**Persistent goals** (spec: `specs/persistent-goals.md`; phases 1–2 built): a goal is a plan with `kind = 'goal'` plus a `goals` row; its work items are ordinary root-level tasks with `run_id`, `external_ref` (unique per goal) and `archived_at`.
+**Persistent goals** (spec: `specs/persistent-goals.md`; phases 1, 2 and 2.5 built): a goal is a plan with `kind = 'goal'` plus a `goals` row; its work items are ordinary root-level tasks with `run_id`, `external_ref` (unique per goal) and `archived_at`.
 - Storage in `core/src/goals.ts`, behaviour in `core/src/goal-engine.ts` (`addItem`, `buildBrief`, run lifecycle, `archiveResolved`, `decideTick`).
 - Autonomy per action category: `off` refused by `addItem`, `propose` → item with `requires_approval` and `review_requested_at` set at creation, `auto` → recorded as completed. Unlisted categories default to `propose`.
 - Approving a proposal (`state.action`) does **not** complete it — it stays active with `approved_at` set, and the next run carries it out (`next_task` returns `execute`). The web approve route queues a run. Rejecting on a goal adds a `feedback` memory.
-- Runs: `web/lib/goal-scheduler.ts` (30 s tick in `server.ts`) starts due runs via `web/lib/goal-runner.ts` → channel `run_goal` request → agent calls `get_goal_brief(goal_id, run_id)`, works, `end_run`, `agent_done`. A run that ends without `end_run` is marked failed. Scheduler and runner state live on `globalThis` because Next.js API routes load separate module instances from `server.ts`.
+- Runs: the scheduler pass is `schedulerPass` in `core/src/goal-tick.ts`. It takes a lease so one session schedules, expires stale runs, runs due health checks, and claims due runs atomically (`goal_runs.holder`). The conductor-goals plugin calls it through the MCP tool `goals_tick` every 30 s (`plugins/conductor-goals/hooks/runner.ts`) and starts each claimed run in a background subagent (`conductor-goals:goal-runner`, description `Goal: <name> (<run id>)`). The agent calls `get_goal_brief(goal_id, run_id)`, works, and calls `end_run`. A run that ends without `end_run` is marked failed; one past `max_run_minutes` is stopped and timed out.
+- The guard plugin exists because the engine hides from a plugin the calls its own timers and buttons cause, so the runner can't see its own timer-started runs. It identifies runs by `$.agent.list()` `spawnedBy` plus the description. It sets `run_scope`, applies the goal guard (`guard_check`), refuses the person-only tools (`decide_item`, `cancel_run`, ...) to agents and the model, and keeps run reports out of the chat. The runner starts nothing unless the guard's `status` tool is present.
+- Old path: with `CONDUCTOR_WEB_RUNS=1` the web app runs its own scheduler (`web/lib/goal-scheduler.ts`), starting runs through the channel (`run_goal` request, then `agent_done`). Its state lives on `globalThis` because Next.js API routes load separate module instances from `server.ts`.
 - Goals are hidden from plan lists (`/api/plans`, home page, MCP `list_plans`).
 - Schedules (`core/src/schedule.ts`): one per goal, `interval` (+ active hours) or `cron` (5-field, local time, own parser — no dependency); webhooks store only a sha256 of the secret (`/api/goals/:id/trigger`, Bearer or `x-conductor-secret`; repeats coalesce into the open run).
 - Health (`core/src/health.ts`): `health_command` exits 0 while the goal is met; the last number printed is the trend value. The scheduler runs due checks each tick; a failure queues a run with trigger `health` if `health_triggers_run`.
@@ -186,7 +189,7 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **One schema, in `core/`**: `mcp/src/db.ts` and `web/lib/db.ts` are thin wrappers that bind `@conductor/core` queries to their own connection. To add a field to plans or tasks, change `core/src/migrate.ts` (CREATE TABLE + ALTER entry) and `core/src/types.ts` only. Put a query in `core/src/queries.ts` if both sides need it; web-only queries stay in `web/lib/db.ts`.
 
-**Claude Code plugin** (`plugins/conductor-goals`, README there): a Goals pane, status line, alerts, `/goal*` commands and tools Claude can call, all over the web app's API (mainly `GET /api/goals/overview`, which answers 304 to a matching ETag). The repo root is a plugin marketplace (`.claude-plugin/marketplace.json`, name `conductor`); installed as `conductor-goals@conductor`, it is read straight from the folder, so `/reload-plugins` picks up edits. Check with `claude plugin validate plugins/conductor-goals` and `claude plugin test plugins/conductor-goals`. Engine rules that bite: functions that take `$` must be top-level and imported by name (no `import * as`), state atoms must be read in the file that declares them (hence `hooks/state.ts` accessors), and every gating hook gets a `.catch`.
+**Claude Code plugins** (`plugins/conductor-goals` and `plugins/conductor-goals-guard`, READMEs there): the goal runner, a Goals pane, status line, alerts, `/goal*` commands and tools Claude can call, all over the conductor MCP server's tools via `$.tool.call` (mainly `goals_overview`, which answers `changed: false` to a matching etag). No web app needed. The repo root is a plugin marketplace (`.claude-plugin/marketplace.json`, name `conductor`); installed as `conductor-goals@conductor`, it is read straight from the folder, so `/reload-plugins` picks up edits. Check each with `claude plugin validate plugins/<name>` and `claude plugin test plugins/<name>`. Engine rules that bite: functions that take `$` must be top-level and imported by name (no `import * as`), state atoms must be read in the file that declares them (hence `hooks/state.ts` accessors), and every gating hook gets a `.catch`.
 
 **Claude Code hooks**: `mcp/scripts/install-hooks.mjs` runs on `npm install` and installs the Conductor reminder hooks into `~/.claude/settings.json`, updating stale copies in place and removing the obsolete decompose hook. Skip with `CONDUCTOR_SKIP_HOOKS=1`.
 
