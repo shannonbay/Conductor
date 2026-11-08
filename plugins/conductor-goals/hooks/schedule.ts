@@ -6,9 +6,9 @@
  */
 import type { EngineInterface } from 'claude-code'
 
-import type { GoalCard } from '../types'
+import type { GoalCard, Schedule } from '../types'
 import { setSchedule } from './api'
-import { choiceFromAnswer, choiceOptions, fallbackTitle, parseSuggestion, SCHEDULE_CHOICES, suggestByKeywords, type ScheduleChoice, type Suggestion } from './model'
+import { choiceFromAnswer, choiceOptions, fallbackTitle, parseSuggestion, SCHEDULE_CHOICES, scheduleLabel, suggestByKeywords, type ScheduleChoice, type Suggestion } from './model'
 
 type $ = EngineInterface
 
@@ -37,16 +37,37 @@ export async function suggestSchedule($: $, name: string | null, objective: stri
 /** Asks how often the goal runs, the suggestion first. A dismissed question takes the suggestion. */
 export async function askSchedule($: $, goalName: string, suggestion: Suggestion): Promise<ScheduleChoice> {
   const suggested = SCHEDULE_CHOICES.find((c) => c.key === suggestion.choice)!
+  return (await ask($, goalName, suggestion, null)) ?? suggested
+}
+
+/** The question itself; null when it was dismissed or the answer isn't a schedule. */
+async function ask($: $, goalName: string, suggestion: Suggestion, current: Schedule | null): Promise<ScheduleChoice | null> {
+  const suggested = SCHEDULE_CHOICES.find((c) => c.key === suggestion.choice)!
+  const now = current ? `Now: ${scheduleLabel(current)}. ` : ''
   let answer: string | null = null
   try {
     answer = await $.ui.ask(
-      `How often should "${goalName}" run? Suggested: ${suggested.label.toLowerCase()} (${suggestion.reason}). Or type your own: every 12h, cron 0 9 * * 1-5, or off.`,
+      `${now}How often should "${goalName}" run? Suggested: ${suggested.label.toLowerCase()} (${suggestion.reason}). Or type your own: every 12h, cron 0 9 * * 1-5, or off.`,
       choiceOptions(suggestion.choice),
     )
   } catch {
     answer = null
   }
-  return choiceFromAnswer(answer) ?? suggested
+  return choiceFromAnswer(answer)
+}
+
+/**
+ * The pane's Reschedule, for a goal that has a schedule: the same choices,
+ * with the current schedule shown. A dismissed question changes nothing.
+ */
+export async function rescheduleGoal($: $, goal: GoalCard): Promise<void> {
+  const choice = await ask($, goal.name, await suggestSchedule($, goal.name, goal.objective), goal.schedule)
+  if (!choice) {
+    $.ui.toast(`${goal.name}: schedule unchanged.`)
+    return
+  }
+  await setSchedule($, goal.id, choice.schedule, choice.oneOff)
+  $.ui.toast(`${goal.name} now runs ${choice.oneOff ? 'once' : scheduleLabel(choice.schedule)}.`)
 }
 
 /** The pane's Set schedule: suggest, ask, set. Says what was chosen. */

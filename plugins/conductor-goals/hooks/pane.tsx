@@ -6,12 +6,12 @@
  * Hotkeys while the pane has focus: a / r approve or reject the first
  * proposal, n runs the first goal that can run, g refreshes, 1–9 expand a goal.
  */
-import type { EngineInterface, RenderInput } from 'claude-code'
+import type { EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
 import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
-import { approve, baseUrl, deleteMemory, reject, runNow, setGoalStatus } from './api'
+import { approve, baseUrl, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus } from './api'
 import { cancelRun } from './runner'
-import { chooseSchedule } from './schedule'
+import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
 import { sendToChat } from './chat'
 import { getAddingTo, getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setConfirm, setRejecting, toggleExpanded } from './state'
@@ -54,8 +54,14 @@ export async function renderPane($: $, e: E) {
     return (
       <Box flexDirection="column">
         <Text>Conductor isn't connected.</Text>
-        <Text dimColor>Add the conductor MCP server to .mcp.json (see Conductor's README), then reconnect it with /mcp.</Text>
-        {s.error && <Text dimColor>{s.error}</Text>}
+        {s.error === NOT_LOADED
+          ? <Text dimColor>{NOT_LOADED}</Text>
+          : (
+            <Box flexDirection="column">
+              <Text dimColor>Add the conductor MCP server for your user (see Conductor's README), then reconnect it with /mcp.</Text>
+              {s.error && <Text dimColor>{s.error}</Text>}
+            </Box>
+          )}
         <Button key="retry" label="Retry" hotkey="g" onPress={() => void refresh($)} />
       </Box>
     )
@@ -223,43 +229,52 @@ function controls($: $, e: E, view: View, g: GoalCard) {
     )
   }
 
+  // The buttons that apply, joined by dots so they don't read as one phrase
+  const buttons: RenderChildren[] = []
+  const run = lastRun(g)
+  if (run && isFailed(run.status)) {
+    buttons.push(<Button key={`discuss-${g.id}`} label={view.doing === `discuss:${g.id}` ? 'Sending…' : 'Discuss'} onPress={() => void discuss($, g, run)} />)
+  }
+  if (g.status === 'active' && !g.oneOff) {
+    buttons.push(g.schedule ? (
+      <Button
+        key={`reschedule-${g.id}`}
+        label={view.doing === `schedule:${g.id}` ? 'Choosing…' : 'Reschedule'}
+        plain
+        onPress={() => void act($, `schedule:${g.id}`, 'change the schedule', () => rescheduleGoal($, g))}
+      />
+    ) : (
+      <Button
+        key={`schedule-${g.id}`}
+        label={view.doing === `schedule:${g.id}` ? 'Choosing…' : 'Set schedule'}
+        plain
+        onPress={() => void act($, `schedule:${g.id}`, 'set the schedule', async () => void (await chooseSchedule($, g)))}
+      />
+    ))
+  }
+  if (canRun(g)) {
+    buttons.push(
+      <Button
+        key={`run-${g.id}`}
+        label={view.doing === `run:${g.id}` ? 'Starting…' : 'Run now'}
+        plain
+        hotkey={view.runnable === g.id ? 'n' : undefined}
+        onPress={() => void act($, `run:${g.id}`, 'start the run', () => runNow($, g.id))}
+      />,
+    )
+  }
+  if (g.openRun) {
+    buttons.push(<Button key={`cancel-run-${g.id}`} label="Cancel run" plain onPress={() => void setConfirm($, ({ kind: 'cancel-run', goalId: g.id }))} />)
+  }
+  buttons.push(g.status === 'active' ? (
+    <Button key={`pause-${g.id}`} label={view.doing === `pause:${g.id}` ? 'Pausing…' : 'Pause'} plain onPress={() => void act($, `pause:${g.id}`, 'pause the goal', () => setGoalStatus($, g.id, 'paused'))} />
+  ) : (
+    <Button key={`resume-${g.id}`} label={view.doing === `resume:${g.id}` ? 'Resuming…' : 'Resume'} plain onPress={() => void act($, `resume:${g.id}`, 'resume the goal', () => setGoalStatus($, g.id, 'active'))} />
+  ))
+
   return (
     <Box key={`controls-${g.id}`} marginTop={g.needsYou.length > 0 ? 1 : 0}>
-      {(() => {
-        const run = lastRun(g)
-        return run && isFailed(run.status) ? (
-          <Box>
-            <Button key={`discuss-${g.id}`} label={view.doing === `discuss:${g.id}` ? 'Sending…' : 'Discuss'} onPress={() => void discuss($, g, run)} />
-            <Text> </Text>
-          </Box>
-        ) : null
-      })()}
-      {g.status === 'active' && !g.schedule && !g.oneOff && (
-        <Button
-          key={`schedule-${g.id}`}
-          label={view.doing === `schedule:${g.id}` ? 'Choosing…' : 'Set schedule'}
-          plain
-          onPress={() => void act($, `schedule:${g.id}`, 'set the schedule', async () => void (await chooseSchedule($, g)))}
-        />
-      )}
-      {canRun(g) && (
-        <Button
-          key={`run-${g.id}`}
-          label={view.doing === `run:${g.id}` ? 'Starting…' : 'Run now'}
-          plain
-          hotkey={view.runnable === g.id ? 'n' : undefined}
-          onPress={() => void act($, `run:${g.id}`, 'start the run', () => runNow($, g.id))}
-        />
-      )}
-      {g.openRun && (
-        <Button key={`cancel-run-${g.id}`} label="Cancel run" plain onPress={() => void setConfirm($, ({ kind: 'cancel-run', goalId: g.id }))} />
-      )}
-      <Text> </Text>
-      {g.status === 'active' ? (
-        <Button key={`pause-${g.id}`} label={view.doing === `pause:${g.id}` ? 'Pausing…' : 'Pause'} plain onPress={() => void act($, `pause:${g.id}`, 'pause the goal', () => setGoalStatus($, g.id, 'paused'))} />
-      ) : (
-        <Button key={`resume-${g.id}`} label={view.doing === `resume:${g.id}` ? 'Resuming…' : 'Resume'} plain onPress={() => void act($, `resume:${g.id}`, 'resume the goal', () => setGoalStatus($, g.id, 'active'))} />
-      )}
+      {buttons.flatMap((b, i) => (i === 0 ? [b] : [<Text key={`sep-${g.id}-${i}`} dimColor> · </Text>, b]))}
     </Box>
   )
 }

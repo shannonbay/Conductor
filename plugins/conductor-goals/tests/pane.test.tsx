@@ -147,7 +147,7 @@ test('without the conductor MCP server the pane says how to connect it', async (
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /isn't connected/ })).toBeDefined()
-    expect((await ui.find({ type: 'Text', text: /\/mcp/ }))?.text).toContain('.mcp.json')
+    expect((await ui.find({ type: 'Text', text: /\/mcp/ }))?.text).toContain('claude mcp add --scope user conductor')
     await ui.unmount()
   }
 })
@@ -209,5 +209,42 @@ test('done one-offs sit in a collapsed Done section with Run again', async ($, o
   await ui.press({ key: 'again-g2' })
   expect(fake.of('run_goal').map((c) => c.input)).toEqual([{ goal_id: 'g2' }])
   expect(await ui.find({ key: 'toggle-g2' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a goal\'s controls are separated by dots, and a scheduled goal has Reschedule', async ($, on) => {
+  engine(on)
+  fakeConductor(on, [
+    goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' }),
+    goal({ id: 'g2', name: 'Invoices', next_run_at: null, schedule: null }),
+  ])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'reschedule-g1' })).toBeDefined()
+  expect(await ui.find({ key: 'schedule-g1' })).toBeUndefined()
+  expect(await ui.find({ key: 'reschedule-g2' })).toBeUndefined()
+  // Each goal: Reschedule (or Set schedule) · Run now · Pause, with no dot at either end
+  expect(await ui.findAll({ type: 'Text', text: /^ · $/ })).toHaveLength(4)
+  await ui.unmount()
+})
+
+test('Reschedule shows the current schedule; a dismissed question changes nothing', async ($, on) => {
+  const { asked } = engine(on) // the fake dismisses (answers Cancel)
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reschedule-g1' })
+  expect(asked[0]).toMatch(/^Now: every \S+\. How often should "Inbox" run\?/)
+  expect(fake.of('set_schedule')).toEqual([])
+  await ui.unmount()
+})
+
+test('Reschedule sets the chosen schedule', async ($, on) => {
+  engine(on, { answer: 'Weekly' })
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reschedule-g1' })
+  expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 10080 } }])
   await ui.unmount()
 })
