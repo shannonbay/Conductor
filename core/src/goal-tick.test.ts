@@ -132,6 +132,12 @@ describe('guardToolCallForRun', () => {
 })
 
 describe('buildOverview', () => {
+  it("leaves the actions params out (the goal page shows them)", () => {
+    addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply', params: { body: 'x'.repeat(5000) } } })
+    const item = buildOverview(db).goals[0]!.needs_you[0]!
+    expect(item.action).toEqual({ category: 'email.send', summary: 'Send reply' })
+  })
+
   it('lists goals with items waiting for review, and an etag that changes with them', () => {
     const before = overviewWithEtag(db).etag
     addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply' } })

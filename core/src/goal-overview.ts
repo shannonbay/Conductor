@@ -53,6 +53,17 @@ export function itemView(t: Task) {
 export type ItemView = ReturnType<typeof itemView>
 
 /**
+ * An item as the overview carries it: without the action's params, which only
+ * the goal page shows. The overview reaches the plugin as one tool answer, and
+ * Claude Code saves a large answer to a file instead of passing it on.
+ */
+function overviewItem(t: Task) {
+  const v = itemView(t)
+  const action = v.action as { category: string; summary: string } | null
+  return action ? { ...v, action: { category: action.category, summary: action.summary } } : v
+}
+
+/**
  * Categories still at "propose" whose last PROMOTE_AFTER human decisions were all
  * approvals: candidates for switching to "auto".
  */
@@ -186,8 +197,8 @@ export function buildOverview(db: Database) {
         runs: runs.map((r) => ({
           id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, started_at: r.started_at, ended_at: r.ended_at, agent_id: r.agent_id,
         })),
-        needs_you: open.filter((t) => t.review_requested_at).map(itemView),
-        open_items: open.filter((t) => !t.review_requested_at).slice(0, OPEN_ITEMS).map(itemView),
+        needs_you: open.filter((t) => t.review_requested_at).map(overviewItem),
+        open_items: open.filter((t) => !t.review_requested_at).slice(0, OPEN_ITEMS).map(overviewItem),
         open_item_count: open.filter((t) => !t.review_requested_at).length,
         health: listHealth(db, plan.id, HEALTH).map((h) => ({ passed: h.passed, value: h.value, created_at: h.created_at })),
         memory: listMemory(db, plan.id, { activeOnly: true }).slice(-MEMORY).reverse()

@@ -66,6 +66,8 @@ import { getRun } from './db.js'
 import { withScope } from './session.js'
 import { isListed } from './tool-filter.js'
 
+const COMPACT_TOOLS = new Set(['goals_overview', 'goals_tick'])
+
 const TOOLS = [
   {
     name: 'create_plan',
@@ -269,7 +271,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       ? await withScope({ planId: getRun(runScope)?.plan_id ?? null, runId: runScope }, () => tool.handler(args))
       : await tool.handler(args)
     return {
-      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      // Compact for the tools only the plugin reads: a large answer reaches it as a file note, not data
+      content: [{ type: 'text', text: JSON.stringify(result, null, COMPACT_TOOLS.has(tool.name) ? 0 : 2) }],
     }
   } catch (e) {
     return {
