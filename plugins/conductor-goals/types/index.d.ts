@@ -93,6 +93,8 @@ declare module 'claude-code' {
       activeRun: ActiveRun | null
       /** Runs this session's plugin started, by subagent id. */
       runs: Record<string, RunEntry>
+      /** True while the conductor-goals-guard plugin isn't loaded, so no run starts. */
+      guardMissing: boolean
     }
   }
 }

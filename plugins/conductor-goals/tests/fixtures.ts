@@ -200,7 +200,8 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean } = {}
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'session-1' }))
   // The guard plugin's tool: present unless a test says otherwise
-  const tools = opts.guarded === false ? [] : [{ name: 'mcp__conductor-goals-guard__status', description: 'guarded' }]
+  const GUARD = { name: 'mcp__conductor-goals-guard__status', description: 'guarded' }
+  let tools = opts.guarded === false ? [] : [GUARD]
   on('tool.list', () => ({ value: tools }) as never)
   // Subagents: spawned ones are listed as running until a test ends them
   const agents: { id: string; description: string; type: string; status: string }[] = []
@@ -223,6 +224,10 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean } = {}
   })
   return {
     toasts, notifications, statuses, asked, clock, agents, spawned, stopped,
+    /** Loads or unloads the guard plugin (its status tool). */
+    setGuarded: (on: boolean) => {
+      tools = on ? [GUARD] : []
+    },
     /** Ends a spawned agent as if it finished its work. */
     finish: (agentId: string) => {
       const a = agents.find((x) => x.id === agentId)

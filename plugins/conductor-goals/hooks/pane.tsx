@@ -12,7 +12,8 @@ import type { Confirm, GoalCard } from '../types'
 import { approve, baseUrl, deleteMemory, reject, runNow, setGoalStatus } from './api'
 import { cancelRun } from './runner'
 import { ago, clip, isFailed, lastRun, spark } from './model'
-import { getBusy, getConfirm, getExpanded, getNotice, getRejecting, getSnapshot, setConfirm, setRejecting, toggleExpanded } from './state'
+import { getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, setConfirm, setRejecting, toggleExpanded } from './state'
+import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
 
 type $ = EngineInterface
@@ -42,6 +43,7 @@ export async function renderPane($: $, e: E) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const s = await getSnapshot($)
   const message = await getNotice($)
+  const guardMissing = await getGuardMissing($)
 
   if (!s.reachable && s.goals.length === 0) {
     return (
@@ -69,6 +71,7 @@ export async function renderPane($: $, e: E) {
 
   return (
     <Box flexDirection="column">
+      {guardMissing && <Text color="yellow">{GUARD_MISSING}</Text>}
       {!s.reachable && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
       {s.goals.length === 0 && (
         <Box flexDirection="column">

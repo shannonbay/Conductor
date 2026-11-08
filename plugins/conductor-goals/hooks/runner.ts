@@ -11,7 +11,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { RunEntry } from '../types'
 import { attachAgent, cancelRunRecord, failRun, releaseLease, tick, type ClaimedRun } from './api'
-import { addRun, getRuns, getSnapshot, removeRun, setNotice } from './state'
+import { addRun, getNotice, getRuns, getSnapshot, removeRun, setGuardMissing, setNotice } from './state'
 
 type $ = EngineInterface
 
@@ -87,11 +87,13 @@ function runPass($: $): Promise<void> {
 // The pane re-reads on its own poll (every 5 s while a run is open).
 async function pass($: $): Promise<void> {
   await reconcile($)
-  // Unguarded runs could act outside their goal: start none without the guard plugin
-  if (!(await $.tool.list()).some((t) => t.name === GUARD_TOOL)) {
-    await setNotice($, GUARD_MISSING)
-    return
-  }
+  // Unguarded runs could act outside their goal: start none without the guard plugin.
+  // Checked every pass, so the pane's warning goes as soon as the guard loads.
+  const guarded = (await $.tool.list()).some((t) => t.name === GUARD_TOOL)
+  await setGuardMissing($, !guarded)
+  // 0.3.0 kept this warning in the action notice, where nothing cleared it
+  if (guarded && (await getNotice($)) === GUARD_MISSING) await setNotice($, null)
+  if (!guarded) return
   const runs = await getRuns($)
   const { claimed } = await tick($, await $.session.id(), Object.values(runs).map((r) => r.runId))
   for (const run of claimed) await start($, run)

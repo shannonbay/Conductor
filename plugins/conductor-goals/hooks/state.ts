@@ -21,6 +21,7 @@ const expanded = atom({ plugin: 'conductor-goals', key: 'expanded' } as const, [
 const confirm = atom({ plugin: 'conductor-goals', key: 'confirm' } as const, null)
 const activeRun = atom({ plugin: 'conductor-goals', key: 'activeRun' } as const, null)
 const runs = atom({ plugin: 'conductor-goals', key: 'runs' } as const, {})
+const guardMissing = atom({ plugin: 'conductor-goals', key: 'guardMissing' } as const, false)
 
 export async function getSnapshot($: $): Promise<Snapshot> {
   return read($, snapshot)
@@ -69,6 +70,14 @@ export async function getActiveRun($: $): Promise<ActiveRun | null> {
 }
 export async function setActiveRun($: $, value: ActiveRun | null): Promise<void> {
   await update($, activeRun, () => value)
+}
+
+export async function getGuardMissing($: $): Promise<boolean> {
+  return read($, guardMissing)
+}
+/** Writes only on a change, so the pane redraws only when the guard comes or goes. */
+export async function setGuardMissing($: $, value: boolean): Promise<void> {
+  if ((await read($, guardMissing)) !== value) await update($, guardMissing, () => value)
 }
 
 export async function getRuns($: $): Promise<Record<string, RunEntry>> {

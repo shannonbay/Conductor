@@ -74,3 +74,20 @@ test('without the guard plugin no run is claimed or started, and the pane says w
   expect((await ui.find({ type: 'Text', text: /conductor-goals-guard/ }))?.text).toContain('Goal runs are paused')
   await ui.unmount()
 })
+
+test('the paused warning goes once the guard plugin loads, and the queued run starts', async ($, on) => {
+  const { spawned, clock, setGuarded } = engine(on, { guarded: false })
+  settle = () => clock.settle()
+  fakeConductor(on, [queued()])
+  await $.session.start(START)
+  await settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Goal runs are paused/ })).toBeDefined()
+
+  setGuarded(true)
+  await clock.advance(30_000)
+  await clock.settle()
+  expect(await ui.find({ type: 'Text', text: /Goal runs are paused/ })).toBeUndefined()
+  expect(spawned.map((x) => x.prompt)).toEqual(['Run Inbox'])
+  await ui.unmount()
+})
