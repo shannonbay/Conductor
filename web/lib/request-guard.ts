@@ -6,7 +6,7 @@ import type { IncomingMessage } from 'http'
  * - Host check: blocks DNS-rebinding, where an attacker's domain is pointed
  *   at 127.0.0.1 so their page can read our responses.
  * - Origin check: blocks cross-site requests (e.g. a hidden form POST to
- *   /api/plans/:id/agent/run) and cross-site WebSocket connections.
+ *   /api/goals/:id/run) and cross-site WebSocket connections.
  *
  * Requests without an Origin header (curl, same-origin GETs) only need a valid Host.
  * Set CONDUCTOR_ALLOWED_HOSTS (comma-separated host:port list) to allow more,

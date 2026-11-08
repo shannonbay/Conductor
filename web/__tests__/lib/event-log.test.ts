@@ -1,8 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { NextRequest } from 'next/server'
-import { POST as POSTProject } from '@/app/api/plans/route.js'
-import { POST as POSTTask } from '@/app/api/plans/[id]/tasks/route.js'
-import { GET as GETEvents } from '@/app/api/plans/[id]/events/route.js'
+import { insertPlan } from '@/lib/db'
 import { recordEvent } from '@/lib/event-log.js'
 
 // vi.mock is hoisted, so the mock variable must be created with vi.hoisted()
@@ -19,13 +16,10 @@ beforeEach(() => {
 })
 
 async function createProject(name = 'Test Project') {
-  const req = new NextRequest('http://localhost/api/projects', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, working_dir: '/tmp/test' }),
-  })
-  const res = await POSTProject(req)
-  return (await res.json()) as { id: string }
+  const id = `plan_${Math.random().toString(36).slice(2, 10)}`
+  const now = new Date().toISOString()
+  insertPlan({ id, name, description: null, status: 'active', working_dir: '/tmp/test', created_at: now, updated_at: now })
+  return { id }
 }
 
 // ── recordEvent → broadcast pipeline ─────────────────────────────────────────
@@ -61,36 +55,5 @@ describe('recordEvent broadcasts to WebSocket clients', () => {
     const message = broadcastMock.mock.calls[0][1]
     expect(message.event.id).toBeTruthy()
     expect(new Date(message.event.created_at).toString()).not.toBe('Invalid Date')
-  })
-})
-
-// ── getEvents ordering ────────────────────────────────────────────────────────
-
-describe('GET /api/plans/:id/events ordering', () => {
-  it('returns events oldest-first (ASC by created_at) for the feed', async () => {
-    const project = await createProject('Order Test')
-
-    for (const goal of ['First', 'Second', 'Third']) {
-      await POSTTask(
-        new NextRequest(`http://localhost/api/plans/${project.id}/tasks`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ goal }),
-        }),
-        { params: Promise.resolve({ id: project.id }) },
-      )
-    }
-
-    const res = await GETEvents(
-      new NextRequest(`http://localhost/api/plans/${project.id}/events`),
-      { params: Promise.resolve({ id: project.id }) },
-    )
-    const events = (await res.json()) as Array<{ created_at: string }>
-
-    expect(events.length).toBeGreaterThan(1)
-    // Route returns oldest-first (reversed from DB DESC) so feed shows chronologically
-    for (let i = 0; i < events.length - 1; i++) {
-      expect(events[i].created_at <= events[i + 1].created_at).toBe(true)
-    }
   })
 })

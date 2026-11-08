@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkChannel, checkDatabase, formatResults,
+  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkDatabase, formatResults,
   type DoctorOptions,
 } from '../doctor.js'
 
@@ -69,7 +69,7 @@ describe('doctor', () => {
     })
 
     it('fails when the conductor server script does not exist', () => {
-      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: ['missing/index.js'] }, 'conductor-channel': {} } }))
+      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: ['missing/index.js'] } } }))
       expect(checkMcpConfig(o)[0]).toMatchObject({ level: 'fail', detail: expect.stringContaining('missing/index.js') })
     })
 
@@ -77,14 +77,15 @@ describe('doctor', () => {
       write(join(dir, 'mcp/dist/index.js'), '')
       write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: {
         conductor: { command: 'node', args: [join(dir, 'mcp/dist/index.js')], env: { CONDUCTOR_STRICT_COMPLETE: '1' } },
-        'conductor-channel': { command: 'node', args: [] },
       } }))
       const [r] = checkMcpConfig(o)
       expect(r).toMatchObject({ level: 'ok', detail: expect.stringContaining('CONDUCTOR_STRICT_COMPLETE') })
     })
 
-    it('warns when conductor-channel is missing', () => {
+    it('warns about a leftover conductor-channel entry', () => {
       write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: [] } } }))
+      expect(checkMcpConfig(o).some((r) => r.name.includes('conductor-channel'))).toBe(false)
+      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: [] }, 'conductor-channel': { command: 'node', args: [] } } }))
       expect(checkMcpConfig(o).some((r) => r.name.includes('conductor-channel') && r.level === 'warn')).toBe(true)
     })
   })
@@ -97,12 +98,12 @@ describe('doctor', () => {
       expect(r.detail).toMatch(/obsolete decompose hook.*retired plan reminder/)
     })
 
-    it('passes with no hooks, and notes the opt-in goal guard', () => {
+    it('passes with no hooks, and warns about the old goal-guard hook', () => {
       expect(checkHooks(o).level).toBe('ok')
       write(join(dir, '.claude/settings.json'), JSON.stringify({ hooks: {} }))
       expect(checkHooks(o)).toMatchObject({ level: 'ok', detail: 'up to date (none needed)' })
       write(join(dir, '.claude/settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: 'node goal-guard.js' }] }] } }))
-      expect(checkHooks(o)).toMatchObject({ level: 'ok', detail: 'goal-guard installed' })
+      expect(checkHooks(o)).toMatchObject({ level: 'warn', detail: expect.stringContaining('old goal-guard hook') })
     })
   })
 
@@ -121,10 +122,6 @@ describe('doctor', () => {
   })
   })
 
-  it('checkChannel warns when the channel server is unreachable', async () => {
-    const r = await checkChannel({ ...o, env: { CONDUCTOR_CHANNEL_URL: 'http://127.0.0.1:1' } })
-    expect(r).toMatchObject({ level: 'warn', detail: expect.stringContaining('not reachable') })
-  })
 
   it('formatResults summarises problems', () => {
     const text = formatResults([

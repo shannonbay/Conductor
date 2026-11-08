@@ -1,6 +1,5 @@
 import { NextRequest } from 'next/server'
 import { getGoal, getOpenRun, queueRun, verifyEventSecret } from '@/lib/db'
-import { kickScheduler } from '@/lib/goal-scheduler'
 import { recordEvent } from '@/lib/event-log'
 import { ok, err, notFound, serverError } from '@/lib/api-utils'
 
@@ -29,7 +28,6 @@ export async function POST(req: NextRequest, { params }: Params) {
       let reason: string | undefined
       try { reason = ((await req.json()) as { reason?: string }).reason } catch { /* no body */ }
       recordEvent({ planId: id, taskId: id, eventType: 'plan_updated', actor: 'agent', payload: { changes: ['webhook triggered a run'], ...(reason && { reason }) } })
-      kickScheduler()
     }
     return ok({ run: { id: run.id, status: run.status }, coalesced: Boolean(existing) }, 202)
   } catch (e) {

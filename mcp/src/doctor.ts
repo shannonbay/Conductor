@@ -138,8 +138,8 @@ export function checkMcpConfig(o: DoctorOptions): CheckResult[] {
       results.push(ok('.mcp.json conductor', `configured${flags.length ? ` (${flags.join(', ')})` : ''}`))
     }
   }
-  if (!servers['conductor-channel']) {
-    results.push(warn('.mcp.json conductor-channel', 'not configured — the web UI\'s AI features need it', 'Add a "conductor-channel" server (see README).'))
+  if (servers['conductor-channel']) {
+    results.push(warn('.mcp.json conductor-channel', 'the channel server was removed, so this entry fails to start', 'Remove "conductor-channel" from .mcp.json.'))
   }
   for (const [name, s] of Object.entries(servers)) {
     if (process.platform === 'win32' && s.command === 'npx') {
@@ -163,9 +163,10 @@ export function checkHooks(o: DoctorOptions): CheckResult {
   const problems = [
     text.includes('conductor-decompose') && 'the obsolete decompose hook is still installed',
     text.includes('mcp__conductor__') && 'the retired plan reminder hooks are still installed',
+    text.includes('goal-guard') && 'the old goal-guard hook is still installed (the guard plugin replaced it)',
   ].filter(Boolean)
   if (problems.length) return warn('Claude Code hooks', problems.join('; '), 'Run `npm run setup-hooks --prefix mcp` to remove them.')
-  return ok('Claude Code hooks', text.includes('goal-guard') ? 'goal-guard installed' : 'up to date (none needed)')
+  return ok('Claude Code hooks', 'up to date (none needed)')
 }
 
 const PLUGIN = 'conductor-goals@conductor'
@@ -193,29 +194,16 @@ export function checkPlugin(o: DoctorOptions): CheckResult {
   return ok(name, `${PLUGIN} and ${GUARD_PLUGIN} enabled`)
 }
 
-export async function checkChannel(o: DoctorOptions): Promise<CheckResult> {
-  const base = o.env.CONDUCTOR_CHANNEL_URL ?? 'http://127.0.0.1:8789'
-  const status = await getJson(`${base}/status`, o.fetchTimeoutMs) as { connected?: boolean; busy?: boolean } | null
-  if (!status) {
-    return warn('Channel server', `not reachable at ${base} (only needed for AI features in the web UI)`,
-      'Start Claude Code with `claude --dangerously-load-development-channels server:conductor-channel`.')
-  }
-  return status.connected
-    ? ok('Channel server', `connected to a Claude Code session${status.busy ? ' (busy)' : ''}`)
-    : warn('Channel server', 'running, but no Claude Code session is connected', 'Restart Claude Code with the --dangerously-load-development-channels flag.')
-}
-
 export async function checkWeb(o: DoctorOptions): Promise<CheckResult> {
   const url = `http://localhost:${o.env.PORT ?? '3000'}/api/health`
   return await getJson(url, o.fetchTimeoutMs)
-    ? ok('Web UI', `running at ${url.replace('/api/health', '')}`)
-    : warn('Web UI', 'not running', 'Start it with `npm run dev --prefix web`.')
+    ? ok('Goal pages (web)', `running at ${url.replace('/api/health', '')}`)
+    : ok('Goal pages (web)', 'not running (optional: `npm run dev --prefix web` for goal pages and webhooks)')
 }
 
 /**
  * Active goals run while Claude Code is open with both goal plugins (the
- * conductor-goals runner, guarded by conductor-goals-guard), or from the web
- * app when it runs with CONDUCTOR_WEB_RUNS=1 (through the channel).
+ * conductor-goals runner, guarded by conductor-goals-guard).
  */
 export async function checkGoals(o: DoctorOptions, plugins: CheckResult): Promise<CheckResult | null> {
   let goals: { plan: { name: string } }[]
@@ -239,7 +227,7 @@ export async function checkGoals(o: DoctorOptions, plugins: CheckResult): Promis
 export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<CheckResult[]> {
   const node = checkNode(o)
   const plugins = checkPlugin(o)
-  const [db, channel, web] = await Promise.all([checkDatabase(o), checkChannel(o), checkWeb(o)])
+  const [db, web] = await Promise.all([checkDatabase(o), checkWeb(o)])
   return [
     node,
     ...db,
@@ -248,7 +236,6 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
     ...checkMcpConfig(o),
     checkHooks(o),
     plugins,
-    channel,
     web,
     ...[await checkGoals(o, plugins)].filter((r): r is CheckResult => r !== null),
   ]

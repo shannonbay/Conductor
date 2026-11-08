@@ -64,6 +64,7 @@ import { todo_list, todo_add, todo_set } from './tools/todos.js'
 import { handleListResources, handleReadResource } from './resources.js'
 import { getRun } from './db.js'
 import { withScope } from './session.js'
+import { isListed } from './tool-filter.js'
 
 const TOOLS = [
   {
@@ -249,7 +250,8 @@ const server = new Server(
 )
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema: withRunScopeProperty(inputSchema) })),
+  tools: TOOLS.filter(({ name }) => isListed(name))
+    .map(({ name, description, inputSchema }) => ({ name, description, inputSchema: withRunScopeProperty(inputSchema) })),
 }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {

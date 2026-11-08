@@ -1,7 +1,8 @@
 /**
  * Goal guard: decides whether a tool call made during a goal run is allowed,
  * by mapping the tool to an action category (goal.tool_map) and applying the
- * goal's autonomy. Called by the goal-guard PreToolUse hook in Claude Code.
+ * goal's autonomy. Called through the MCP tool guard_check by the
+ * conductor-goals-guard plugin, which knows which subagent does which run.
  *
  *   off     → denied
  *   auto    → allowed
@@ -34,17 +35,6 @@ export function matchToolCategory(toolMap: Record<string, string>, toolName: str
   return null
 }
 
-/** Ties a Claude Code session to the goal run it is working on (done when the agent calls get_goal_brief). */
-export function bindSessionToRun(db: Database, runId: string, ccSessionId: string): boolean {
-  return db.prepare("UPDATE goal_runs SET cc_session_id = ? WHERE id = ? AND status IN ('queued', 'running')")
-    .run(ccSessionId, runId).changes > 0
-}
-
-export function findRunForSession(db: Database, ccSessionId: string): GoalRun | undefined {
-  return db.prepare("SELECT * FROM goal_runs WHERE cc_session_id = ? AND status IN ('queued', 'running') ORDER BY started_at DESC LIMIT 1")
-    .get(ccSessionId) as GoalRun | undefined
-}
-
 function record(db: Database, run: GoalRun, toolName: string, category: string, decision: 'allow' | 'deny', reason: string | null): void {
   db.prepare(`
     INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
@@ -52,13 +42,7 @@ function record(db: Database, run: GoalRun, toolName: string, category: string, 
   `).run(newId('tc'), run.plan_id, run.id, toolName, category, decision, reason, new Date().toISOString())
 }
 
-/** Guard for a Claude Code session bound to a run (the PreToolUse goal-guard hook). */
-export function guardToolCall(db: Database, ccSessionId: string, toolName: string): GuardDecision {
-  const run = findRunForSession(db, ccSessionId)
-  return run ? guardRun(db, run, toolName) : { decision: 'allow' }
-}
-
-/** Guard for a run by its id (the conductor-goals plugin, which knows which subagent does which run). */
+/** Guard for a call made by a goal run's agent, by the run's id. */
 export function guardToolCallForRun(db: Database, runId: string, toolName: string): GuardDecision {
   const run = db.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId) as GoalRun | undefined
   return run ? guardRun(db, run, toolName) : { decision: 'allow' }

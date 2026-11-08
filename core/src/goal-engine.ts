@@ -307,7 +307,7 @@ export type TickDecision =
   | { action: 'skip'; trigger: TriggerKind; reason: string; queuedRunId?: string }
   | { action: 'start'; trigger: TriggerKind; queuedRunId?: string }
 
-/** Decides what the scheduler should do for one goal right now (channel state is checked by the caller). */
+/** Decides what the scheduler should do for one goal right now. */
 export function decideTick(db: Database, planId: string, now: Date = new Date()): TickDecision {
   const goal = getGoal(db, planId)
   if (!goal || goal.status !== 'active') return { action: 'none' }

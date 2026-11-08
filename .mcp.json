@@ -2,12 +2,9 @@
   "mcpServers": {
     "conductor": {
       "command": "node",
-      "args": ["C:/Users/layen/GitHub/Conductor/mcp/dist/index.js"],
-      "env": { "CONDUCTOR_REQUIRE_DECOMPOSE": "1", "CONDUCTOR_STRICT_COMPLETE": "1" }
-    },
-    "conductor-channel": {
-      "command": "cmd",
-      "args": ["/c", "npx", "tsx", "C:/Users/layen/GitHub/Conductor/channel/src/server.ts"]
+      "args": [
+        "C:/Users/layen/GitHub/Conductor/mcp/dist/index.js"
+      ]
     }
   }
 }

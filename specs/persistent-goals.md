@@ -303,7 +303,7 @@ Revision triggers are added for `goal_runs` and `goal_memory` so the web page up
 
 ## Scheduler
 
-*Since phase 2.5 the scheduler runs in the Claude Code plugin (see Phases); this section describes v1, which the web app still does with `CONDUCTOR_WEB_RUNS=1`.*
+*Since phase 2.5 the scheduler runs in the Claude Code plugin (see Phases). This section describes v1, which was removed with the channel server (roadmap 1.6); it's kept for the record.*
 
 v1 runs inside the **web server process** (`web/server.ts`), which is already long-lived, owns the channel client, and starts the revision poller.
 
@@ -363,7 +363,7 @@ After a few weeks, the approval stats show 40/40 `email.draft_reply` proposals a
 - Cron and event triggers (event endpoint behind the request guard plus a per-goal secret).
 - Per-category approval stats driving "promote to auto" suggestions.
 
-*As built:* the guard hook is **opt-in** (`npm run setup-hooks --prefix mcp -- --guard`) because a global PreToolUse hook runs on every tool call (~0.3 s each on Windows). It ties a Claude Code session to its run when the agent calls `get_goal_brief` with a `run_id`, and allows one guarded call per approved proposal. The "promote to auto" threshold is 10 approvals in a row.
+*As built (later replaced by the guard plugin, phase 2.5):* the guard hook was **opt-in** (`npm run setup-hooks --prefix mcp -- --guard`) because a global PreToolUse hook runs on every tool call (~0.3 s each on Windows). It ties a Claude Code session to its run when the agent calls `get_goal_brief` with a `run_id`, and allows one guarded call per approved proposal. The "promote to auto" threshold is 10 approvals in a row.
 
 **Phase 2.5 — Runs from the Claude Code plugin** (built)
 - **Why:** v1 needed three processes (web app, channel server, a Claude Code session started with `--dangerously-load-development-channels`), and runs shared the person's conversation: a run arrived mid-conversation, used up its time limit there, and its report landed in the chat.
@@ -371,7 +371,8 @@ After a few weeks, the approval stats show 40/40 `email.draft_reply` proposals a
 - **MCP tools for the runner:** `goals_tick`, `goals_overview`, `decide_item`, `cancel_run`, `set_goal_status`, `attach_agent`, `fail_run`, `guard_check`, `create_goal`, `delete_memory`. Every tool accepts `run_scope`: with it, the call acts on that run's goal in a scope of its own (`AsyncLocalStorage`), so a run never switches the process-wide open plan the person's conversation uses.
 - **conductor-goals plugin:** ticks every 30 s and after any pane action. It starts each claimed run in a background subagent (`conductor-goals:goal-runner`, described `Goal: <name> (<run id>)`), stops runs past `max_run_minutes`, and marks a run whose agent ended without `end_run` as failed. It starts nothing unless the guard plugin is loaded.
 - **conductor-goals-guard plugin:** what a run may do. It exists separately because the engine hides from a plugin the calls its own timers and buttons cause (the recursion skip), so the runner's hooks never see a timer-started run. It identifies runs by `spawnedBy` (engine-set) plus the description. It handles run tagging, the goal's guard (via `guard_check`), keeping person-only tools from agents and the model, and keeping the run's report out of the chat.
-- **Web app:** optional. A dashboard plus webhook and health endpoints that only queue runs; its own scheduler runs only with `CONDUCTOR_WEB_RUNS=1`.
+- **Web app:** optional. A dashboard plus webhook and health endpoints that only queue runs.
+- **Later (roadmap 1.6):** the channel server, the web app's own scheduler (`CONDUCTOR_WEB_RUNS`), its plan UI and the PreToolUse goal-guard hook were removed; the plan tools are hidden from Claude unless `CONDUCTOR_TOOLS=all`.
 - **Answers open question 4:** runs no longer share the conversation; each has its own subagent and context.
 
 **Phase 3 — Off-machine**

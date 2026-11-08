@@ -6,7 +6,7 @@ import {
   parseCron, cronNext, getSchedule, setSchedule, nextScheduledRun, decideTick,
   enableEventTrigger, disableEventTrigger, verifyEventSecret,
   runHealthCheck, listHealth, healthDue, parseHealthValue, buildBrief,
-  matchToolCategory, bindSessionToRun, guardToolCall, listToolCalls,
+  matchToolCategory, guardToolCallForRun, listToolCalls,
 } from './index.js'
 
 let db: Database.Database
@@ -125,11 +125,9 @@ describe('health checks', () => {
 describe('goal guard', () => {
   const MAP = { 'mcp__gmail__send_message': 'email.send', 'mcp__gmail__delete*': 'email.delete', 'mcp__gmail__archive*': 'email.archive' }
 
-  function runWithSession(session = 'cc_1') {
+  function startRun() {
     updateGoal(db, 'g1', { tool_map: MAP })
-    const run = insertRun(db, 'g1', 'manual', 'running')
-    expect(bindSessionToRun(db, run.id, session)).toBe(true)
-    return run
+    return insertRun(db, 'g1', 'manual', 'running')
   }
 
   it('matches exact names before globs', () => {
@@ -139,40 +137,36 @@ describe('goal guard', () => {
   })
 
   it('allows everything outside a goal run, and unmapped tools inside one', () => {
-    expect(guardToolCall(db, 'cc_other', 'mcp__gmail__send_message')).toEqual({ decision: 'allow' })
-    runWithSession()
-    expect(guardToolCall(db, 'cc_1', 'Bash').decision).toBe('allow')
+    expect(guardToolCallForRun(db, 'run_other', 'mcp__gmail__send_message')).toEqual({ decision: 'allow' })
+    const run = startRun()
+    expect(guardToolCallForRun(db, run.id, 'Bash').decision).toBe('allow')
   })
 
   it('denies off categories and allows auto ones', () => {
-    runWithSession()
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__delete_message')).toMatchObject({ decision: 'deny', category: 'email.delete', reason: expect.stringMatching(/off/) })
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__archive_thread')).toMatchObject({ decision: 'allow', category: 'email.archive' })
+    const run = startRun()
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__delete_message')).toMatchObject({ decision: 'deny', category: 'email.delete', reason: expect.stringMatching(/off/) })
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__archive_thread')).toMatchObject({ decision: 'allow', category: 'email.archive' })
   })
 
   it('allows a propose category while an approved proposal is being carried out, however many calls it takes', () => {
-    const run = runWithSession()
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/needs approval/) })
+    const run = startRun()
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__send_message')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/needs approval/) })
 
     const item = addItem(db, 'g1', run.id, { goal: 'Reply to Alice', action: { category: 'email.send', summary: 'send' } }).task
     approveTask(db, 'g1', item.id)
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message').decision).toBe('allow')
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message').decision).toBe('allow') // the same action, a second call
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__send_message').decision).toBe('allow')
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__send_message').decision).toBe('allow') // the same action, a second call
 
     updateTask(db, 'g1', item.id, { status: 'completed' }) // carried out: the approval is used up
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__send_message')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/needs approval/) })
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__send_message')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/needs approval/) })
     expect(listToolCalls(db, 'g1').map((c) => c.decision)).toEqual(['deny', 'allow', 'allow', 'deny']) // newest first
   })
 
   it('stops guarding once the run has ended', () => {
-    const run = runWithSession()
+    const run = startRun()
     db.prepare("UPDATE goal_runs SET status = 'completed' WHERE id = ?").run(run.id)
-    expect(guardToolCall(db, 'cc_1', 'mcp__gmail__delete_message')).toEqual({ decision: 'allow' })
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__delete_message')).toEqual({ decision: 'allow' })
     expect(getTask(db, 'g1', '1')).toBeUndefined()
   })
 
-  it('cannot bind a session to a finished run', () => {
-    const run = insertRun(db, 'g1', 'manual', 'completed')
-    expect(bindSessionToRun(db, run.id, 'cc_1')).toBe(false)
-  })
 })

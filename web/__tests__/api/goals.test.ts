@@ -1,6 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
 
-vi.mock('@/lib/goal-scheduler', () => ({ kickScheduler: vi.fn() }))
 
 import { NextRequest } from 'next/server'
 import { tmpdir } from 'os'
@@ -9,11 +8,9 @@ import { GET as GETGoal, PATCH as PATCHGoal } from '@/app/api/goals/[id]/route.j
 import { POST as POSTRun } from '@/app/api/goals/[id]/run/route.js'
 import { POST as POSTMemory } from '@/app/api/goals/[id]/memory/route.js'
 import { PATCH as PATCHMemory, DELETE as DELETEMemory } from '@/app/api/goals/[id]/memory/[memoryId]/route.js'
-import { POST as POSTApprove } from '@/app/api/plans/[id]/tasks/[taskId]/approve/route.js'
-import { POST as POSTReject } from '@/app/api/plans/[id]/tasks/[taskId]/reject/route.js'
-import { GET as GETPlans, POST as POSTPlan } from '@/app/api/plans/route.js'
-import { kickScheduler } from '@/lib/goal-scheduler'
-import { getDb, getOpenRun, getTask, getGoal, getIntervalTrigger } from '@/lib/db'
+import { POST as POSTApprove } from '@/app/api/goals/[id]/items/[itemId]/approve/route.js'
+import { POST as POSTReject } from '@/app/api/goals/[id]/items/[itemId]/reject/route.js'
+import { getDb, getOpenRun, getTask, getGoal, getIntervalTrigger, insertPlan } from '@/lib/db'
 import * as core from '@conductor/core'
 
 function req(method: string, body?: unknown) {
@@ -34,11 +31,9 @@ describe('goals API', () => {
     expect(getIntervalTrigger(body.id)!.config).toEqual({ minutes: 30, active_hours: '08:00-20:00' })
     expect(getGoal(body.id)!.autonomy).toEqual({ 'email.archive': 'auto' })
 
-    await POSTPlan(req('POST', { name: 'Ordinary plan', working_dir: tmpdir() }))
+    insertPlan({ id: 'plan_ordinary', name: 'Ordinary plan', description: null, status: 'active', working_dir: tmpdir(), created_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     const goals = await (await GETGoals(new NextRequest('http://localhost/api/goals'))).json()
     expect(goals).toEqual([expect.objectContaining({ id: body.id, name: 'Inbox', open_items: 0, needs_you: 0 })])
-    const plans = await (await GETPlans(new NextRequest('http://localhost/api/plans'))).json()
-    expect(plans.map((x: { name: string }) => x.name)).toEqual(['Ordinary plan'])
   })
 
   it('validates input', async () => {
@@ -71,12 +66,11 @@ describe('goals API', () => {
     expect(res.status).toBe(400)
   })
 
-  it('Run now queues a run and kicks the scheduler; refuses paused goals', async () => {
+  it('Run now queues a run for the plugin to start; refuses paused goals', async () => {
     const { body: { id } } = await createGoal()
     const res = await POSTRun(req('POST'), p(id))
     expect(res.status).toBe(202)
     expect(getOpenRun(id)!.status).toBe('queued')
-    expect(kickScheduler).toHaveBeenCalled()
     core.updateRun(getDb(), getOpenRun(id)!.id, { status: 'completed' })
     await PATCHGoal(req('PATCH', { status: 'paused' }), p(id))
     expect((await POSTRun(req('POST'), p(id))).status).toBe(409)
@@ -99,11 +93,11 @@ describe('goals API', () => {
     const a = core.addItem(getDb(), id, null, { goal: 'Reply A', action: { category: 'email.send', summary: 'send A' } }).task
     const b = core.addItem(getDb(), id, null, { goal: 'Reply B', action: { category: 'email.send', summary: 'send B' } }).task
 
-    await POSTApprove(req('POST'), p(id, { taskId: a.id }))
+    await POSTApprove(req('POST'), p(id, { itemId: a.id }))
     expect(getTask(id, a.id)).toMatchObject({ status: 'active', review_requested_at: null })
     expect(getOpenRun(id)!.status).toBe('queued')
 
-    await POSTReject(req('POST', { feedback: 'Too formal.' }), p(id, { taskId: b.id }))
+    await POSTReject(req('POST', { feedback: 'Too formal.' }), p(id, { itemId: b.id }))
     const data = await (await GETGoal(req('GET'), p(id))).json()
     expect(data.memory).toEqual([expect.objectContaining({ source: 'feedback', text: expect.stringContaining('Too formal.') })])
     expect(data.approval_stats).toEqual({ 'email.send': { approved: 1, rejected: 1 } })

@@ -5,7 +5,6 @@ import { WebSocketServer } from 'ws'
 import { registerClient, unregisterClient } from './lib/ws-broadcaster.js'
 import { startWatchingPlan, startPoller } from './lib/mcp-poller.js'
 import { allowedHosts, isAllowedRequest } from './lib/request-guard.js'
-import { startGoalScheduler } from './lib/goal-scheduler.js'
 
 const dev = process.env.NODE_ENV !== 'production'
 const hostname = process.env.HOST ?? 'localhost'
@@ -54,13 +53,8 @@ app.prepare().then(() => {
 
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`)
+    // Goal runs are started by the conductor-goals Claude Code plugin, not here
     startPoller()
-    // Goal runs are started by the conductor-goals Claude Code plugin. The web
-    // app starts them itself (through the channel) only when asked to.
-    if (process.env.CONDUCTOR_WEB_RUNS === '1') {
-      startGoalScheduler()
-      console.log('> Goal scheduler on (CONDUCTOR_WEB_RUNS=1): runs start through the channel')
-    }
   })
 }).catch((err) => {
   console.error('> Failed to start server:', err)

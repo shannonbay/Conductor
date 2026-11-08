@@ -122,7 +122,7 @@ export async function end_run(args: unknown) {
   record(planId, planId, 'run_completed', { run_id: runId, summary: ended.summary, items_created: ended.items_created, items_resolved: ended.items_resolved })
   return {
     run: { id: ended.id, status: ended.status, items_created: ended.items_created, items_resolved: ended.items_resolved },
-    message: 'Run ended. Finish with a one-line final message (your summary is saved). If you were started through the Conductor channel, call agent_done now.',
+    message: 'Run ended. Finish with a one-line final message (your summary is saved).',
   }
 }
 

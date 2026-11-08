@@ -1,10 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
-
-vi.mock('@/lib/channel-client', () => ({
-  getChannelStatus: vi.fn(async () => ({ connected: false, busy: false })),
-  startGoalRunViaChannel: vi.fn(), streamAgentEvents: vi.fn(), cancelAgentViaChannel: vi.fn(),
-  ChannelBusyError: class extends Error {}, ChannelNotConnectedError: class extends Error {},
-}))
+import { describe, it, expect } from 'vitest'
 
 import { NextRequest } from 'next/server'
 import { tmpdir } from 'os'
@@ -13,7 +7,6 @@ import { GET as GETGoal, PATCH as PATCHGoal } from '@/app/api/goals/[id]/route.j
 import { POST as POSTWebhook, DELETE as DELETEWebhook } from '@/app/api/goals/[id]/webhook/route.js'
 import { POST as POSTTrigger } from '@/app/api/goals/[id]/trigger/route.js'
 import { POST as POSTHealth } from '@/app/api/goals/[id]/health/route.js'
-import { tickGoals } from '@/lib/goal-scheduler'
 import { getDb, getGoal, getOpenRun, getSchedule, listHealth } from '@/lib/db'
 import * as core from '@conductor/core'
 
@@ -92,14 +85,6 @@ describe('health checks', () => {
     expect((await (await POSTHealth(req('POST'), p(id))).json()).queuedRun).toBe(false)
   })
 
-  it('the scheduler runs due health checks', async () => {
-    const id = await goal()
-    await PATCHGoal(req('PATCH', { health_command: 'node -e "console.log(3)"' }), p(id))
-    await tickGoals(new Date(), { channelStatus: async () => ({ connected: false, busy: false }), start: vi.fn() })
-    expect(listHealth(id)).toEqual([expect.objectContaining({ passed: true, value: 3 })])
-    await tickGoals(new Date(), { channelStatus: async () => ({ connected: false, busy: false }), start: vi.fn() })
-    expect(listHealth(id)).toHaveLength(1) // not due again yet
-  })
 
   it('returns 400 without a health command', async () => {
     const id = await goal()

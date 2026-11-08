@@ -2,7 +2,7 @@
 
 A Claude Code plugin that runs your Conductor goals and puts them beside the chat. While Claude Code is open it starts each due goal run in a background subagent of its own. You approve or reject proposals, run, pause and inspect goals, and get alerts, all without leaving Claude Code. Claude can also check on your goals and act on them, always asking you first before it changes anything.
 
-It needs the `conductor` MCP server (in `.mcp.json`, see Conductor's README) and its companion plugin **conductor-goals-guard**, which keeps each run within its goal. The web app and the channel are optional: the web app gives goal pages in a browser and webhook triggers.
+It needs the `conductor` MCP server (in `.mcp.json`, see Conductor's README) and its companion plugin **conductor-goals-guard**, which keeps each run within its goal. The web app is optional: it gives goal pages in a browser and webhook triggers.
 
 ## Install
 

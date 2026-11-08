@@ -128,7 +128,6 @@ export function GoalView({ goalId }: { goalId: string }) {
               className="px-3 py-1.5 text-sm border border-gray-200 text-gray-700 rounded-lg hover:bg-gray-50 disabled:opacity-50">
               {goal.status === 'active' ? 'Pause' : 'Resume'}
             </button>
-            <Link href={`/plans/${goalId}`} className="px-3 py-1.5 text-sm text-gray-500 hover:text-gray-900">Task tree</Link>
           </div>
         </div>
       </header>
@@ -254,7 +253,7 @@ function NeedsYou({ items, goalId, busy, call }: { items: Item[]; goalId: string
                 <div className="flex gap-2">
                   <button disabled={busy !== null || !feedback.trim()} className="px-3 py-1.5 text-sm bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
                     onClick={async () => {
-                      if (await call('reject', `/api/plans/${goalId}/tasks/${i.id}/reject`, { method: 'POST', body: JSON.stringify({ feedback }) })) {
+                      if (await call('reject', `/api/goals/${goalId}/items/${i.id}/reject`, { method: 'POST', body: JSON.stringify({ feedback }) })) {
                         setRejecting(null); setFeedback('')
                       }
                     }}>Send back</button>
@@ -263,7 +262,7 @@ function NeedsYou({ items, goalId, busy, call }: { items: Item[]; goalId: string
               </div>
             ) : (
               <div className="flex gap-2">
-                <button onClick={() => call('approve', `/api/plans/${goalId}/tasks/${i.id}/approve`)} disabled={busy !== null}
+                <button onClick={() => call('approve', `/api/goals/${goalId}/items/${i.id}/approve`)} disabled={busy !== null}
                   className="px-3 py-1.5 text-sm bg-green-600 text-white rounded-md hover:bg-green-700 disabled:opacity-50">Approve</button>
                 <button onClick={() => { setRejecting(i.id); setFeedback('') }} disabled={busy !== null}
                   className="px-3 py-1.5 text-sm border border-red-200 text-red-600 bg-white rounded-md hover:bg-red-50 disabled:opacity-50">Reject…</button>
