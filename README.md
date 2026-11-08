@@ -6,6 +6,8 @@ An agent session ends; the work doesn't. Conductor keeps everything a long-lived
 
 It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `conductor-goals` runs goals and shows the Goals pane, and `conductor-goals-guard` keeps each run within its goal. An optional **web app** adds goal pages in a browser, webhook triggers and a UI for plans. Everything lives in one local SQLite database.
 
+![The Goals pane beside a Claude Code chat: three goals with their last and next runs, the to-do lists, and an expanded to-do with Ask, Plan and Start](docs/goals-pane.png)
+
 ## Persistent goals
 
 A goal is an objective that never finishes. Create one in Claude Code with `/goal-new <name>: <objective>` (it works in the session's directory, and asks how often it should run, suggesting a schedule from the objective), or from the web app's home page (**+ New goal**) with standing instructions too. A goal can also be a **one-off**: it runs once and, when nothing is left open, moves to the pane's **Done** section.
