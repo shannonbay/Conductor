@@ -90,16 +90,19 @@ describe('doctor', () => {
   })
 
   describe('checkHooks', () => {
-    it('warns about the obsolete decompose hook and old tool names', () => {
-      write(join(dir, '.claude/settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: 'python conductor-decompose.py' }] }], UserPromptSubmit: [{ hooks: [{ command: 'mcp__conductor__list_projects' }] }] } }))
+    it('warns about the obsolete decompose hook and the retired plan reminders', () => {
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: 'python conductor-decompose.py' }] }], Stop: [{ hooks: [{ command: 'mcp__conductor__update_task' }] }] } }))
       const r = checkHooks(o)
       expect(r.level).toBe('warn')
-      expect(r.detail).toMatch(/obsolete decompose hook.*old \*_project/)
+      expect(r.detail).toMatch(/obsolete decompose hook.*retired plan reminder/)
     })
 
-    it('passes with current hooks', () => {
-      write(join(dir, '.claude/settings.json'), JSON.stringify({ hooks: { Stop: [{ hooks: [{ command: 'mcp__conductor__update_task' }] }] } }))
+    it('passes with no hooks, and notes the opt-in goal guard', () => {
       expect(checkHooks(o).level).toBe('ok')
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ hooks: {} }))
+      expect(checkHooks(o)).toMatchObject({ level: 'ok', detail: 'up to date (none needed)' })
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: 'node goal-guard.js' }] }] } }))
+      expect(checkHooks(o)).toMatchObject({ level: 'ok', detail: 'goal-guard installed' })
     })
   })
 

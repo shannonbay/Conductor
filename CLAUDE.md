@@ -76,8 +76,6 @@ Tests live in `mcp/src/tests/`. `vitest.config.ts` sets `CONDUCTOR_DB=:memory:`.
 
 To run a single test file: `npm test -- src/tests/tools/create_plan.test.ts`
 
-When working in this repo, call `mcp__conductor__next_task` after opening a plan or finishing a task to see what to do next.
-
 ### Web App (`cd web`)
 
 ```bash
@@ -164,8 +162,6 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 - Agents can only change gate fields while a task is pending (except turning approval on); humans can edit them any time via PATCH.
 - Every check result is a `verifications` row (the evidence); the web shows them in `GatesPanel`.
 
-**Using gates in this repo:** when you plan work here, give tasks a `verify_command` where one exists (e.g. `npm test --prefix mcp -- src/tests/tools/gates.test.ts`, `npm run typecheck --prefix web`) and acceptance criteria for behaviour you'll need to show. Run `verify_task` before completing.
-
 **Persistent goals** (spec: `specs/persistent-goals.md`; phases 1, 2 and 2.5 built): a goal is a plan with `kind = 'goal'` plus a `goals` row; its work items are ordinary root-level tasks with `run_id`, `external_ref` (unique per goal) and `archived_at`.
 - Storage in `core/src/goals.ts`, behaviour in `core/src/goal-engine.ts` (`addItem`, `buildBrief`, run lifecycle, `archiveResolved`, `decideTick`).
 - Autonomy per action category: `off` refused by `addItem`, `propose` → item with `requires_approval` and `review_requested_at` set at creation, `auto` → recorded as completed. Unlisted categories default to `propose`.
@@ -192,13 +188,13 @@ The settings gear (⚙) in the UI shows a green/red dot for session connection s
 
 **Claude Code plugins** (`plugins/conductor-goals` and `plugins/conductor-goals-guard`, READMEs there): the goal runner, a Goals pane, status line, alerts, `/goal*` commands and tools Claude can call, all over the conductor MCP server's tools via `$.tool.call` (mainly `goals_overview`, which answers `changed: false` to a matching etag). No web app needed. The repo root is a plugin marketplace (`.claude-plugin/marketplace.json`, name `conductor`); installed as `conductor-goals@conductor`, it is read straight from the folder, so `/reload-plugins` picks up edits. Check each with `claude plugin validate plugins/<name>` and `claude plugin test plugins/<name>`. Engine rules that bite: functions that take `$` must be top-level and imported by name (no `import * as`), state atoms must be read in the file that declares them (hence `hooks/state.ts` accessors), and every gating hook gets a `.catch`.
 
-**Claude Code hooks**: `mcp/scripts/install-hooks.mjs` runs on `npm install` and installs the Conductor reminder hooks into `~/.claude/settings.json`, updating stale copies in place and removing the obsolete decompose hook. Skip with `CONDUCTOR_SKIP_HOOKS=1`.
+**Claude Code hooks**: goals need none. `mcp/scripts/install-hooks.mjs` runs on `npm install`: it removes the retired plan reminder hooks and the obsolete decompose hook from `~/.claude/settings.json`, and manages the opt-in goal-guard hook (`--guard` / `--no-guard`) for web-started runs. Skip with `CONDUCTOR_SKIP_HOOKS=1`.
 
 **Channel is one-request-at-a-time**: The channel server rejects new requests with 503 while one is active. The web app surfaces this as `ChannelBusyError`. Agent pause is a soft signal (DB-only); Claude Code keeps running until it calls `agent_done` or `agent_cancelled`.
 
 ## Working in This Repo
 
-**Use Conductor to plan and track your own work** — not the Claude Code `TaskCreate`/`TaskUpdate` tools. Before starting any multi-step task, call `mcp__conductor__list_plans` to check for existing in-progress work, then either resume it with `mcp__conductor__open_plan` or create a new plan with `mcp__conductor__create_plan`. Decompose the work into tasks, record progress with `mcp__conductor__update_task`, and archive the plan when done.
+**Goals are the product; plans are plumbing.** Don't track your own work here with Conductor plans (`create_plan`, `provision_tasks`, ...): use plan mode and Claude Code's own task list, as anywhere else. Plans stay as the store goal items are built on, so keep their code and tests working, but new features go to goals.
 
 ## Adding a New MCP Tool
 

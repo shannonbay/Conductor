@@ -1,14 +1,16 @@
 #!/usr/bin/env node
 /**
- * Installs Conductor reminder hooks into ~/.claude/settings.json.
+ * Keeps Conductor's Claude Code hooks in ~/.claude/settings.json current.
  * Runs automatically as a postinstall script, or manually via:
- *   node scripts/install-hooks.mjs
+ *   node scripts/install-hooks.mjs [--guard | --no-guard]
  *
- * Set CONDUCTOR_SKIP_HOOKS=1 to skip installation (e.g. in CI).
+ * Set CONDUCTOR_SKIP_HOOKS=1 to skip it (e.g. in CI).
  *
- * Forced task decomposition is no longer a hook: it is enforced by the MCP
- * server's set_status when CONDUCTOR_REQUIRE_DECOMPOSE=1. This script removes
- * the old decompose PreToolUse hook if an earlier version installed it.
+ * Goals are Conductor's product now, so it no longer installs the old plan
+ * reminder hooks (a UserPromptSubmit "use mcp__conductor__* to track work"
+ * note and a Stop "did Claude update task progress?" message); it removes
+ * them, along with the obsolete decompose hook. The only hook left is the
+ * opt-in goal guard for runs the web app starts through the channel.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
@@ -24,29 +26,15 @@ if (process.env.CONDUCTOR_SKIP_HOOKS === '1') {
 // Each entry: { event, detect, hook }
 //   detect — substring identifying an existing Conductor hook for this event
 //   hook   — the current hook definition; an existing match is replaced with it
-const HOOKS = [
-  {
-    event: 'UserPromptSubmit',
-    detect: 'mcp__conductor__',
-    hook: {
-      type: 'command',
-      command: `printf '{"hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"CONDUCTOR: Use mcp__conductor__* tools for task management — not TaskCreate/TaskUpdate. At the start of any multi-step task: call mcp__conductor__list_plans first, then open or create a plan and decompose work into tasks. Update progress incrementally with mcp__conductor__update_task. Archive when done with mcp__conductor__archive_plan."}}'`,
-      timeout: 5,
-    },
-  },
-  {
-    event: 'Stop',
-    detect: 'mcp__conductor__',
-    hook: {
-      type: 'command',
-      command: `printf '{"systemMessage":"Conductor: Did Claude update task progress? If a multi-step task was just completed, ask Claude to call mcp__conductor__update_task and mcp__conductor__set_status."}'`,
-      timeout: 5,
-    },
-  },
-]
+const HOOKS = []
 
 // Hooks from earlier versions of this script that should be removed.
-const OBSOLETE = [{ event: 'PreToolUse', detect: 'conductor-decompose' }]
+const OBSOLETE = [
+  { event: 'PreToolUse', detect: 'conductor-decompose' },
+  // The plan reminders (retired: goals don't need them, and they cost tokens every turn)
+  { event: 'UserPromptSubmit', detect: 'mcp__conductor__' },
+  { event: 'Stop', detect: 'mcp__conductor__' },
+]
 
 const targetDir = join(homedir(), '.claude')
 const targetFile = join(targetDir, 'settings.json')
@@ -70,7 +58,7 @@ for (const { event, detect } of OBSOLETE) {
   if (!groups) continue
   const kept = groups.filter((g) => !g.hooks?.some((h) => h.command?.includes(detect)))
   if (kept.length !== groups.length) {
-    changes.push(`removed obsolete ${event} hook`)
+    changes.push(`removed the old ${event} hook`)
     if (kept.length > 0) settings.hooks[event] = kept
     else delete settings.hooks[event]
   }

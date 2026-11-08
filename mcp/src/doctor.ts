@@ -151,7 +151,7 @@ export function checkMcpConfig(o: DoctorOptions): CheckResult[] {
 
 export function checkHooks(o: DoctorOptions): CheckResult {
   const file = join(o.home, '.claude', 'settings.json')
-  if (!existsSync(file)) return warn('Claude Code hooks', 'no ~/.claude/settings.json', 'Run `npm run setup-hooks --prefix mcp`.')
+  if (!existsSync(file)) return ok('Claude Code hooks', 'none installed (none needed)')
   let text: string
   try {
     text = readFileSync(file, 'utf8')
@@ -159,13 +159,13 @@ export function checkHooks(o: DoctorOptions): CheckResult {
   } catch {
     return fail('Claude Code hooks', '~/.claude/settings.json is not valid JSON', 'Fix the JSON syntax.')
   }
+  // Goals need no hooks; these are leftovers from the plan era, costing tokens every turn
   const problems = [
     text.includes('conductor-decompose') && 'the obsolete decompose hook is still installed',
-    /mcp__conductor__(list|open|create|archive)_project/.test(text) && 'hooks use old *_project tool names',
+    text.includes('mcp__conductor__') && 'the retired plan reminder hooks are still installed',
   ].filter(Boolean)
-  if (problems.length) return warn('Claude Code hooks', problems.join('; '), 'Run `npm run setup-hooks --prefix mcp` to update them.')
-  if (!text.includes('mcp__conductor__')) return warn('Claude Code hooks', 'Conductor reminder hooks not installed', 'Run `npm run setup-hooks --prefix mcp`.')
-  return ok('Claude Code hooks', 'up to date')
+  if (problems.length) return warn('Claude Code hooks', problems.join('; '), 'Run `npm run setup-hooks --prefix mcp` to remove them.')
+  return ok('Claude Code hooks', text.includes('goal-guard') ? 'goal-guard installed' : 'up to date (none needed)')
 }
 
 const PLUGIN = 'conductor-goals@conductor'
