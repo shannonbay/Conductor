@@ -34,6 +34,7 @@ import {
   GuardCheckSchema,
   CreateGoalSchema,
   DeleteMemorySchema,
+  SetScheduleSchema,
 } from './schema.js'
 
 import { create_plan } from './tools/create_plan.js'
@@ -52,7 +53,7 @@ import { verify_task } from './tools/verify_task.js'
 import { list_goals, get_goal_brief, add_item, remember, forget, end_run, run_goal } from './tools/goals.js'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory,
+  create_goal, delete_memory, set_schedule,
 } from './tools/goal_runner.js'
 import { handleListResources, handleReadResource } from './resources.js'
 import { getRun } from './db.js'
@@ -196,6 +197,7 @@ const TOOLS = [
     ['guard_check', "Applies a goal's autonomy to a tool call made during a run.", GuardCheckSchema, guard_check],
     ['create_goal', 'Creates a goal for the human.', CreateGoalSchema, create_goal],
     ['delete_memory', "Deletes one of a goal's memories for the human.", DeleteMemorySchema, delete_memory],
+    ['set_schedule', "Sets a goal's schedule (interval, cron, or none) for the human.", SetScheduleSchema, set_schedule],
   ] as const).map(([name, description, schema, handler]) => ({
     name,
     description: `${description} For the conductor-goals plugin only: agents and the model must not call this.`,

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, clip, diffAlerts, EMPTY, findGoal, spark, statusText, toCard } from '../hooks/model'
+import { ago, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, scheduleLabel, spark, statusText, toCard } from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -46,4 +46,30 @@ test('spark and ago format for a narrow pane', async () => {
   expect(ago('2026-11-07T07:58:00Z', NOW)).toBe('2m ago')
   expect(ago('2026-11-07T10:00:00Z', NOW)).toBe('in 2h')
   expect(ago(null, NOW)).toBe('—')
+})
+
+test('parseSchedule reads intervals, windows, cron and off, and explains the rest', async () => {
+  expect(parseSchedule('every 6h')).toEqual({ schedule: { kind: 'interval', minutes: 360 } })
+  expect(parseSchedule('Every 30 minutes between 8:00-20:30')).toEqual({ schedule: { kind: 'interval', minutes: 30, active_hours: '08:00-20:30' } })
+  expect(parseSchedule('every 1d')).toEqual({ schedule: { kind: 'interval', minutes: 1440 } })
+  expect(parseSchedule('cron 0 9 * * 1-5')).toEqual({ schedule: { kind: 'cron', expr: '0 9 * * 1-5' } })
+  expect(parseSchedule('off')).toEqual({ schedule: null })
+  expect(parseSchedule('every 2m')).toEqual({ error: expect.stringContaining('5 minutes') })
+  expect(parseSchedule('every 6 weeks')).toEqual({ error: expect.stringContaining('m, h or d') })
+  expect(parseSchedule('every 1h between 25:00-26:00')).toEqual({ error: expect.stringContaining('24-hour') })
+  expect(parseSchedule('cron 0 9 *')).toEqual({ error: expect.stringContaining('5 fields') })
+  expect(parseSchedule('sometimes')).toEqual({ error: expect.stringContaining('every 6h') })
+})
+
+test('scheduleLabel and nextRunText say when a goal runs next', async () => {
+  expect(scheduleLabel({ kind: 'interval', minutes: 360 })).toBe('every 6h')
+  expect(scheduleLabel({ kind: 'interval', minutes: 90, active_hours: '08:00-20:00' })).toBe('every 90m, 08:00–20:00')
+  expect(scheduleLabel({ kind: 'cron', expr: '0 9 * * *' })).toBe('cron 0 9 * * *')
+  expect(scheduleLabel(null)).toBe('on demand')
+  const g = { status: 'active', openRun: null, schedule: { kind: 'interval' as const, minutes: 60 } }
+  expect(nextRunText({ ...g, nextRunAt: new Date(NOW + 25 * 60_000).toISOString() }, NOW)).toBe(' · next in 25m')
+  expect(nextRunText({ ...g, nextRunAt: new Date(NOW - 60_000).toISOString() }, NOW)).toBe(' · next run due now')
+  expect(nextRunText({ ...g, nextRunAt: null, schedule: null }, NOW)).toBe(' · no schedule (/goal-schedule)')
+  expect(nextRunText({ ...g, status: 'paused', nextRunAt: null, schedule: null }, NOW)).toBe('')
+  expect(nextRunText({ ...g, openRun: { id: 'r', status: 'running' }, nextRunAt: null }, NOW)).toBe('')
 })

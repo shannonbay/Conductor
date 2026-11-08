@@ -6,6 +6,7 @@
  */
 import type { EngineInterface } from 'claude-code'
 
+import type { Schedule } from '../types'
 import type { OverviewGoal } from './model'
 
 type $ = EngineInterface
@@ -93,6 +94,11 @@ export async function setGoalStatus($: $, goalId: string, status: 'active' | 'pa
 
 export async function deleteMemory($: $, goalId: string, memoryId: string): Promise<void> {
   await call($, 'delete_memory', { goal_id: goalId, memory_id: memoryId })
+}
+
+/** null: the goal runs only on demand. */
+export async function setSchedule($: $, goalId: string, schedule: Schedule | null): Promise<{ next_run_at: string | null }> {
+  return call($, 'set_schedule', { goal_id: goalId, schedule })
 }
 
 export async function createGoal($: $, input: { name: string; objective: string; working_dir: string }): Promise<string> {

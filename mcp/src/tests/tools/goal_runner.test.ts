@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory,
+  create_goal, delete_memory, set_schedule,
 } from '../../tools/goal_runner.js'
 import { add_item, get_goal_brief, end_run } from '../../tools/goals.js'
 import { create_plan } from '../../tools/create_plan.js'
@@ -157,5 +157,27 @@ describe('create_goal and delete_memory', () => {
     await expect(delete_memory({ goal_id: 'other', memory_id: m.id })).rejects.toThrow(/not found/)
     expect(await delete_memory({ goal_id: id, memory_id: m.id })).toEqual({ deleted: m.id })
     expect(getMemory(m.id)).toBeUndefined()
+  })
+})
+
+describe('set_schedule', () => {
+  it('an interval makes a run due now, which the next tick claims', async () => {
+    const id = makeGoal()
+    const before = Date.now()
+    const r = await set_schedule({ goal_id: id, schedule: { kind: 'interval', minutes: 360 } })
+    expect(r.schedule).toEqual({ kind: 'interval', minutes: 360 })
+    expect(Date.parse(r.next_run_at!)).toBeGreaterThanOrEqual(before - 1000)
+    await new Promise((res) => setTimeout(res, 5))
+    expect((await tick('session-A')).claimed.map((c) => [c.goal_id, c.trigger])).toEqual([[id, 'interval']])
+    expect(Date.parse(getGoal(id)!.next_run_at!)).toBeGreaterThan(Date.now() + 359 * 60_000)
+  })
+
+  it('cron sets the next match; null clears it; a cron that never matches is refused', async () => {
+    const id = makeGoal()
+    const r = await set_schedule({ goal_id: id, schedule: { kind: 'cron', expr: '0 9 * * *' } })
+    expect(new Date(r.next_run_at!).getHours()).toBe(9)
+    expect(await set_schedule({ goal_id: id, schedule: null })).toMatchObject({ schedule: null, next_run_at: null })
+    await expect(set_schedule({ goal_id: id, schedule: { kind: 'cron', expr: '0 9 31 2 *' } })).rejects.toThrow()
+    await expect(set_schedule({ goal_id: id, schedule: { kind: 'interval', minutes: 2 } })).rejects.toThrow()
   })
 })

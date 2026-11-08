@@ -36,6 +36,7 @@ type FakeGoal = {
   objective: string
   status: string
   next_run_at: string | null
+  schedule: { kind: 'interval'; minutes: number; active_hours?: string } | { kind: 'cron'; expr: string } | null
   open_run: { id: string; status: string } | null
   activity: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
   runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null }[]
@@ -51,6 +52,7 @@ export function goal(over: Partial<FakeGoal> & { id: string; name: string }): Fa
     objective: `${over.name} objective`,
     status: 'active',
     next_run_at: '2026-11-07T09:00:00Z',
+    schedule: { kind: 'interval', minutes: 60 },
     open_run: null,
     activity: { state: 'idle', text: 'Waiting for its first run', at: null },
     runs: [],
@@ -71,7 +73,7 @@ export type Call = { tool: string; input: Record<string, unknown> }
 
 const TOOLS = [
   'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'create_goal',
-  'goals_tick', 'attach_agent', 'fail_run', 'guard_check',
+  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule',
 ] as const
 
 /**
@@ -146,6 +148,12 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
             version++
           }
           return ok({ run_id: input.run_id, changed: Boolean(run) }) as never
+        }
+        case 'set_schedule': {
+          g!.schedule = (input.schedule ?? null) as FakeGoal['schedule']
+          g!.next_run_at = g!.schedule ? (g!.schedule.kind === 'interval' ? new Date(NOW).toISOString() : '2026-11-08T09:00:00Z') : null
+          version++
+          return ok({ goal_id: g!.id, schedule: g!.schedule, next_run_at: g!.next_run_at }) as never
         }
         case 'guard_check':
           return ok(input.tool_name === 'mcp__gmail__delete'

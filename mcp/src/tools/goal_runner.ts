@@ -7,10 +7,11 @@
 import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
   getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory,
+  setSchedule, getSchedule, nextScheduledRun,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
-  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema,
+  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema,
 } from '../schema.js'
 import { existsSync } from 'fs'
 import { nanoid } from 'nanoid'
@@ -122,4 +123,20 @@ export async function delete_memory(args: unknown) {
   deleteMemory(m.id)
   record(input.goal_id, input.goal_id, 'memory_deleted', { memory_id: m.id, text: m.text }, human)
   return { deleted: m.id }
+}
+
+/**
+ * Replaces a goal's schedule (null: on demand only). As the web app does, a
+ * new schedule makes the next run due: now for an interval, the next match for cron.
+ */
+export async function set_schedule(args: unknown) {
+  const input = SetScheduleSchema.parse(args)
+  if (!getGoal(input.goal_id)) throw new Error(`Goal ${input.goal_id} not found.`)
+  setSchedule(input.goal_id, input.schedule) // throws on a cron expression that never matches
+  const schedule = getSchedule(input.goal_id)
+  const next_run_at = !schedule ? null : schedule.kind === 'interval' ? new Date().toISOString() : nextScheduledRun(input.goal_id)
+  updateGoal(input.goal_id, { next_run_at })
+  record(input.goal_id, input.goal_id, 'goal_updated', { schedule }, human)
+  touchPlan(input.goal_id)
+  return { goal_id: input.goal_id, schedule, next_run_at }
 }

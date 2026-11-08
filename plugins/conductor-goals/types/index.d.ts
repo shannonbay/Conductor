@@ -22,6 +22,9 @@ export type Activity = {
   at: string | null
 }
 
+/** When a goal runs on its own: every N minutes (optionally inside a daily window) or on a cron expression. */
+export type Schedule = { kind: 'interval'; minutes: number; active_hours?: string } | { kind: 'cron'; expr: string }
+
 /** One goal as the pane shows it. */
 export type GoalCard = {
   id: string
@@ -39,6 +42,8 @@ export type GoalCard = {
   /** Most recent first. */
   runs: Run[]
   nextRunAt: string | null
+  /** null: runs only on demand. */
+  schedule: Schedule | null
   health: { passed: boolean; value: number | null } | null
   /** Health values, oldest first. */
   trend: number[]

@@ -69,6 +69,9 @@ export const guardToolCallForRun = (runId: string, tool: string) => core.guardTo
 export const updateGoal = (planId: string, fields: Parameters<typeof core.updateGoal>[2]) => core.updateGoal(db, planId, fields)
 
 export const deleteMemory = (id: string) => core.deleteMemory(db, id)
+export const setSchedule = (planId: string, schedule: core.Schedule | null) => core.setSchedule(db, planId, schedule)
+export const getSchedule = (planId: string) => core.getSchedule(db, planId)
+export const nextScheduledRun = (planId: string) => core.nextScheduledRun(db, planId)
 
 export const clearAllData = () => core.clearAllData(db)
 

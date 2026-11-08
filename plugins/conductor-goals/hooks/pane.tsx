@@ -11,7 +11,7 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 import type { Confirm, GoalCard } from '../types'
 import { approve, baseUrl, deleteMemory, reject, runNow, setGoalStatus } from './api'
 import { cancelRun } from './runner'
-import { ago, clip, isFailed, lastRun, spark } from './model'
+import { ago, clip, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
 import { getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, setConfirm, setRejecting, toggleExpanded } from './state'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
@@ -105,7 +105,7 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
       {activityLine($, e, view, g)}
       <Text dimColor>
         {run ? <Text color={isFailed(run.status) ? 'red' : undefined}>last run {run.status} {ago(run.endedAt ?? run.startedAt, view.now)}</Text> : 'no runs yet'}
-        {g.status === 'active' && g.nextRunAt && !g.openRun ? ` · next ${ago(g.nextRunAt, view.now)}` : ''}
+        {nextRunText(g, view.now)}
         {g.openItemCount > 0 ? ` · ${g.openItemCount} open` : ''}
       </Text>
       {g.health && (
@@ -240,6 +240,7 @@ function details($: $, e: E, view: View, g: GoalCard) {
   return (
     <Box key={`details-${g.id}`} flexDirection="column" marginTop={1}>
       <Text dimColor>{g.objective}</Text>
+      <Text dimColor>Runs {scheduleLabel(g.schedule)}{g.schedule ? '' : ' (set one with /goal-schedule)'}</Text>
 
       <Text bold>Open items</Text>
       {g.openItems.length === 0 && <Text dimColor>  none</Text>}

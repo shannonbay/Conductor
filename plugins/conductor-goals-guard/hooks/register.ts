@@ -39,6 +39,7 @@ const HUMAN_ONLY = new Set([
   'mcp__conductor__guard_check',
   'mcp__conductor__create_goal',
   'mcp__conductor__delete_memory',
+  'mcp__conductor__set_schedule',
 ])
 const HUMAN_ONLY_REASON = "This Conductor action is the person's: they take it from the Goals pane (/goals)."
 

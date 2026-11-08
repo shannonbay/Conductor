@@ -52,6 +52,8 @@ test("the person's Conductor actions are refused to a run, to other agents and t
   for (const agentId of ['run-agent', 'model-agent', undefined]) {
     const r = await $.tool.call(call({ tool: 'mcp__conductor__decide_item', goal_id: 'g1', item_id: '1', decision: 'approve', ...(agentId && { agentId }) }))
     expect(said(r)).toContain('Goals pane')
+    const s = await $.tool.call(call({ tool: 'mcp__conductor__set_schedule', goal_id: 'g1', schedule: null, ...(agentId && { agentId }) }))
+    expect(said(s)).toContain('Goals pane')
   }
 })
 

@@ -158,6 +158,19 @@ export const CreateGoalSchema = z.object({
   interval_minutes: z.number().int().min(5).optional().describe('Run every N minutes; left out, the goal runs on demand'),
 })
 
+export const SetScheduleSchema = z.object({
+  goal_id: z.string(),
+  schedule: z.union([
+    z.object({
+      kind: z.literal('interval'),
+      minutes: z.number().int().min(5).describe('Run every N minutes (at least 5)'),
+      active_hours: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/).optional().describe('Only run inside this local-time window, e.g. "08:00-20:00"'),
+    }),
+    z.object({ kind: z.literal('cron'), expr: z.string().min(1).describe('5-field cron, local time') }),
+    z.null(),
+  ]).describe('null makes the goal run only on demand'),
+})
+
 export const DeleteMemorySchema = z.object({
   goal_id: z.string(),
   memory_id: z.string(),

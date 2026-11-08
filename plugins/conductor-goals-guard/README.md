@@ -8,7 +8,7 @@ For every subagent that conductor-goals started for a goal run:
 
 - **Run tagging.** Each Conductor call the run makes carries its run (`run_scope`), so it acts on that run's goal and never switches the open plan of your own conversation.
 - **The goal's autonomy.** Tools the goal maps to an action category (its `tool_map`) go through the goal's guard. An `off` category is refused, a `propose` category is refused until you approve a proposal for it (one call per approved item), and an `auto` category is allowed. Tools outside the map follow your session's own permission rules.
-- **Your actions stay yours.** A run can't approve, reject, cancel, pause, create goals or delete memory, can't queue more runs, and can't start other agents.
+- **Your actions stay yours.** A run can't approve, reject, cancel, pause, change a goal's schedule, create goals or delete memory, can't queue more runs, and can't start other agents.
 - **Reports stay out of your chat.** A run's report is its `end_run` summary, shown in the Goals pane. The run's final message isn't handed back into your conversation.
 
 It also refuses those person-only Conductor actions to Claude in your conversation and to other agents. conductor-goals itself takes them when you press the pane's buttons.

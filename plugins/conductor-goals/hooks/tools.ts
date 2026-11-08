@@ -6,8 +6,8 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
-import { approve, createGoal, reject, runNow, setGoalStatus } from './api'
-import { describe, findGoal, noMatch, summarize } from './model'
+import { approve, createGoal, reject, runNow, setGoalStatus, setSchedule } from './api'
+import { ago, describe, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, summarize } from './model'
 import { act, refresh } from './sync'
 
 type $ = EngineInterface
@@ -40,6 +40,15 @@ export const TOOLS = [
     name: 'run_goal',
     description: 'Queues a run of a Conductor goal now. The person is asked to confirm first.',
     inputSchema: { type: 'object', properties: { goal: GOAL }, required: ['goal'] },
+  },
+  {
+    name: 'set_schedule',
+    description: 'Sets when a Conductor goal runs on its own, or "off" for on demand only. The person is asked to confirm first.',
+    inputSchema: {
+      type: 'object',
+      properties: { goal: GOAL, schedule: { type: 'string', description: `One of: ${SCHEDULE_USAGE}` } },
+      required: ['goal', 'schedule'],
+    },
   },
 ] as const
 
@@ -90,6 +99,14 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
 
   if (name === 'goal_detail') return { text: describe(goal, now), isError: false }
 
+  if (name === 'set_schedule') {
+    const parsed = parseSchedule(String(input.schedule ?? ''))
+    if ('error' in parsed) return fail(parsed.error)
+    const label = scheduleLabel(parsed.schedule)
+    if (!(await confirmWith($, `Run the goal "${goal.name}" ${label}?`, 'Set schedule'))) return fail('The person declined; the schedule is unchanged.')
+    return { text: await applySchedule($, goal, parsed.schedule), isError: false }
+  }
+
   if (name === 'run_goal') {
     if (goal.openRun) return fail(`${goal.name} already has a run ${goal.openRun.status}.`)
     if (!(await confirmWith($, `Start a run of the goal "${goal.name}" now?`, 'Run it'))) return fail('The person declined; nothing was started.')
@@ -127,6 +144,7 @@ export const COMMANDS = [
   { name: 'goal-new', description: 'Create a Conductor goal in this directory', argumentHint: '<name>: <objective>' },
   { name: 'goal-pause', description: 'Pause a Conductor goal', argumentHint: '<goal>' },
   { name: 'goal-resume', description: 'Resume a paused Conductor goal', argumentHint: '<goal>' },
+  { name: 'goal-schedule', description: 'Set when a Conductor goal runs on its own', argumentHint: '<goal> every 6h | cron ... | off' },
 ] as const
 
 export async function registerCommands($: $): Promise<void> {
@@ -167,4 +185,28 @@ export async function newGoal($: $, args: string): Promise<string> {
   }
   await refresh($)
   return `Created the goal "${name}" in ${cwd}. It runs on demand until you give it a schedule on its goal page.`
+}
+
+/** Sets the schedule through the pane's action wrapper and says what happens next. */
+async function applySchedule($: $, goal: GoalCard, schedule: Parameters<typeof setSchedule>[2]): Promise<string> {
+  let next: string | null = null
+  const done = await act($, `schedule:${goal.id}`, 'set the schedule', async () => {
+    next = (await setSchedule($, goal.id, schedule)).next_run_at
+  })
+  if (!done) return "That didn't work; see the Goals pane."
+  if (!schedule) return `${goal.name} now runs only on demand (/goal-run).`
+  const now = await $.clock.now()
+  const when = !next || Date.parse(next) <= now + 60_000 ? 'the next run starts within a minute' : `next run ${ago(next, now)}`
+  return `${goal.name} runs ${scheduleLabel(schedule)}; ${when}.`
+}
+
+/** /goal-schedule <goal> <every …|cron …|off>: the person typed it, so no confirm. */
+export async function scheduleCommand($: $, args: string): Promise<string> {
+  const m = /^(.*?)\s+((?:every|cron)\s.*|off|manual|none)$/i.exec(args.trim())
+  if (!m || !m[1]!.trim()) return `Usage: /goal-schedule <goal> ${SCHEDULE_USAGE}. E.g. /goal-schedule inbox every 6h`
+  const parsed = parseSchedule(m[2]!)
+  if ('error' in parsed) return parsed.error
+  const found = await resolveGoal($, m[1]!.trim())
+  if ('error' in found) return found.error
+  return applySchedule($, found.goal, parsed.schedule)
 }

@@ -160,3 +160,18 @@ test('with no goals the pane says how to create one', async ($, on) => {
   expect(await ui.find({ type: 'Text', text: /\/goal-new/ })).toBeDefined()
   await ui.unmount()
 })
+
+test('each goal says how long until its next automatic run, or that it has no schedule', async ($, on) => {
+  engine(on)
+  fakeConductor(on, [
+    goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' }),
+    goal({ id: 'g2', name: 'Invoices', next_run_at: null, schedule: null }),
+  ])
+  await $.session.start(START)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: /no runs yet · next in 25m/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /no runs yet · no schedule \(\/goal-schedule\)/ })).toBeDefined()
+    await ui.unmount()
+  }
+})

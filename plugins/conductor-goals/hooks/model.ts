@@ -2,7 +2,7 @@
  * Pure functions: the web app's overview turned into cards, goal-name
  * matching, alert diffing and the small formatters the pane uses.
  */
-import type { GoalCard, Item, Snapshot } from '../types'
+import type { GoalCard, Item, Schedule, Snapshot } from '../types'
 
 /** One goal as GET /api/goals/overview returns it (the fields used here). */
 export type OverviewGoal = {
@@ -11,6 +11,7 @@ export type OverviewGoal = {
   objective: string
   status: string
   next_run_at: string | null
+  schedule?: Schedule | null
   open_run: { id: string; status: string } | null
   activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
   runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null }[]
@@ -45,6 +46,7 @@ export function toCard(g: OverviewGoal): GoalCard {
     openRun: g.open_run ? { id: g.open_run.id, status: g.open_run.status } : null,
     runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at })),
     nextRunAt: g.next_run_at,
+    schedule: g.schedule ?? null,
     health: latest ? { passed: latest.passed, value: latest.value } : null,
     trend: g.health.map((h) => h.value).filter((v): v is number => v !== null).reverse(),
     memory: g.memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, pinned: m.pinned })),
@@ -184,4 +186,52 @@ export function ago(iso: string | null, now: number): string {
   if (s < 3600) return `${Math.floor(s / 60)}m ago`
   if (s < 86400) return `${Math.floor(s / 3600)}h ago`
   return `${Math.floor(s / 86400)}d ago`
+}
+
+// ── Schedules ─────────────────────────────────────────────────────────────────
+
+export const SCHEDULE_USAGE = 'every 30m | every 6h | every 1d [between 08:00-20:00] | cron <5 fields> | off'
+
+const UNIT_MINUTES: Record<string, number> = { m: 1, min: 1, mins: 1, minute: 1, minutes: 1, h: 60, hr: 60, hrs: 60, hour: 60, hours: 60, d: 1440, day: 1440, days: 1440 }
+
+/** "every 6h", "every 30m between 08:00-20:00", "cron 0 9 * * 1-5" or "off": a schedule, null (on demand), or why not. */
+export function parseSchedule(text: string): { schedule: Schedule | null } | { error: string } {
+  const t = text.trim().toLowerCase().replace(/\s+/g, ' ')
+  if (t === 'off' || t === 'manual' || t === 'none') return { schedule: null }
+  if (t.startsWith('cron ')) {
+    const expr = text.trim().replace(/^cron\s+/i, '').trim()
+    return expr.split(/\s+/).length === 5
+      ? { schedule: { kind: 'cron', expr } }
+      : { error: 'A cron expression has 5 fields (minute hour day month weekday), e.g. "cron 0 9 * * 1-5".' }
+  }
+  const m = /^every (\d+) ?([a-z]+)(?: between (\d{1,2}):(\d{2}) ?- ?(\d{1,2}):(\d{2}))?$/.exec(t)
+  if (!m) return { error: `Say when it runs: ${SCHEDULE_USAGE}.` }
+  const unit = UNIT_MINUTES[m[2]!]
+  if (!unit) return { error: 'Use m, h or d for the interval, e.g. "every 6h".' }
+  const minutes = Number(m[1]) * unit
+  if (minutes < 5) return { error: 'Goals run at most every 5 minutes.' }
+  const schedule: Schedule = { kind: 'interval', minutes }
+  if (m[3] !== undefined) {
+    const hours = [Number(m[3]), Number(m[5])]
+    const mins = [Number(m[4]), Number(m[6])]
+    if (hours.some((h) => h > 23) || mins.some((x) => x > 59)) return { error: 'Use 24-hour times, e.g. "between 08:00-20:00".' }
+    const pad = (n: number) => String(n).padStart(2, '0')
+    schedule.active_hours = `${pad(hours[0]!)}:${pad(mins[0]!)}-${pad(hours[1]!)}:${pad(mins[1]!)}`
+  }
+  return { schedule }
+}
+
+/** "every 6h", "every 30m, 08:00–20:00", "cron 0 9 * * 1-5", or "on demand". */
+export function scheduleLabel(s: Schedule | null): string {
+  if (!s) return 'on demand'
+  if (s.kind === 'cron') return `cron ${s.expr}`
+  const every = s.minutes % 1440 === 0 ? `${s.minutes / 1440}d` : s.minutes % 60 === 0 ? `${s.minutes / 60}h` : `${s.minutes}m`
+  return `every ${every}${s.active_hours ? `, ${s.active_hours.replace('-', '–')}` : ''}`
+}
+
+/** " · next in 25m", " · next run due now", " · no schedule (/goal-schedule)", or "" while running or paused. */
+export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt' | 'schedule'>, now: number): string {
+  if (g.status !== 'active' || g.openRun) return ''
+  if (g.nextRunAt) return Date.parse(g.nextRunAt) <= now ? ' · next run due now' : ` · next ${ago(g.nextRunAt, now)}`
+  return g.schedule === null ? ' · no schedule (/goal-schedule)' : ''
 }

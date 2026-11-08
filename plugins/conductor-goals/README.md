@@ -33,6 +33,9 @@ Open it with `/goals`. It opens on its own at start-up when something is waiting
 ▸ Inbox active · run running
 ● Drafting a reply to Alice · 1m ago
 last run completed 12m ago · 3 open
+▸ Invoices active
+Last run: filed 2 invoices
+last run completed 48m ago · next in 12m
 failing 18 ▁▃▅█
 ● Reply to Alice about Thursday
   email.send: Send: Thursday 2pm works.
@@ -43,9 +46,10 @@ Updated just now  Refresh
 ```
 
 - Under each goal's name is one line saying what its agent is doing. While a run is going, that's the agent's latest step: a progress update, an item it added or finished, or a note it saved. Otherwise it says the run is queued, the goal is paused, what the next run will carry out, or the last run's summary. Claude's `goals_status` tool reports the same line.
+- Below that: the last run and when the next automatic one is due (`· next in 12m`), or `· no schedule (/goal-schedule)` for a goal that runs only on demand.
 - **Approve** or **Reject…** each proposal. Rejecting asks what should change, and your answer is saved to the goal's memory.
 - **Run now**, **Cancel run** (asks you to confirm), **Pause** and **Resume**.
-- **▸ name** expands a goal to show its objective, open items, last five runs with summaries, and memory. Each memory entry can be deleted (asks you to confirm).
+- **▸ name** expands a goal to show its objective, its schedule, open items, last five runs with summaries, and memory. Each memory entry can be deleted (asks you to confirm).
 - When you have approved a category every time lately, a hint suggests switching it to auto on the goal page.
 - **Open in browser** opens the goal page.
 
@@ -59,6 +63,7 @@ Hotkeys while the pane has focus: `a`/`r` approve or reject the first proposal, 
 | `/goal-new <name>: <objective>` | Create a goal that works in the current directory |
 | `/goal-run <goal>` | Queue a run now |
 | `/goal-pause <goal>`, `/goal-resume <goal>` | Pause or resume a goal |
+| `/goal-schedule <goal> <when>` | Set when it runs on its own: `every 30m`, `every 6h`, `every 1d`, optionally `between 08:00-20:00`; `cron 0 9 * * 1-5`; or `off` for on demand only. An interval's first run starts within a minute. |
 
 Goal names match by exact name, then prefix, then any part of the name. If more than one goal matches, the command lists them.
 
@@ -70,6 +75,7 @@ Goal names match by exact name, then prefix, then any part of the name. If more 
 | `goal_detail` | One goal's open items, recent runs and memory. Read-only. |
 | `approve_item`, `reject_item` | Approve or reject a proposal. **Asks you first.** |
 | `run_goal` | Queue a run. **Asks you first.** |
+| `set_schedule` | Set or clear a goal's schedule (same forms as `/goal-schedule`). **Asks you first.** |
 
 Ask things like "what do my goals need?" or "approve the Alice reply".
 
