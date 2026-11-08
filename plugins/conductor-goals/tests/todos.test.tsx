@@ -14,25 +14,49 @@ const roadmap = () => ({
 
 const typed = (command: string, args: string) => ({ command, args, origin: { kind: 'person' } }) as never
 
-test('the pane shows each list collapsed, then its open to-dos with tick and Do it', async ($, on) => {
+test('the pane shows each list collapsed, then its open to-dos with a tick and their ids', async ($, on) => {
   engine(on)
   fakeConductor(on, [], { todos: [roadmap()] })
   await $.session.start(START)
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ key: 'todo-toggle-p1' }))?.props.label).toBe('▸ Goals roadmap (2 to do)')
-    expect(await ui.find({ key: 'todo-tick-p1/1.1' })).toBeUndefined()
+    expect(await ui.find({ key: 'todo-open-p1/1.1' })).toBeUndefined()
     await ui.press({ key: 'todo-toggle-p1' })
-    expect((await ui.find({ key: 'todo-tick-p1/1.1' }))?.props.label).toContain('☐ 1.1 Approvals away from the terminal')
-    expect(await ui.find({ key: 'todo-tick-p1/1.2' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /1 done/ })).toBeDefined()
+    expect((await ui.find({ key: 'todo-open-p1/1.1' }))?.props.label).toBe('1.1 Approvals away from the terminal')
+    expect((await ui.find({ key: 'todo-tick-p1/1.1' }))?.props.label).toBe('☐')
+    expect(await ui.find({ key: 'todo-open-p1/1.2' })).toBeUndefined()
+    expect((await ui.find({ key: 'todo-done-toggle-p1' }))?.props.label).toBe('  ▸ 1 done')
     await ui.press({ key: 'todo-toggle-p1' })
     await ui.unmount()
   }
 })
 
-test('ticking, adding and Do it from the pane', async ($, on) => {
-  const { spawned, clock } = engine(on)
+test('pressing a to-do expands it; Plan and Start send it to this conversation', async ($, on) => {
+  const { prompts } = engine(on)
+  const fake = fakeConductor(on, [], { todos: [roadmap()] })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo-toggle-p1' })
+  await ui.press({ key: 'todo-open-p1/1.3' })
+  expect(await ui.find({ type: 'Text', text: /Set autonomy from Claude Code$/ })).toBeDefined()
+  expect(fake.of('todo_set')).toEqual([]) // pressing the text changes nothing
+
+  await ui.press({ key: 'todo-plan-p1/1.3' })
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('From my to-do list "Goals roadmap", item 1.3:\n\nSet autonomy from Claude Code')
+  expect(prompts[0]).toContain('Enter plan mode and plan this')
+  expect(prompts[0]).toContain('complete_todo (item 1.3, list "Goals roadmap")')
+  expect(fake.of('todo_set').at(-1)?.input).toEqual({ list_id: 'p1', item_id: '1.3', status: 'active', notes: 'Planning it in the conversation' })
+  expect(fake.of('create_goal')).toEqual([]) // no background run
+
+  await ui.press({ key: 'todo-start-p1/1.3' })
+  expect(prompts[1]).toContain("Let's work on this now")
+  await ui.unmount()
+})
+
+test('ticking says how to undo; done to-dos can be put back; adding works', async ($, on) => {
+  const { toasts } = engine(on)
   const fake = fakeConductor(on, [], { todos: [roadmap()] })
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -40,18 +64,18 @@ test('ticking, adding and Do it from the pane', async ($, on) => {
 
   await ui.press({ key: 'todo-tick-p1/1.1' })
   expect(fake.of('todo_set').at(-1)?.input).toEqual({ list_id: 'p1', item_id: '1.1', status: 'completed' })
-  expect(await ui.find({ key: 'todo-tick-p1/1.1' })).toBeUndefined()
+  expect(toasts.at(-1)).toBe('Ticked off 1.1. To undo, open "done" under Goals roadmap and press it.')
+  expect(await ui.find({ key: 'todo-open-p1/1.1' })).toBeUndefined()
+
+  await ui.press({ key: 'todo-done-toggle-p1' })
+  expect((await ui.find({ key: 'todo-untick-p1/1.1' }))?.props.label).toContain('☑ 1.1 Approvals away from the terminal')
+  await ui.press({ key: 'todo-untick-p1/1.1' })
+  expect(fake.of('todo_set').at(-1)?.input).toEqual({ list_id: 'p1', item_id: '1.1', status: 'pending' })
+  expect(await ui.find({ key: 'todo-open-p1/1.1' })).toBeDefined()
 
   await ui.input({ key: 'todo-add-p1', text: 'Goal templates' })
   expect(fake.of('todo_add').at(-1)?.input).toEqual({ working_dir: '/work/project', text: 'Goal templates', added_by: 'human', list_id: 'p1' })
-  expect(await ui.find({ key: 'todo-tick-p1/4' })).toBeDefined()
-
-  await ui.press({ key: 'todo-do-p1/1.3' })
-  await clock.settle()
-  expect(fake.of('create_goal').at(-1)?.input).toMatchObject({ name: 'Set autonomy from Claude Code', one_off: true, working_dir: '/work/project' })
-  expect(fake.of('todo_set').at(-1)?.input).toMatchObject({ list_id: 'p1', item_id: '1.3', status: 'active' })
-  expect(spawned.map((x) => x.prompt)).toEqual(['Run Set autonomy from Claude Code'])
-  expect((await ui.find({ key: 'todo-tick-p1/1.3' }))?.props.label).toContain('◐ 1.3 ')
+  expect(await ui.find({ key: 'todo-open-p1/4' })).toBeDefined()
   await ui.unmount()
 })
 

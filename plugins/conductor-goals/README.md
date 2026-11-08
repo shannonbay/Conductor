@@ -75,7 +75,9 @@ Goal names match by exact name, then prefix, then any part of the name. If more 
 Long conversations produce ideas and decisions to come back to, and a context compaction forgets them. The to-do list keeps them outside the conversation, for you:
 
 - `/todo <text>` adds to this project's **To do** list (made the first time). Or ask Claude: "add that to the list". Claude only adds when asked, or offers when an idea is clearly being put off.
-- In the pane, open a list to see its open to-dos. Press one to tick it off (it goes to the done count), add with the box below, or press **Do it** to hand it to a one-off goal that runs now in the background. The to-do shows ◐ until you tick it.
+- In the pane, open a list to see its open to-dos, each with its id (`☐ 1.3 Set autonomy…`). Press ☐ to tick one off; a toast says how to undo. **n done** shows the ticked ones, and pressing one puts it back.
+- Press a to-do's text to expand it: the full text, any notes, and **Plan** / **Start**. Both bring it into this conversation, where Claude can ask you things: **Plan** asks Claude to plan it in plan mode for you to review, **Start** to begin. The to-do shows ◐ until it's ticked off (Claude ticks it with `complete_todo` when it's done). To-dos don't run in the background; goals do.
+- Add a to-do with the box under a list.
 - After a compaction, say "check my list": Claude reads it with the `todos` tool. Nothing is added to the conversation otherwise: no hooks, no reminders.
 
 A list is any active Conductor plan in the project's directory, and its to-dos are the plan's tasks, so a plan made earlier (like a roadmap) shows up as a list. A plan with one top task over several (`1` over `1.1`, `1.2`, ...) shows the inner ones. Archive a plan to remove its list.

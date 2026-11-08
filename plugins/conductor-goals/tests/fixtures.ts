@@ -241,6 +241,12 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean; sugge
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'session-1' }))
+  // Prompts the plugin sends into the conversation
+  const prompts: string[] = []
+  on('prompt.submit', (_, e) => {
+    prompts.push(e.text)
+    return { text: e.text }
+  })
   // The small model that suggests schedules: a JSON answer, or (null) unavailable
   const suggestion = opts.suggestion === undefined ? '{"choice": "daily", "reason": "it is ongoing upkeep"}' : opts.suggestion
   const usage = { input_tokens: 10, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
@@ -271,7 +277,7 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean; sugge
     return { result: { message: `stopped ${id}` } } as never
   })
   return {
-    toasts, notifications, statuses, asked, clock, agents, spawned, stopped,
+    toasts, notifications, statuses, asked, clock, agents, spawned, stopped, prompts,
     /** Loads or unloads the guard plugin (its status tool). */
     setGuarded: (on: boolean) => {
       tools = on ? [GUARD] : []

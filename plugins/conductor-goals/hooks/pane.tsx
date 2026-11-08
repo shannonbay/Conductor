@@ -8,13 +8,13 @@
  */
 import type { EngineInterface, RenderInput } from 'claude-code'
 
-import type { Confirm, GoalCard, Todos } from '../types'
+import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
 import { approve, baseUrl, deleteMemory, reject, runNow, setGoalStatus } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule } from './schedule'
 import { ago, clip, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
 import { getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setConfirm, setRejecting, toggleExpanded } from './state'
-import { addFromPane, doTodoFromPane, toggleTodo } from './todos'
+import { addFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
 
@@ -340,7 +340,12 @@ function doneSection($: $, e: E, view: View, done: GoalCard[]) {
   )
 }
 
-/** The person's to-do lists, each collapsed to its name and open count. */
+/**
+ * The person's to-do lists, each collapsed to its name and open count. Open,
+ * a list shows its to-dos: ☐ ticks one off, pressing the text expands it (the
+ * full text, Plan and Start), and "n done" shows the ticked ones, each of
+ * which goes back on the list when pressed.
+ */
 function todoSection($: $, e: E, view: View, todos: Todos) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   return (
@@ -348,25 +353,57 @@ function todoSection($: $, e: E, view: View, todos: Todos) {
       {todos.lists.map((list) => {
         const key = `todo:${list.id}`
         const isOpen = view.shown.includes(key)
-        const open = list.items.filter((i) => i.status !== 'completed' && i.status !== 'abandoned')
+        const doneKey = `todo-done:${list.id}`
+        const showDone = view.shown.includes(doneKey)
+        const isDone = (i: TodoItem) => i.status === 'completed' || i.status === 'abandoned'
+        const open = list.items.filter((i) => !isDone(i))
+        const done = list.items.filter(isDone)
         return (
           <Box key={key} flexDirection="column">
             <Button key={`todo-toggle-${list.id}`} plain label={`${isOpen ? '▾' : '▸'} ${list.name} (${list.open} to do)`} onPress={() => void toggleExpanded($, key)} />
-            {isOpen && open.map((item) => (
-              <Box key={`todo-${list.id}/${item.id}`}>
-                <Text>{'  '.repeat(item.depth + 1)}</Text>
-                <Button
-                  key={`todo-tick-${list.id}/${item.id}`}
-                  plain
-                  label={`${item.status === 'active' ? '◐' : '☐'} ${item.id} ${clip(item.text, Math.max(view.columns - 15 - item.id.length - item.depth * 2, 10))}`}
-                  onPress={() => void toggleTodo($, list, item)}
-                />
-                {item.status !== 'active' && (
-                  <Button key={`todo-do-${list.id}/${item.id}`} plain label={view.doing === `todo-do:${list.id}/${item.id}` ? ' Starting…' : ' Do it'} onPress={() => void doTodoFromPane($, todos.dir, list, item)} />
-                )}
-              </Box>
+            {isOpen && open.map((item) => {
+              const itemKey = `todo-item:${list.id}/${item.id}`
+              const expanded = view.shown.includes(itemKey)
+              const indent = '  '.repeat(item.depth + 1)
+              return (
+                <Box key={`todo-${list.id}/${item.id}`} flexDirection="column">
+                  <Box>
+                    <Text>{indent}</Text>
+                    <Button key={`todo-tick-${list.id}/${item.id}`} plain label={item.status === 'active' ? '◐' : '☐'} onPress={() => void toggleTodo($, list, item)} />
+                    <Text> </Text>
+                    <Button
+                      key={`todo-open-${list.id}/${item.id}`}
+                      plain
+                      label={`${item.id} ${expanded ? '▾' : clip(item.text, Math.max(view.columns - 8 - item.id.length - item.depth * 2, 10))}`}
+                      onPress={() => void toggleExpanded($, itemKey)}
+                    />
+                  </Box>
+                  {expanded && (
+                    <Box flexDirection="column">
+                      <Text>{indent}    {item.text}</Text>
+                      {item.notes && <Text dimColor>{indent}    {item.notes}</Text>}
+                      <Box>
+                        <Text>{indent}    </Text>
+                        <Button key={`todo-plan-${list.id}/${item.id}`} label={view.doing === `todo-plan:${list.id}/${item.id}` ? 'Sending…' : 'Plan'} onPress={() => void workFromPane($, list, item, 'plan')} />
+                        <Text> </Text>
+                        <Button key={`todo-start-${list.id}/${item.id}`} plain label={view.doing === `todo-start:${list.id}/${item.id}` ? 'Sending…' : 'Start'} onPress={() => void workFromPane($, list, item, 'start')} />
+                      </Box>
+                    </Box>
+                  )}
+                </Box>
+              )
+            })}
+            {isOpen && done.length > 0 && (
+              <Button key={`todo-done-toggle-${list.id}`} plain label={`  ${showDone ? '▾' : '▸'} ${done.length} done`} onPress={() => void toggleExpanded($, doneKey)} />
+            )}
+            {isOpen && showDone && done.map((item) => (
+              <Button
+                key={`todo-untick-${list.id}/${item.id}`}
+                plain
+                label={`    ☑ ${item.id} ${clip(item.text, Math.max(view.columns - 10 - item.id.length, 10))}`}
+                onPress={() => void toggleTodo($, list, item)}
+              />
             ))}
-            {isOpen && list.done > 0 && <Text dimColor>{'  '}{list.done} done</Text>}
             {isOpen && Input && (
               <Input key={`todo-add-${list.id}`} label="Add a to-do" submitLabel="Add" onSubmit={(text: string) => { if (text.trim()) void addFromPane($, todos.dir, list, text.trim()) }} />
             )}
