@@ -129,13 +129,12 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
       {controls($, e, view, g)}
       {isOpen && details($, e, view, g)}
       {g.suggestions.length > 0 && (
-        <Box>
+        // The link on a line of its own: beside long text that wraps, the row draws them apart
+        <Box flexDirection="column">
           <Text dimColor>
-            Approved every time lately: {g.suggestions.map((x) => x.category).join(', ')}. Consider switching to auto
+            Approved every time lately: {g.suggestions.map((x) => x.category).join(', ')}. Consider switching to auto: ask Claude, or
           </Text>
-          {/* A space of its own: a trailing space inside the text is trimmed when drawn */}
-          <Text> </Text>
-          <Link key={`autonomy-${g.id}`} href={`${view.base}/goals/${encodeURIComponent(g.id)}`} label="on the goal page" />
+          <Link key={`autonomy-${g.id}`} href={`${view.base}/goals/${encodeURIComponent(g.id)}`} label="open the goal page" />
         </Box>
       )}
     </Box>
