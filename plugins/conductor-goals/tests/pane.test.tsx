@@ -171,7 +171,43 @@ test('each goal says how long until its next automatic run, or that it has no sc
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /no runs yet · next in 25m/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /no runs yet · no schedule \(\/goal-schedule\)/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /no runs yet · no schedule/ })).toBeDefined()
+    expect(await ui.find({ key: 'schedule-g2' })).toBeDefined()
+    expect(await ui.find({ key: 'schedule-g1' })).toBeUndefined()
     await ui.unmount()
   }
+})
+
+test('Set schedule asks with the suggestion first and sets the choice', async ($, on) => {
+  const { asked } = engine(on, { answer: 'Weekly' })
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Status', objective: 'a weekly report', next_run_at: null, schedule: null })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'schedule-g1' })
+  expect(asked[0]).toContain('How often should "Status" run? Suggested: daily')
+  expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 10080 } }])
+  expect(await ui.find({ key: 'schedule-g1' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('done one-offs sit in a collapsed Done section with Run again', async ($, on) => {
+  engine(on)
+  const fake = fakeConductor(on, [
+    goal({ id: 'g1', name: 'Inbox' }),
+    goal({
+      id: 'g2', name: 'Tidy downloads', status: 'retired', one_off: true, next_run_at: null, schedule: null,
+      runs: [{ id: 'r9', status: 'completed', trigger: 'manual', summary: 'Deleted 12 installers', started_at: '2026-11-07T07:00:00Z', ended_at: '2026-11-07T07:02:00Z' }],
+    }),
+  ])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'toggle-g2' })).toBeUndefined()
+  expect((await ui.find({ key: 'done-toggle' }))?.props.label).toBe('▸ Done (1)')
+  expect(await ui.find({ type: 'Text', text: /Deleted 12 installers/ })).toBeUndefined()
+  await ui.press({ key: 'done-toggle' })
+  expect(await ui.find({ type: 'Text', text: /Deleted 12 installers/ })).toBeDefined()
+  await ui.press({ key: 'again-g2' })
+  expect(fake.of('run_goal').map((c) => c.input)).toEqual([{ goal_id: 'g2' }])
+  expect(await ui.find({ key: 'toggle-g2' })).toBeDefined()
+  await ui.unmount()
 })

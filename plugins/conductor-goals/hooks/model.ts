@@ -12,6 +12,7 @@ export type OverviewGoal = {
   status: string
   next_run_at: string | null
   schedule?: Schedule | null
+  one_off?: boolean
   open_run: { id: string; status: string } | null
   activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
   runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null }[]
@@ -47,6 +48,7 @@ export function toCard(g: OverviewGoal): GoalCard {
     runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at })),
     nextRunAt: g.next_run_at,
     schedule: g.schedule ?? null,
+    oneOff: g.one_off ?? false,
     health: latest ? { passed: latest.passed, value: latest.value } : null,
     trend: g.health.map((h) => h.value).filter((v): v is number => v !== null).reverse(),
     memory: g.memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, pinned: m.pinned })),
@@ -131,7 +133,7 @@ export function summarize(goals: GoalCard[], now: number): string {
   return goals.map((g) => {
     const run = lastRun(g)
     const lines = [
-      `## ${g.name} (id ${g.id}, ${g.status})`,
+      `## ${g.name} (id ${g.id}, ${g.status === 'retired' ? 'done' : g.status}${g.oneOff ? ', one-off' : ''})`,
       `Objective: ${g.objective}`,
       g.activity.text ? `Now: ${g.activity.text}` : null,
       g.openRun ? `Run ${g.openRun.status} now.` : `Last run: ${run ? `${run.status} ${ago(run.endedAt ?? run.startedAt, now)}${run.summary ? ` — ${run.summary}` : ''}` : 'none'}.`,
@@ -190,14 +192,15 @@ export function ago(iso: string | null, now: number): string {
 
 // ── Schedules ─────────────────────────────────────────────────────────────────
 
-export const SCHEDULE_USAGE = 'every 30m | every 6h | every 1d [between 08:00-20:00] | cron <5 fields> | off'
+export const SCHEDULE_USAGE = 'every 30m | every 6h | every 1d [between 08:00-20:00] | cron <5 fields> | one-off | off'
 
 const UNIT_MINUTES: Record<string, number> = { m: 1, min: 1, mins: 1, minute: 1, minutes: 1, h: 60, hr: 60, hrs: 60, hour: 60, hours: 60, d: 1440, day: 1440, days: 1440 }
 
 /** "every 6h", "every 30m between 08:00-20:00", "cron 0 9 * * 1-5" or "off": a schedule, null (on demand), or why not. */
-export function parseSchedule(text: string): { schedule: Schedule | null } | { error: string } {
+export function parseSchedule(text: string): { schedule: Schedule | null; oneOff?: boolean } | { error: string } {
   const t = text.trim().toLowerCase().replace(/\s+/g, ' ')
   if (t === 'off' || t === 'manual' || t === 'none') return { schedule: null }
+  if (t === 'one-off' || t === 'oneoff' || t === 'one off' || t === 'once') return { schedule: null, oneOff: true }
   if (t.startsWith('cron ')) {
     const expr = text.trim().replace(/^cron\s+/i, '').trim()
     return expr.split(/\s+/).length === 5
@@ -229,9 +232,83 @@ export function scheduleLabel(s: Schedule | null): string {
   return `every ${every}${s.active_hours ? `, ${s.active_hours.replace('-', '–')}` : ''}`
 }
 
-/** " · next in 25m", " · next run due now", " · no schedule (/goal-schedule)", or "" while running or paused. */
-export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt' | 'schedule'>, now: number): string {
+/** " · next in 25m", " · next run due now", " · one-off", " · no schedule", or "" while running or paused. */
+export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt' | 'schedule' | 'oneOff'>, now: number): string {
   if (g.status !== 'active' || g.openRun) return ''
+  if (g.oneOff) return ' · one-off'
   if (g.nextRunAt) return Date.parse(g.nextRunAt) <= now ? ' · next run due now' : ` · next ${ago(g.nextRunAt, now)}`
-  return g.schedule === null ? ' · no schedule (/goal-schedule)' : ''
+  return g.schedule === null ? ' · no schedule' : ''
+}
+
+// ── Choosing a schedule ───────────────────────────────────────────────────────
+
+export type ChoiceKey = 'hourly' | '6h' | 'daily' | 'weekly' | 'one-off' | 'on-demand' | 'custom'
+export type ScheduleChoice = { key: ChoiceKey; label: string; schedule: Schedule | null; oneOff: boolean }
+export type Suggestion = { choice: Exclude<ChoiceKey, 'on-demand'>; reason: string }
+
+/** The choices offered when a goal is created or given a schedule. */
+export const SCHEDULE_CHOICES: readonly ScheduleChoice[] = [
+  { key: 'hourly', label: 'Every hour', schedule: { kind: 'interval', minutes: 60 }, oneOff: false },
+  { key: '6h', label: 'Every 6 hours', schedule: { kind: 'interval', minutes: 360 }, oneOff: false },
+  { key: 'daily', label: 'Daily', schedule: { kind: 'interval', minutes: 1440 }, oneOff: false },
+  { key: 'weekly', label: 'Weekly', schedule: { kind: 'interval', minutes: 10080 }, oneOff: false },
+  { key: 'one-off', label: 'One-off: run once now', schedule: null, oneOff: true },
+  { key: 'on-demand', label: 'Only when I run it', schedule: null, oneOff: false },
+]
+
+const SUGGESTED = ' (suggested)'
+
+/** The alternatives offered after the suggestion, in this order (the question takes four options). */
+const ALTERNATIVES: ChoiceKey[] = ['daily', 'weekly', 'one-off', 'hourly', '6h']
+
+/** Four labels: the suggestion first and marked, then the most common alternatives. Anything else is typed. */
+export function choiceOptions(suggested: ChoiceKey): string[] {
+  const first = SCHEDULE_CHOICES.find((c) => c.key === suggested)!
+  const rest = ALTERNATIVES.filter((k) => k !== suggested).slice(0, 3).map((k) => SCHEDULE_CHOICES.find((c) => c.key === k)!.label)
+  return [first.label + SUGGESTED, ...rest]
+}
+
+/**
+ * The choice an answer names. A typed answer is read like /goal-schedule
+ * ("every 12h", "cron 0 9 * * 1-5", "off"). Null when dismissed or unreadable.
+ */
+export function choiceFromAnswer(answer: string | null): ScheduleChoice | null {
+  if (!answer) return null
+  const label = answer.endsWith(SUGGESTED) ? answer.slice(0, -SUGGESTED.length) : answer
+  const listed = SCHEDULE_CHOICES.find((c) => c.label === label)
+  if (listed) return listed
+  const typed = parseSchedule(answer)
+  if ('error' in typed) return null
+  const text = typed.oneOff ? 'one-off' : scheduleLabel(typed.schedule)
+  return { key: 'custom', label: text, schedule: typed.schedule, oneOff: typed.oneOff ?? false }
+}
+
+const KEYWORDS: [RegExp, Suggestion][] = [
+  [/\b(once|one[- ]?off|install|set ?up|setup|migrate|migration|upgrade|fix|bootstrap)\b/, { choice: 'one-off', reason: 'it reads like a single task' }],
+  [/\b(inbox|triage|alerts?|notifications?|on[- ]call|incidents?)\b/, { choice: 'hourly', reason: 'new things arrive all the time' }],
+  [/\b(weekly|reports?|digest|summary|summaries|review)\b/, { choice: 'weekly', reason: 'it sums up a period' }],
+  [/\b(monitor|watch|track|keep an eye)\w*/, { choice: '6h', reason: 'it watches for changes' }],
+  [/\b(maintain|keep|check|update|sync|backup|back up|clean|tidy|current)\w*/, { choice: 'daily', reason: 'it is ongoing upkeep' }],
+]
+
+/** The fallback suggestion: keyword rules, leaning towards a daily schedule. */
+export function suggestByKeywords(name: string, objective: string): Suggestion {
+  const text = `${name} ${objective}`.toLowerCase().replace(/[-_]/g, ' ')
+  for (const [re, suggestion] of KEYWORDS) if (re.test(text)) return suggestion
+  return { choice: 'daily', reason: 'goals are ongoing unless they are clearly one-offs' }
+}
+
+/** The small model's answer: {"choice": ..., "reason": ...}, possibly wrapped in prose or a code fence. */
+export function parseSuggestion(text: string): Suggestion | null {
+  const json = /\{[\s\S]*\}/.exec(text)?.[0]
+  if (!json) return null
+  try {
+    const v = JSON.parse(json) as { choice?: unknown; reason?: unknown }
+    const choice = SCHEDULE_CHOICES.find((c) => c.key === v.choice && c.key !== 'on-demand')
+    if (!choice) return null
+    const reason = typeof v.reason === 'string' && v.reason.trim() ? v.reason.trim().replace(/\.$/, '') : 'suggested from its objective'
+    return { choice: choice.key as Suggestion['choice'], reason }
+  } catch {
+    return null
+  }
 }

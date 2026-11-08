@@ -142,6 +142,8 @@ export interface Goal {
   /** Queue a run when the health check fails. */
   health_triggers_run: boolean
   last_health_at: string | null
+  /** Runs once: when a run ends with nothing open, the goal is done (status 'retired'). */
+  one_off: boolean
 }
 
 export type NewGoal = Pick<Goal, 'plan_id' | 'objective'> & Partial<Omit<Goal, 'plan_id' | 'objective' | 'limits'>> & { limits?: Partial<GoalLimits> }

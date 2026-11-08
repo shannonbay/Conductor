@@ -1,6 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
-import { ago, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, scheduleLabel, spark, statusText, toCard } from '../hooks/model'
+import {
+  ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
+  statusText, suggestByKeywords, toCard,
+} from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -66,10 +69,39 @@ test('scheduleLabel and nextRunText say when a goal runs next', async () => {
   expect(scheduleLabel({ kind: 'interval', minutes: 90, active_hours: '08:00-20:00' })).toBe('every 90m, 08:00–20:00')
   expect(scheduleLabel({ kind: 'cron', expr: '0 9 * * *' })).toBe('cron 0 9 * * *')
   expect(scheduleLabel(null)).toBe('on demand')
-  const g = { status: 'active', openRun: null, schedule: { kind: 'interval' as const, minutes: 60 } }
+  const g = { status: 'active', openRun: null, oneOff: false, schedule: { kind: 'interval' as const, minutes: 60 } }
   expect(nextRunText({ ...g, nextRunAt: new Date(NOW + 25 * 60_000).toISOString() }, NOW)).toBe(' · next in 25m')
   expect(nextRunText({ ...g, nextRunAt: new Date(NOW - 60_000).toISOString() }, NOW)).toBe(' · next run due now')
-  expect(nextRunText({ ...g, nextRunAt: null, schedule: null }, NOW)).toBe(' · no schedule (/goal-schedule)')
+  expect(nextRunText({ ...g, nextRunAt: null, schedule: null }, NOW)).toBe(' · no schedule')
+  expect(nextRunText({ ...g, nextRunAt: null, schedule: null, oneOff: true }, NOW)).toBe(' · one-off')
   expect(nextRunText({ ...g, status: 'paused', nextRunAt: null, schedule: null }, NOW)).toBe('')
   expect(nextRunText({ ...g, openRun: { id: 'r', status: 'running' }, nextRunAt: null }, NOW)).toBe('')
+})
+
+test('keyword suggestions lean towards a schedule, and spot one-offs', async () => {
+  expect(suggestByKeywords('maintain-github-profile', 'monitor my github for contributions').choice).toBe('6h')
+  expect(suggestByKeywords('Inbox', 'keep my inbox under 20 unread').choice).toBe('hourly')
+  expect(suggestByKeywords('Profile', 'maintain my profile README').choice).toBe('daily')
+  expect(suggestByKeywords('Status', 'weekly report of open PRs').choice).toBe('weekly')
+  expect(suggestByKeywords('Setup', 'install gh and sign in').choice).toBe('one-off')
+  expect(suggestByKeywords('Plants', 'water the plants').choice).toBe('daily')
+})
+
+test('the model suggestion is read from JSON, and anything else falls through', async () => {
+  expect(parseSuggestion('```json\n{"choice": "weekly", "reason": "It sums up a week."}\n```')).toEqual({ choice: 'weekly', reason: 'It sums up a week' })
+  expect(parseSuggestion('{"choice": "on-demand"}')).toBeNull()
+  expect(parseSuggestion('daily, I think')).toBeNull()
+  expect(parseSchedule('one-off')).toEqual({ schedule: null, oneOff: true })
+})
+
+test('choices put the suggestion first, and answers map back to choices', async () => {
+  const options = choiceOptions('weekly')
+  expect(options).toEqual(['Weekly (suggested)', 'Daily', 'One-off: run once now', 'Every hour'])
+  expect(choiceOptions('one-off')).toEqual(['One-off: run once now (suggested)', 'Daily', 'Weekly', 'Every hour'])
+  expect(choiceFromAnswer('Weekly (suggested)')).toMatchObject({ key: 'weekly', schedule: { kind: 'interval', minutes: 10080 } })
+  expect(choiceFromAnswer('One-off: run once now')).toMatchObject({ key: 'one-off', oneOff: true, schedule: null })
+  expect(choiceFromAnswer('every 12h')).toMatchObject({ key: 'custom', label: 'every 12h', schedule: { kind: 'interval', minutes: 720 } })
+  expect(choiceFromAnswer('off')).toMatchObject({ key: 'custom', schedule: null, oneOff: false })
+  expect(choiceFromAnswer('Cancel')).toBeNull()
+  expect(choiceFromAnswer(null)).toBeNull()
 })

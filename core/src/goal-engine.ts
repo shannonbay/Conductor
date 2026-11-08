@@ -251,7 +251,22 @@ export function endRun(db: Database, runId: string, summary: string): GoalRun {
     .get(run.plan_id, run.started_at) as { n: number }).n
   updateRun(db, runId, { status: 'completed', summary: summary.trim(), ended_at: now, items_created: created, items_resolved: resolved })
   archiveResolved(db, run.plan_id)
+  finishIfDone(db, run.plan_id)
   return getRun(db, runId)!
+}
+
+/** Open items: pending, or active (which includes proposals waiting for review and approved ones not yet carried out). */
+export function countOpenItems(db: Database, planId: string): number {
+  return (db.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND archived_at IS NULL AND status IN ('pending', 'active')")
+    .get(planId) as { n: number }).n
+}
+
+/** A one-off goal whose run left nothing open is done: it retires (the pane lists it under Done). */
+export function finishIfDone(db: Database, planId: string): boolean {
+  const goal = getGoal(db, planId)
+  if (!goal?.one_off || goal.status !== 'active' || countOpenItems(db, planId) > 0) return false
+  updateGoal(db, planId, { status: 'retired', next_run_at: null })
+  return true
 }
 
 /** Marks a run failed or timed out; partial work stays. No-op if it already ended. */

@@ -150,25 +150,29 @@ export const GuardCheckSchema = z.object({
   tool_name: z.string().describe('The tool the run agent is about to call'),
 })
 
+const GoalScheduleSchema = z.union([
+  z.object({
+    kind: z.literal('interval'),
+    minutes: z.number().int().min(5).describe('Run every N minutes (at least 5)'),
+    active_hours: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/).optional().describe('Only run inside this local-time window, e.g. "08:00-20:00"'),
+  }),
+  z.object({ kind: z.literal('cron'), expr: z.string().min(1).describe('5-field cron, local time') }),
+  z.null(),
+])
+
 export const CreateGoalSchema = z.object({
   name: z.string().trim().min(1),
   objective: z.string().trim().min(1),
   working_dir: z.string().min(1).describe('Where its runs work'),
   instructions: z.string().optional(),
-  interval_minutes: z.number().int().min(5).optional().describe('Run every N minutes; left out, the goal runs on demand'),
+  schedule: GoalScheduleSchema.optional().describe('When it runs on its own; left out or null, on demand'),
+  one_off: z.boolean().optional().describe('Runs once now; done when its run leaves nothing open'),
 })
 
 export const SetScheduleSchema = z.object({
   goal_id: z.string(),
-  schedule: z.union([
-    z.object({
-      kind: z.literal('interval'),
-      minutes: z.number().int().min(5).describe('Run every N minutes (at least 5)'),
-      active_hours: z.string().regex(/^\d{2}:\d{2}-\d{2}:\d{2}$/).optional().describe('Only run inside this local-time window, e.g. "08:00-20:00"'),
-    }),
-    z.object({ kind: z.literal('cron'), expr: z.string().min(1).describe('5-field cron, local time') }),
-    z.null(),
-  ]).describe('null makes the goal run only on demand'),
+  schedule: GoalScheduleSchema.describe('null makes the goal run only on demand'),
+  one_off: z.boolean().optional().describe('With schedule null: the goal runs once and is done when its run leaves nothing open'),
 })
 
 export const DeleteMemorySchema = z.object({

@@ -44,6 +44,8 @@ export type GoalCard = {
   nextRunAt: string | null
   /** null: runs only on demand. */
   schedule: Schedule | null
+  /** Runs once; done (status 'retired') when its run leaves nothing open. */
+  oneOff: boolean
   health: { passed: boolean; value: number | null } | null
   /** Health values, oldest first. */
   trend: number[]

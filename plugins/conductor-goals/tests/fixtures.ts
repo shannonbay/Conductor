@@ -35,6 +35,7 @@ type FakeGoal = {
   name: string
   objective: string
   status: string
+  one_off?: boolean
   next_run_at: string | null
   schedule: { kind: 'interval'; minutes: number; active_hours?: string } | { kind: 'cron'; expr: string } | null
   open_run: { id: string; status: string } | null
@@ -108,6 +109,7 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
           version++
           return ok({ item: { id: input.item_id }, queued_run: null }) as never
         case 'run_goal':
+          if (g!.status === 'retired' && g!.one_off) g!.status = 'active' // a done one-off runs again
           g!.open_run = { id: `r${++runs}`, status: 'queued' }
           version++
           return ok({ run: g!.open_run }) as never
@@ -125,10 +127,18 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
           g!.memory = g!.memory.filter((x) => x.id !== input.memory_id)
           version++
           return ok({ deleted: input.memory_id }) as never
-        case 'create_goal':
-          goals.push(goal({ id: `g${goals.length + 1}`, name: String(input.name), objective: String(input.objective) }))
+        case 'create_goal': {
+          const schedule = (input.schedule ?? null) as FakeGoal['schedule']
+          const oneOff = input.one_off === true
+          const made = goal({
+            id: `g${goals.length + 1}`, name: String(input.name), objective: String(input.objective), schedule, one_off: oneOff,
+            next_run_at: schedule ? new Date(NOW).toISOString() : null,
+            open_run: oneOff ? { id: `r${++runs}`, status: 'queued' } : null,
+          })
+          goals.push(made)
           version++
-          return ok({ id: `g${goals.length}` }) as never
+          return ok({ id: made.id, next_run_at: made.next_run_at, one_off: oneOff, queued_run: made.open_run?.id ?? null }) as never
+        }
         case 'goals_tick': {
           if (input.release) return ok({ released: true }) as never
           const claimed = goals.filter((x) => x.open_run?.status === 'queued').map((x) => {
@@ -151,6 +161,7 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
         }
         case 'set_schedule': {
           g!.schedule = (input.schedule ?? null) as FakeGoal['schedule']
+          g!.one_off = input.one_off === true && !g!.schedule
           g!.next_run_at = g!.schedule ? (g!.schedule.kind === 'interval' ? new Date(NOW).toISOString() : '2026-11-08T09:00:00Z') : null
           version++
           return ok({ goal_id: g!.id, schedule: g!.schedule, next_run_at: g!.next_run_at }) as never
@@ -176,7 +187,7 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
 }
 
 /** Answers the engine nouns the plugin calls; records what it shows. */
-export function engine(on: On, opts: { answer?: string; guarded?: boolean } = {}) {
+export function engine(on: On, opts: { answer?: string; guarded?: boolean; suggestion?: string | null } = {}) {
   const toasts: string[] = []
   const notifications: string[] = []
   const statuses: (string | undefined)[] = []
@@ -207,6 +218,12 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean } = {}
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'session-1' }))
+  // The small model that suggests schedules: a JSON answer, or (null) unavailable
+  const suggestion = opts.suggestion === undefined ? '{"choice": "daily", "reason": "it is ongoing upkeep"}' : opts.suggestion
+  const usage = { input_tokens: 10, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
+  on('model.complete', () => ({
+    value: suggestion === null ? { isAnswered: false, reason: 'api-error', status: 500, error: 'api_error', usage } : { isAnswered: true, text: suggestion, usage },
+  }) as never)
   // The guard plugin's tool: present unless a test says otherwise
   const GUARD = { name: 'mcp__conductor-goals-guard__status', description: 'guarded' }
   let tools = opts.guarded === false ? [] : [GUARD]

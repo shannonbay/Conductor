@@ -27,6 +27,7 @@ function deserializeGoal(r: Row): Goal {
     health_every_minutes: (r.health_every_minutes as number | undefined) ?? 60,
     health_triggers_run: r.health_triggers_run === undefined ? true : Boolean(r.health_triggers_run),
     last_health_at: (r.last_health_at as string | null | undefined) ?? null,
+    one_off: Boolean(r.one_off),
   } as Goal
 }
 
@@ -49,6 +50,7 @@ export function createGoal(db: Database, plan: NewPlan, goal: Omit<NewGoal, 'pla
       interval ? new Date().toISOString() : null,
     )
     if (interval) setIntervalTrigger(db, plan.id, interval)
+    if (goal.one_off) db.prepare('UPDATE goals SET one_off = 1 WHERE plan_id = ?').run(plan.id)
   })()
   return getGoal(db, plan.id)!
 }
@@ -78,6 +80,7 @@ export function updateGoal(
   if (fields.autonomy) serialized.autonomy = JSON.stringify(fields.autonomy)
   if (fields.tool_map) serialized.tool_map = JSON.stringify(fields.tool_map)
   if ('health_triggers_run' in fields) serialized.health_triggers_run = fields.health_triggers_run ? 1 : 0
+  if ('one_off' in fields) serialized.one_off = fields.one_off ? 1 : 0
   if (fields.limits) serialized.limits = JSON.stringify({ ...current.limits, ...fields.limits })
   const entries = Object.entries(serialized)
   if (!entries.length) return

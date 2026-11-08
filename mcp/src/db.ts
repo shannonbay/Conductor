@@ -72,6 +72,7 @@ export const deleteMemory = (id: string) => core.deleteMemory(db, id)
 export const setSchedule = (planId: string, schedule: core.Schedule | null) => core.setSchedule(db, planId, schedule)
 export const getSchedule = (planId: string) => core.getSchedule(db, planId)
 export const nextScheduledRun = (planId: string) => core.nextScheduledRun(db, planId)
+export const reviveIfDone = (planId: string) => core.reviveIfDone(db, planId)
 
 export const clearAllData = () => core.clearAllData(db)
 

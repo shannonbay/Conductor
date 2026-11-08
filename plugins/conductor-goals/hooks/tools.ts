@@ -8,6 +8,8 @@ import type { EngineInterface } from 'claude-code'
 import type { GoalCard } from '../types'
 import { approve, createGoal, reject, runNow, setGoalStatus, setSchedule } from './api'
 import { ago, describe, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, summarize } from './model'
+import { kick } from './runner'
+import { askSchedule, suggestSchedule } from './schedule'
 import { act, refresh } from './sync'
 
 type $ = EngineInterface
@@ -102,9 +104,9 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
   if (name === 'set_schedule') {
     const parsed = parseSchedule(String(input.schedule ?? ''))
     if ('error' in parsed) return fail(parsed.error)
-    const label = scheduleLabel(parsed.schedule)
+    const label = parsed.oneOff ? 'once (one-off)' : scheduleLabel(parsed.schedule)
     if (!(await confirmWith($, `Run the goal "${goal.name}" ${label}?`, 'Set schedule'))) return fail('The person declined; the schedule is unchanged.')
-    return { text: await applySchedule($, goal, parsed.schedule), isError: false }
+    return { text: await applySchedule($, goal, parsed.schedule, parsed.oneOff), isError: false }
   }
 
   if (name === 'run_goal') {
@@ -171,29 +173,36 @@ export async function goalCommand($: $, command: 'goal-run' | 'goal-pause' | 'go
   return ok(await act($, `${command}:${goal.id}`, `${command === 'goal-pause' ? 'pause' : 'resume'} the goal`, () => setGoalStatus($, goal.id, status)), `${goal.name} is ${status === 'paused' ? 'paused' : 'active again'}.`)
 }
 
-/** /goal-new <name>: <objective> */
+/** /goal-new <name>: <objective>. Asks how often it runs, with a suggestion first. */
 export async function newGoal($: $, args: string): Promise<string> {
   const at = args.indexOf(':')
   const name = (at === -1 ? args : args.slice(0, at)).trim()
   const objective = at === -1 ? '' : args.slice(at + 1).trim()
   if (!name || !objective) return 'Usage: /goal-new <name>: <objective>, e.g. /goal-new Inbox: keep my inbox under 20 unread'
   const cwd = await $.session.cwd()
+  const choice = await askSchedule($, name, await suggestSchedule($, name, objective))
+  let created
   try {
-    await createGoal($, { name, objective, working_dir: cwd })
+    created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff })
   } catch (err) {
     return `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}`
   }
+  await kick($) // a new interval or a one-off has a run due now
   await refresh($)
-  return `Created the goal "${name}" in ${cwd}. It runs on demand until you give it a schedule on its goal page.`
+  const where = `in ${cwd}`
+  if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.`
+  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.`
+  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.`
 }
 
 /** Sets the schedule through the pane's action wrapper and says what happens next. */
-async function applySchedule($: $, goal: GoalCard, schedule: Parameters<typeof setSchedule>[2]): Promise<string> {
+async function applySchedule($: $, goal: GoalCard, schedule: Parameters<typeof setSchedule>[2], oneOff = false): Promise<string> {
   let next: string | null = null
   const done = await act($, `schedule:${goal.id}`, 'set the schedule', async () => {
-    next = (await setSchedule($, goal.id, schedule)).next_run_at
+    next = (await setSchedule($, goal.id, schedule, oneOff)).next_run_at
   })
   if (!done) return "That didn't work; see the Goals pane."
+  if (oneOff) return `${goal.name} is a one-off now: run it with /goal-run; it moves to Done when a run leaves nothing open.`
   if (!schedule) return `${goal.name} now runs only on demand (/goal-run).`
   const now = await $.clock.now()
   const when = !next || Date.parse(next) <= now + 60_000 ? 'the next run starts within a minute' : `next run ${ago(next, now)}`
@@ -202,11 +211,11 @@ async function applySchedule($: $, goal: GoalCard, schedule: Parameters<typeof s
 
 /** /goal-schedule <goal> <every …|cron …|off>: the person typed it, so no confirm. */
 export async function scheduleCommand($: $, args: string): Promise<string> {
-  const m = /^(.*?)\s+((?:every|cron)\s.*|off|manual|none)$/i.exec(args.trim())
+  const m = /^(.*?)\s+((?:every|cron)\s.*|off|manual|none|one-?off|once)$/i.exec(args.trim())
   if (!m || !m[1]!.trim()) return `Usage: /goal-schedule <goal> ${SCHEDULE_USAGE}. E.g. /goal-schedule inbox every 6h`
   const parsed = parseSchedule(m[2]!)
   if ('error' in parsed) return parsed.error
   const found = await resolveGoal($, m[1]!.trim())
   if ('error' in found) return found.error
-  return applySchedule($, found.goal, parsed.schedule)
+  return applySchedule($, found.goal, parsed.schedule, parsed.oneOff)
 }

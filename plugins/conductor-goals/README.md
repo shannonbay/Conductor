@@ -46,7 +46,8 @@ Updated just now  Refresh
 ```
 
 - Under each goal's name is one line saying what its agent is doing. While a run is going, that's the agent's latest step: a progress update, an item it added or finished, or a note it saved. Otherwise it says the run is queued, the goal is paused, what the next run will carry out, or the last run's summary. Claude's `goals_status` tool reports the same line.
-- Below that: the last run and when the next automatic one is due (`· next in 12m`), or `· no schedule (/goal-schedule)` for a goal that runs only on demand.
+- Below that: the last run and when the next automatic one is due (`· next in 12m`), `· one-off`, or `· no schedule` with a **Set schedule** button (it suggests one, as `/goal-new` does).
+- **Done (n)** at the bottom, collapsed: one-off goals that have finished, each with its last run's summary and **Run again**.
 - **Approve** or **Reject…** each proposal. Rejecting asks what should change, and your answer is saved to the goal's memory.
 - **Run now**, **Cancel run** (asks you to confirm), **Pause** and **Resume**.
 - **▸ name** expands a goal to show its objective, its schedule, open items, last five runs with summaries, and memory. Each memory entry can be deleted (asks you to confirm).
@@ -60,12 +61,18 @@ Hotkeys while the pane has focus: `a`/`r` approve or reject the first proposal, 
 | Command | What it does |
 | --- | --- |
 | `/goals` | Open the Goals pane |
-| `/goal-new <name>: <objective>` | Create a goal that works in the current directory |
+| `/goal-new <name>: <objective>` | Create a goal that works in the current directory. It asks how often it should run, with a suggestion first (see below). |
 | `/goal-run <goal>` | Queue a run now |
 | `/goal-pause <goal>`, `/goal-resume <goal>` | Pause or resume a goal |
-| `/goal-schedule <goal> <when>` | Set when it runs on its own: `every 30m`, `every 6h`, `every 1d`, optionally `between 08:00-20:00`; `cron 0 9 * * 1-5`; or `off` for on demand only. An interval's first run starts within a minute. |
+| `/goal-schedule <goal> <when>` | Set when it runs on its own: `every 30m`, `every 6h`, `every 1d`, optionally `between 08:00-20:00`; `cron 0 9 * * 1-5`; `one-off`; or `off` for on demand only. An interval's first run starts within a minute. |
 
 Goal names match by exact name, then prefix, then any part of the name. If more than one goal matches, the command lists them.
+
+### Schedules and one-off goals
+
+Goals lean towards running on a schedule: most are ongoing work. When you create one (or press **Set schedule**), a small model (Haiku) reads the name and objective and suggests how often it should run. "maintain", "keep" or "check" suggest daily, an inbox or triage hourly, monitoring every 6 hours, a report weekly, and "install", "set up" or "migrate" a one-off. Keyword rules stand in when the model isn't available. You pick from four choices with the suggestion first, or type your own (`every 12h`, `cron 0 9 * * 1-5`, `off`). Dismissing the question keeps the suggestion.
+
+A **one-off** goal runs once, straight away. When its run ends with nothing left open (no proposals waiting, no open items), it's done and moves to **Done**. If it proposed something, it stays until you decide: approving runs it again to carry the action out, and rejecting runs it again to revise. **Run again** brings a done one-off back for another run.
 
 ## Tools Claude can call
 

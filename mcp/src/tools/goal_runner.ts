@@ -7,7 +7,7 @@
 import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
   getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory,
-  setSchedule, getSchedule, nextScheduledRun,
+  setSchedule, getSchedule, nextScheduledRun, queueRun,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
@@ -105,15 +105,18 @@ export async function guard_check(args: unknown) {
 export async function create_goal(args: unknown) {
   const input = CreateGoalSchema.parse(args)
   if (!existsSync(input.working_dir)) throw new Error(`Working directory not found: ${input.working_dir}`)
+  if (input.one_off && input.schedule) throw new Error('A one-off goal has no schedule.')
   const now = new Date().toISOString()
   const id = `plan_${nanoid(10)}`
   createGoal(
     { id, name: input.name, description: input.objective, status: 'active', working_dir: input.working_dir, created_at: now, updated_at: now },
-    { objective: input.objective, instructions: input.instructions ?? '', autonomy: {} },
-    input.interval_minutes ? { minutes: input.interval_minutes } : undefined,
+    { objective: input.objective, instructions: input.instructions ?? '', autonomy: {}, one_off: input.one_off ?? false },
   )
-  record(id, id, 'plan_created', { kind: 'goal' }, human)
-  return { id }
+  record(id, id, 'plan_created', { kind: 'goal', one_off: input.one_off ?? false }, human)
+  const applied = input.schedule ? applySchedule(id, input.schedule) : { schedule: null, next_run_at: null }
+  // A one-off runs straight away; a new interval is due now (the next tick starts it)
+  const queued = input.one_off ? queueRun(id) : null
+  return { id, ...applied, one_off: input.one_off ?? false, queued_run: queued ? queued.id : null }
 }
 
 export async function delete_memory(args: unknown) {
@@ -132,11 +135,21 @@ export async function delete_memory(args: unknown) {
 export async function set_schedule(args: unknown) {
   const input = SetScheduleSchema.parse(args)
   if (!getGoal(input.goal_id)) throw new Error(`Goal ${input.goal_id} not found.`)
-  setSchedule(input.goal_id, input.schedule) // throws on a cron expression that never matches
-  const schedule = getSchedule(input.goal_id)
-  const next_run_at = !schedule ? null : schedule.kind === 'interval' ? new Date().toISOString() : nextScheduledRun(input.goal_id)
-  updateGoal(input.goal_id, { next_run_at })
-  record(input.goal_id, input.goal_id, 'goal_updated', { schedule }, human)
+  if (input.one_off && input.schedule) throw new Error('A one-off goal has no schedule.')
+  const applied = applySchedule(input.goal_id, input.schedule)
+  // A schedule makes a goal recurring; "one-off" (with no schedule) makes it run once
+  const one_off = Boolean(input.one_off && !input.schedule)
+  updateGoal(input.goal_id, { one_off })
+  record(input.goal_id, input.goal_id, 'goal_updated', { schedule: applied.schedule, one_off }, human)
   touchPlan(input.goal_id)
-  return { goal_id: input.goal_id, schedule, next_run_at }
+  return { goal_id: input.goal_id, ...applied, one_off }
+}
+
+/** Sets the schedule and when the next run is due: now for an interval, the next match for cron, none without one. */
+function applySchedule(goalId: string, schedule: Parameters<typeof setSchedule>[1]) {
+  setSchedule(goalId, schedule) // throws on a cron expression that never matches
+  const s = getSchedule(goalId)
+  const next_run_at = !s ? null : s.kind === 'interval' ? new Date().toISOString() : nextScheduledRun(goalId)
+  updateGoal(goalId, { next_run_at })
+  return { schedule: s, next_run_at }
 }

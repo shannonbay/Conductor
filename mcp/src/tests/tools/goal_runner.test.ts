@@ -3,7 +3,7 @@ import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
   create_goal, delete_memory, set_schedule,
 } from '../../tools/goal_runner.js'
-import { add_item, get_goal_brief, end_run } from '../../tools/goals.js'
+import { add_item, get_goal_brief, end_run, run_goal } from '../../tools/goals.js'
 import { create_plan } from '../../tools/create_plan.js'
 import { createGoal, queueRun, getRun, getGoal, getEvents, updateGoal, insertMemory, getMemory } from '../../db.js'
 import { tmpdir } from 'os'
@@ -179,5 +179,34 @@ describe('set_schedule', () => {
     expect(await set_schedule({ goal_id: id, schedule: null })).toMatchObject({ schedule: null, next_run_at: null })
     await expect(set_schedule({ goal_id: id, schedule: { kind: 'cron', expr: '0 9 31 2 *' } })).rejects.toThrow()
     await expect(set_schedule({ goal_id: id, schedule: { kind: 'interval', minutes: 2 } })).rejects.toThrow()
+  })
+})
+
+describe('one-off goals and schedules at creation', () => {
+  it('create_goal with a schedule makes a run due now; a one-off queues its run', async () => {
+    const daily = await create_goal({ name: 'Inbox', objective: 'Triage', working_dir: tmpdir(), schedule: { kind: 'interval', minutes: 1440 } })
+    expect(daily).toMatchObject({ schedule: { kind: 'interval', minutes: 1440 }, one_off: false, queued_run: null })
+    expect(daily.next_run_at).not.toBeNull()
+    const once = await create_goal({ name: 'Tidy', objective: 'Delete installers', working_dir: tmpdir(), one_off: true })
+    expect(once).toMatchObject({ schedule: null, one_off: true, queued_run: expect.any(String) })
+    expect(getGoal(once.id)!.one_off).toBe(true)
+    await expect(create_goal({ name: 'X', objective: 'Y', working_dir: tmpdir(), one_off: true, schedule: { kind: 'interval', minutes: 60 } })).rejects.toThrow(/no schedule/)
+  })
+
+  it('set_schedule switches between one-off and recurring', async () => {
+    const id = makeGoal()
+    expect(await set_schedule({ goal_id: id, schedule: null, one_off: true })).toMatchObject({ one_off: true, schedule: null })
+    expect(getGoal(id)!.one_off).toBe(true)
+    expect(await set_schedule({ goal_id: id, schedule: { kind: 'interval', minutes: 60 } })).toMatchObject({ one_off: false })
+    expect(getGoal(id)!.one_off).toBe(false)
+  })
+
+  it('run_goal runs a done one-off again', async () => {
+    const { id } = await create_goal({ name: 'Tidy', objective: 'Delete installers', working_dir: tmpdir(), one_off: true })
+    const run = (await tick('session-A')).claimed[0]!
+    await withScope({ planId: id, runId: run.run_id }, () => end_run({ summary: 'Deleted 3.' }))
+    expect(getGoal(id)!.status).toBe('retired')
+    await run_goal({ goal_id: id })
+    expect(getGoal(id)!.status).toBe('active')
   })
 })

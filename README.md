@@ -8,7 +8,7 @@ It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `
 
 ## Persistent goals
 
-A goal is an objective that never finishes. Create one in Claude Code with `/goal-new <name>: <objective>` (it works in the session's directory), or from the web app's home page (**+ New goal**) with standing instructions and a schedule too.
+A goal is an objective that never finishes. Create one in Claude Code with `/goal-new <name>: <objective>` (it works in the session's directory, and asks how often it should run, suggesting a schedule from the objective), or from the web app's home page (**+ New goal**) with standing instructions too. A goal can also be a **one-off**: it runs once and, when nothing is left open, moves to the pane's **Done** section.
 
 - **Runs.** Each run is a fresh background subagent in your Claude Code session, with its own context: it doesn't interrupt your conversation, and its report goes to the Goals pane, not your chat. It calls `get_goal_brief` — objective, instructions, memory, your decisions since the last run, open items, recent run summaries, latest health — handles what's new, and ends with `end_run` and a summary for the next run.
 - **Triggers.** Every N minutes (with optional active hours), a cron expression, **Run now**, a **webhook** with a per-goal secret, or a failing **health check**.
@@ -203,7 +203,7 @@ Open [http://localhost:3000](http://localhost:3000). The settings gear (⚙) sho
 ### Your first goal
 
 1. Give your Claude Code session the tools the goal needs (e.g. a mail MCP server for an inbox goal). Runs are subagents of that session, so they get the same tools.
-2. In the goal's directory, run `/goal-new Inbox: keep my inbox under 20 unread`, then `/goal-run inbox` (or **Run now** in the pane). In the web app you can also give it standing instructions and a schedule.
+2. In the goal's directory, run `/goal-new Inbox: keep my inbox under 20 unread` and pick how often it runs (it suggests one: hourly, for an inbox). The first run starts within a minute. Change it later with `/goal-schedule inbox every 6h`. In the web app you can also give it standing instructions.
 3. Set each action category to *off*, *propose* or *auto* (in the web app's goal **Settings**). Keep anything irreversible at *propose* or *off* to start. Unlisted categories are *propose*.
 4. Optional: add **tool rules** (tool name → category) so the guard plugin blocks actions the goal doesn't allow, and a **health check** command to chart how the goal is doing.
 5. Approve or reject what the Goals pane shows under **Needs you** (`/goals`). Your rejections become memory, so the agent improves run by run.

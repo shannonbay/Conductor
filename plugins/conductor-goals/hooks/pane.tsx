@@ -11,6 +11,7 @@ import type { EngineInterface, RenderInput } from 'claude-code'
 import type { Confirm, GoalCard } from '../types'
 import { approve, baseUrl, deleteMemory, reject, runNow, setGoalStatus } from './api'
 import { cancelRun } from './runner'
+import { chooseSchedule } from './schedule'
 import { ago, clip, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
 import { getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, setConfirm, setRejecting, toggleExpanded } from './state'
 import { GUARD_MISSING } from './runner'
@@ -56,7 +57,10 @@ export async function renderPane($: $, e: E) {
     )
   }
 
-  const firstWithProposal = s.goals.find((g) => g.needsYou.length > 0)
+  // Done one-offs (retired) go in their own section at the bottom
+  const current = s.goals.filter((g) => g.status !== 'retired')
+  const done = s.goals.filter((g) => g.status === 'retired')
+  const firstWithProposal = current.find((g) => g.needsYou.length > 0)
   const view: View = {
     now: await $.clock.now(),
     columns: e.props.bodyColumns,
@@ -66,20 +70,21 @@ export async function renderPane($: $, e: E) {
     shown: await getExpanded($),
     pending: await getConfirm($),
     first: firstWithProposal ? `${firstWithProposal.id}/${firstWithProposal.needsYou[0]!.id}` : null,
-    runnable: s.goals.find(canRun)?.id ?? null,
+    runnable: current.find(canRun)?.id ?? null,
   }
 
   return (
     <Box flexDirection="column">
       {guardMissing && <Text color="yellow">{GUARD_MISSING}</Text>}
       {!s.reachable && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
-      {s.goals.length === 0 && (
+      {current.length === 0 && (
         <Box flexDirection="column">
           <Text dimColor>No goals yet.</Text>
           <Text dimColor>Create one with /goal-new &lt;name&gt;: &lt;objective&gt;, or in the web app.</Text>
         </Box>
       )}
-      {s.goals.map((g, i) => goalCard($, e, view, g, i))}
+      {current.map((g, i) => goalCard($, e, view, g, i))}
+      {done.length > 0 && doneSection($, e, view, done)}
       {message && <Text color="red">{message}</Text>}
       <Box>
         <Text dimColor>Updated {ago(new Date(s.fetchedAt).toISOString(), view.now)} </Text>
@@ -213,6 +218,14 @@ function controls($: $, e: E, view: View, g: GoalCard) {
 
   return (
     <Box key={`controls-${g.id}`} marginTop={g.needsYou.length > 0 ? 1 : 0}>
+      {g.status === 'active' && !g.schedule && !g.oneOff && (
+        <Button
+          key={`schedule-${g.id}`}
+          label={view.doing === `schedule:${g.id}` ? 'Choosing…' : 'Set schedule'}
+          plain
+          onPress={() => void act($, `schedule:${g.id}`, 'set the schedule', async () => void (await chooseSchedule($, g)))}
+        />
+      )}
       {canRun(g) && (
         <Button
           key={`run-${g.id}`}
@@ -289,6 +302,37 @@ function details($: $, e: E, view: View, g: GoalCard) {
       })}
 
       <Link key={`open-${g.id}`} href={`${view.base}/goals/${encodeURIComponent(g.id)}`} label="Open in browser" />
+    </Box>
+  )
+}
+
+const DONE_SECTION = '__done__'
+
+/** Done one-off goals, collapsed: each with its last run's summary and Run again. */
+function doneSection($: $, e: E, view: View, done: GoalCard[]) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const isOpen = view.shown.includes(DONE_SECTION)
+  return (
+    <Box key="done" flexDirection="column" marginBottom={1}>
+      <Button key="done-toggle" plain label={`${isOpen ? '▾' : '▸'} Done (${done.length})`} onPress={() => void toggleExpanded($, DONE_SECTION)} />
+      {isOpen && done.map((g) => {
+        const run = lastRun(g)
+        return (
+          <Box key={`done-${g.id}`} flexDirection="column">
+            <Box>
+              <Text>  ✓ {g.name}</Text>
+              <Text dimColor> · {run ? ago(run.endedAt ?? run.startedAt, view.now) : 'never run'} </Text>
+              <Button
+                key={`again-${g.id}`}
+                label={view.doing === `run:${g.id}` ? 'Starting…' : 'Run again'}
+                plain
+                onPress={() => void act($, `run:${g.id}`, 'run it again', () => runNow($, g.id))}
+              />
+            </Box>
+            {run?.summary && <Text dimColor>    {clip(run.summary, Math.max(view.columns - 4, 10))}</Text>}
+          </Box>
+        )
+      })}
     </Box>
   )
 }

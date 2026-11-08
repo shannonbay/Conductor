@@ -1,6 +1,7 @@
 /** MCP tools for persistent goals (specs/persistent-goals.md). */
 import {
   listGoals, getGoal, buildBrief, addItem, insertMemory, getMemory, updateMemory, getRun, endRun, queueRun, countItems, touchPlan,
+  reviveIfDone,
 } from '../db.js'
 import { getOpenPlan, setOpenPlan, getOpenRun, setOpenRun } from '../session.js'
 import {
@@ -128,6 +129,7 @@ export async function end_run(args: unknown) {
 export async function run_goal(args: unknown) {
   const input = RunGoalSchema.parse(args)
   if (!getGoal(input.goal_id)) throw new Error(`Goal ${input.goal_id} not found.`)
+  reviveIfDone(input.goal_id) // a done one-off runs again
   const run = queueRun(input.goal_id)
   return {
     run: { id: run.id, status: run.status },

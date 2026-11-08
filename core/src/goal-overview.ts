@@ -17,6 +17,8 @@ const RUNS = 5
 const OPEN_ITEMS = 10
 const HEALTH = 20
 const MEMORY = 10
+/** Done one-off goals listed, newest first. */
+const DONE = 10
 /** Recent events read to find a running agent's latest step. */
 const ACTIVITY_EVENTS = 20
 /** A "propose" category approved this many times in a row is suggested for "auto". */
@@ -149,8 +151,12 @@ export function describeActivity({ goal, openRun, lastRun, events, items }: Acti
 // ── Overview ──────────────────────────────────────────────────────────────────
 
 export function buildOverview(db: Database) {
-  const goals = listGoals(db)
-    .filter(({ goal }) => goal.status !== 'retired')
+  const all = listGoals(db)
+  // Done one-offs (retired) are listed too, the newest few; other retired goals are not
+  const done = all.filter(({ goal }) => goal.status === 'retired' && goal.one_off)
+    .sort((a, b) => (b.goal.last_run_at ?? '').localeCompare(a.goal.last_run_at ?? ''))
+    .slice(0, DONE)
+  const goals = [...all.filter(({ goal }) => goal.status !== 'retired'), ...done]
     .sort((a, b) => a.plan.name.localeCompare(b.plan.name))
     .map(({ plan, goal }) => {
       const items = getGoalItems(db, plan.id)
@@ -162,6 +168,7 @@ export function buildOverview(db: Database) {
         name: plan.name,
         objective: goal.objective,
         status: goal.status,
+        one_off: goal.one_off,
         next_run_at: goal.next_run_at,
         schedule: getSchedule(db, plan.id),
         open_run: openRun,

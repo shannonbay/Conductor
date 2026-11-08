@@ -60,8 +60,11 @@ test('/goal-new creates a goal in the session directory; /goal-pause pauses it',
 
   const made = await $.command.run(typed('goal-new', 'Inbox: keep my inbox under 20 unread'))
   expect(made.text).toContain('Created the goal "Inbox"')
+  // The question was dismissed (the fake answers Cancel), so the suggestion stands: daily
+  expect(made.text).toContain('running every 1d')
   expect(fake.of('create_goal')[0]?.input).toEqual({
     name: 'Inbox', objective: 'keep my inbox under 20 unread', working_dir: '/work/project',
+    schedule: { kind: 'interval', minutes: 1440 }, one_off: false,
   })
 
   const paused = await $.command.run(typed('goal-pause', 'inbox'))
@@ -123,4 +126,24 @@ test('the set_schedule tool asks first', async ($, on) => {
   expect(asked).toEqual(['Run the goal "Inbox" cron 0 9 * * 1-5?'])
   expect(String(res.result)).toContain('declined')
   expect(fake.of('set_schedule')).toEqual([])
+})
+
+test('/goal-new offers the choices with the suggestion first; a one-off runs at once', async ($, on) => {
+  const { asked, spawned, clock } = engine(on, { answer: 'One-off: run once now', suggestion: '{"choice": "one-off", "reason": "it is a single task"}' })
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', 'Tidy: delete installers older than 30 days'))
+  await clock.settle()
+  expect(asked[0]).toContain('How often should "Tidy" run? Suggested: one-off: run once now (it is a single task).')
+  expect(made.text).toContain('one-off goal "Tidy"')
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({ schedule: null, one_off: true })
+  expect(spawned.map((x) => x.prompt)).toEqual(['Run Tidy'])
+})
+
+test('/goal-new falls back to keyword rules when the model is unavailable', async ($, on) => {
+  const { asked } = engine(on, { suggestion: null })
+  fakeConductor(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', 'maintain-github-profile: monitor my github for contributions'))
+  expect(asked[0]).toContain('Suggested: every 6 hours (it watches for changes)')
 })

@@ -97,12 +97,16 @@ export async function deleteMemory($: $, goalId: string, memoryId: string): Prom
 }
 
 /** null: the goal runs only on demand. */
-export async function setSchedule($: $, goalId: string, schedule: Schedule | null): Promise<{ next_run_at: string | null }> {
-  return call($, 'set_schedule', { goal_id: goalId, schedule })
+export async function setSchedule($: $, goalId: string, schedule: Schedule | null, oneOff = false): Promise<{ next_run_at: string | null }> {
+  return call($, 'set_schedule', { goal_id: goalId, schedule, ...(oneOff && { one_off: true }) })
 }
 
-export async function createGoal($: $, input: { name: string; objective: string; working_dir: string }): Promise<string> {
-  return (await call<{ id: string }>($, 'create_goal', input)).id
+export type CreatedGoal = { id: string; next_run_at: string | null; one_off: boolean; queued_run: string | null }
+
+export async function createGoal(
+  $: $, input: { name: string; objective: string; working_dir: string; schedule?: Schedule | null; one_off?: boolean },
+): Promise<CreatedGoal> {
+  return call<CreatedGoal>($, 'create_goal', input)
 }
 
 // ── The runner's calls ────────────────────────────────────────────────────────

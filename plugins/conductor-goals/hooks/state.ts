@@ -13,7 +13,7 @@ type $ = EngineInterface
 
 export const PANE = 'conductor-goals'
 
-const snapshot = atom({ plugin: 'conductor-goals', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-3' })
+const snapshot = atom({ plugin: 'conductor-goals', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-4' })
 const rejecting = atom({ plugin: 'conductor-goals', key: 'rejecting' } as const, null)
 const busy = atom({ plugin: 'conductor-goals', key: 'busy' } as const, null)
 const notice = atom({ plugin: 'conductor-goals', key: 'notice' } as const, null)

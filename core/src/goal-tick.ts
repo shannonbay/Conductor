@@ -214,6 +214,17 @@ export function decideItem(
     if (isProposal(task) && getGoal(db, planId)?.status === 'active') queuedRun = queueRun(db, planId)
   } else {
     rejectTask(db, planId, taskId, input.feedback ?? '')
+    // A one-off has no schedule to bring the next run: queue one to revise or drop the proposal
+    const goal = getGoal(db, planId)
+    if (isProposal(task) && goal?.one_off && goal.status === 'active') queuedRun = queueRun(db, planId)
   }
   return { task: getTask(db, planId, taskId)!, queuedRun }
+}
+
+/** A done one-off goes back to active, so it can run again. True if it was done. */
+export function reviveIfDone(db: Database, planId: string): boolean {
+  const goal = getGoal(db, planId)
+  if (!goal?.one_off || goal.status !== 'retired') return false
+  updateGoal(db, planId, { status: 'active' })
+  return true
 }

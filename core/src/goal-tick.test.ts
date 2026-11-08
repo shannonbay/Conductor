@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 import {
   openDatabase, createGoal, updateGoal, getGoal, queueRun, getRun, updateRun, addItem, getTask, listMemory, listRuns,
   takeLease, releaseLease, claimRun, schedulerPass, expireStaleRuns, decideItem, attachAgent, guardToolCallForRun,
-  buildOverview, overviewWithEtag, LEASE_MS, insertRun,
+  buildOverview, overviewWithEtag, LEASE_MS, insertRun, endRun, updateTask, reviveIfDone,
 } from './index.js'
 
 let db: Database.Database
@@ -140,5 +140,51 @@ describe('buildOverview', () => {
     expect(o.goals[0]).toMatchObject({ id: 'g1', name: 'Inbox', needs_you: [{ id: '1', awaiting_review: true }] })
     expect(overviewWithEtag(db).etag).not.toBe(before)
     expect(listRuns(db, 'g1')).toEqual([])
+  })
+})
+
+describe('one-off goals', () => {
+  const oneOff = (id = 'o1') => createGoal(db, { ...plan, id, name: 'Tidy downloads' }, { objective: 'Delete old installers', one_off: true })
+
+  it('a run that leaves nothing open makes it done, and it can run again', async () => {
+    oneOff()
+    const run = claimRun(db, 'o1', { holder: 'A' })!
+    endRun(db, run.run_id, 'Deleted 12 installers.')
+    expect(getGoal(db, 'o1')).toMatchObject({ status: 'retired', one_off: true, next_run_at: null })
+    expect(buildOverview(db).goals.find((g) => g.id === 'o1')).toMatchObject({ status: 'retired', one_off: true })
+    expect(reviveIfDone(db, 'o1')).toBe(true)
+    expect(getGoal(db, 'o1')!.status).toBe('active')
+    expect(reviveIfDone(db, 'g1')).toBe(false)
+  })
+
+  it('stays while a proposal waits, and finishes after the run that carries it out', async () => {
+    oneOff()
+    const first = claimRun(db, 'o1', { holder: 'A' })!
+    addItem(db, 'o1', first.run_id, { goal: 'Delete ~/Downloads/big.iso', action: { category: 'fs.delete', summary: 'Delete it' } })
+    endRun(db, first.run_id, 'Proposed one deletion.')
+    expect(getGoal(db, 'o1')!.status).toBe('active')
+    const { queuedRun } = decideItem(db, 'o1', '1', { decision: 'approve' })
+    const second = claimRun(db, 'o1', { holder: 'A', queuedRunId: queuedRun!.id })!
+    updateTask(db, 'o1', '1', { status: 'completed' })
+    endRun(db, second.run_id, 'Deleted it.')
+    expect(getGoal(db, 'o1')!.status).toBe('retired')
+  })
+
+  it('a rejected proposal queues a run to revise it; recurring goals never finish', async () => {
+    oneOff()
+    const run = claimRun(db, 'o1', { holder: 'A' })!
+    addItem(db, 'o1', run.run_id, { goal: 'Delete all of ~/Downloads', action: { category: 'fs.delete', summary: 'Delete everything' } })
+    endRun(db, run.run_id, 'Proposed.')
+    expect(decideItem(db, 'o1', '1', { decision: 'reject', feedback: 'only installers' }).queuedRun).toMatchObject({ status: 'queued' })
+
+    const g1 = claimRun(db, 'g1', { holder: 'A' })!
+    endRun(db, g1.run_id, 'Nothing to do.')
+    expect(getGoal(db, 'g1')!.status).toBe('active')
+    expect(buildOverview(db).goals.map((g) => g.id)).toContain('g1')
+  })
+
+  it('other retired goals stay out of the overview', async () => {
+    updateGoal(db, 'g1', { status: 'retired' })
+    expect(buildOverview(db).goals.map((g) => g.id)).not.toContain('g1')
   })
 })

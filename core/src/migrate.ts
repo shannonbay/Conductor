@@ -285,6 +285,8 @@ export function runMigrations(db: Database): void {
     ['health_every_minutes', 'INTEGER NOT NULL DEFAULT 60'],
     ['health_triggers_run', 'INTEGER NOT NULL DEFAULT 1'],
     ['last_health_at', 'TEXT'],
+    // 1: runs once; when its run ends with nothing open it is done (status 'retired')
+    ['one_off', 'INTEGER NOT NULL DEFAULT 0'],
   ]
   for (const [col, def] of addedGoalColumns) {
     try { db.exec(`ALTER TABLE goals ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
