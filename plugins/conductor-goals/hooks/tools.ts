@@ -6,11 +6,12 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
-import { approve, createGoal, reject, runNow, setGoalStatus, setSchedule } from './api'
+import { addTodo, approve, createGoal, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo } from './api'
 import { ago, describe, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, summarize } from './model'
 import { kick } from './runner'
 import { askSchedule, suggestSchedule } from './schedule'
-import { act, refresh } from './sync'
+import { describeTodos, findTodo } from './todos'
+import { act, refresh, refreshTodos } from './sync'
 
 type $ = EngineInterface
 
@@ -42,6 +43,29 @@ export const TOOLS = [
     name: 'run_goal',
     description: 'Queues a run of a Conductor goal now. The person is asked to confirm first.',
     inputSchema: { type: 'object', properties: { goal: GOAL }, required: ['goal'] },
+  },
+  {
+    name: 'todos',
+    description: "The person's to-do lists for this project, with each open to-do's id. Read-only. Use it when they ask what's on their list, or refer to it after a compaction.",
+    inputSchema: { type: 'object', properties: { include_done: { type: 'boolean', description: 'Also list ticked-off to-dos' } } },
+  },
+  {
+    name: 'add_todo',
+    description: "Adds a to-do to the person's list for this project, where it survives the conversation and shows in the Goals pane. Add what they ask you to; when an idea is clearly being put off for later, offer to add it rather than adding it unasked.",
+    inputSchema: {
+      type: 'object',
+      properties: { text: { type: 'string', description: 'The to-do, short and in their words' }, list: { type: 'string', description: 'A list name or id; left out, the "To do" list' } },
+      required: ['text'],
+    },
+  },
+  {
+    name: 'complete_todo',
+    description: "Ticks a to-do off the person's list. Only when they say it's done or ask you to.",
+    inputSchema: {
+      type: 'object',
+      properties: { item: { type: 'string', description: 'The to-do id from the todos tool, e.g. 3 or 1.4' }, list: { type: 'string', description: 'A list name or id, when more than one list has that id' } },
+      required: ['item'],
+    },
   },
   {
     name: 'set_schedule',
@@ -88,6 +112,8 @@ async function confirmWith($: $, question: string, yes: string): Promise<boolean
 export async function runTool($: $, name: ToolName, input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
   const now = await $.clock.now()
   const fail = (text: string) => ({ text, isError: true })
+
+  if (name === 'todos' || name === 'add_todo' || name === 'complete_todo') return todoTool($, name, input)
 
   if (name === 'goals_status') {
     const s = await refresh($)
@@ -146,6 +172,7 @@ export const COMMANDS = [
   { name: 'goal-new', description: 'Create a Conductor goal in this directory', argumentHint: '<name>: <objective>' },
   { name: 'goal-pause', description: 'Pause a Conductor goal', argumentHint: '<goal>' },
   { name: 'goal-resume', description: 'Resume a paused Conductor goal', argumentHint: '<goal>' },
+  { name: 'todo', description: 'Your to-do list for this project: /todo <text> adds, /todo done <id> ticks off, /todo shows it', argumentHint: '<text> | done <id>' },
   { name: 'goal-schedule', description: 'Set when a Conductor goal runs on its own', argumentHint: '<goal> every 6h | cron ... | off' },
 ] as const
 
@@ -218,4 +245,26 @@ export async function scheduleCommand($: $, args: string): Promise<string> {
   const found = await resolveGoal($, m[1]!.trim())
   if ('error' in found) return found.error
   return applySchedule($, found.goal, parsed.schedule, parsed.oneOff)
+}
+
+/** The to-do tools: no confirm, since the person asked and every change is undone with one press. */
+async function todoTool($: $, name: 'todos' | 'add_todo' | 'complete_todo', input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
+  const dir = await $.session.cwd()
+  const lists = await fetchTodos($, dir)
+  const listArg = typeof input.list === 'string' && input.list.trim() ? input.list.trim() : undefined
+  if (name === 'todos') return { text: describeTodos(lists, { withDone: input.include_done === true }), isError: false }
+  if (name === 'add_todo') {
+    const text = String(input.text ?? '').trim()
+    if (!text) return { text: 'A to-do needs some text.', isError: true }
+    const list = listArg ? lists.find((l) => l.id === listArg || l.name.toLowerCase() === listArg.toLowerCase()) : undefined
+    if (listArg && !list) return { text: `No list "${listArg}". Lists: ${lists.map((l) => l.name).join(', ') || 'none'}.`, isError: true }
+    const r = await addTodo($, { dir, text, listId: list?.id, by: 'agent' })
+    await refreshTodos($)
+    return { text: `Added to ${list?.name ?? 'To do'} as ${r.item_id}: ${text}`, isError: false }
+  }
+  const found = findTodo(lists, String(input.item ?? ''), listArg)
+  if ('error' in found) return { text: found.error, isError: true }
+  await setTodo($, found.list.id, found.item.id, 'completed')
+  await refreshTodos($)
+  return { text: `Ticked off ${found.item.id}: ${found.item.text}`, isError: false }
 }

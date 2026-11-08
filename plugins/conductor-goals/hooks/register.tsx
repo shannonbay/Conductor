@@ -14,6 +14,7 @@ import { reconcile, registerRunnerAgent, RUNNER_AGENT, startRunner, stopRunner }
 import { getActiveRun, getRuns, getSnapshot, PANE, setActiveRun } from './state'
 import { refresh, startPolling, stopPolling } from './sync'
 import { goalCommand, newGoal, registerCommands, registerTools, runTool, scheduleCommand, type ToolName } from './tools'
+import { todoCommand } from './todos'
 
 type $ = EngineInterface
 
@@ -125,6 +126,7 @@ export const register: Register = (on, options) => {
   on('command.run', { command: 'goal-resume' }, async ($, e) => ({ text: await goalCommand($, 'goal-resume', e.args) })).catch(failedCommand)
   on('command.run', { command: 'goal-new' }, async ($, e) => ({ text: await newGoal($, e.args) })).catch(failedCommand)
   on('command.run', { command: 'goal-schedule' }, async ($, e) => ({ text: await scheduleCommand($, e.args) })).catch(failedCommand)
+  on('command.run', { command: 'todo' }, async ($, e) => ({ text: await todoCommand($, e.args) })).catch(failedCommand)
 
   // Tools Claude can call (the names match TOOLS in tools.ts)
 
@@ -134,6 +136,9 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'mcp__conductor-goals__reject_item' }, ($, e) => answerTool($, 'reject_item', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__conductor-goals__run_goal' }, ($, e) => answerTool($, 'run_goal', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__conductor-goals__set_schedule' }, ($, e) => answerTool($, 'set_schedule', e)).catch(failedTool)
+  on('tool.call', { tool: 'mcp__conductor-goals__todos' }, ($, e) => answerTool($, 'todos', e)).catch(failedTool)
+  on('tool.call', { tool: 'mcp__conductor-goals__add_todo' }, ($, e) => answerTool($, 'add_todo', e)).catch(failedTool)
+  on('tool.call', { tool: 'mcp__conductor-goals__complete_todo' }, ($, e) => answerTool($, 'complete_todo', e)).catch(failedTool)
 
   // A goal run in this conversation itself (the old channel path): get_goal_brief
   // with a run_id starts it, end_run ends it. Runs in subagents are the runner's.

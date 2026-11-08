@@ -35,6 +35,9 @@ import {
   CreateGoalSchema,
   DeleteMemorySchema,
   SetScheduleSchema,
+  TodoListSchema,
+  TodoAddSchema,
+  TodoSetSchema,
 } from './schema.js'
 
 import { create_plan } from './tools/create_plan.js'
@@ -55,6 +58,7 @@ import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
   create_goal, delete_memory, set_schedule,
 } from './tools/goal_runner.js'
+import { todo_list, todo_add, todo_set } from './tools/todos.js'
 import { handleListResources, handleReadResource } from './resources.js'
 import { getRun } from './db.js'
 import { withScope } from './session.js'
@@ -179,6 +183,24 @@ const TOOLS = [
     description: 'Queue a run of a goal now (e.g. after changing its instructions). It starts within about 30 seconds while Claude Code is open with the conductor-goals plugin.',
     inputSchema: zodToJsonSchema(RunGoalSchema),
     handler: run_goal,
+  },
+  {
+    name: 'todo_list',
+    description: "The person's to-do lists for a project (the active plans in its directory), with each to-do's id and status. Read-only. Use it when they ask what's on their list, or after a compaction when they refer to it.",
+    inputSchema: zodToJsonSchema(TodoListSchema),
+    handler: todo_list,
+  },
+  {
+    name: 'todo_add',
+    description: "Adds a to-do to the person's list for a project, so it survives the conversation. Add only what they ask you to, or offer first when an idea is clearly being put off for later.",
+    inputSchema: zodToJsonSchema(TodoAddSchema),
+    handler: todo_add,
+  },
+  {
+    name: 'todo_set',
+    description: "Ticks a to-do off (completed), puts it back (pending), or marks it under way (active) with a note. Only when the person says it's done or asks you to.",
+    inputSchema: zodToJsonSchema(TodoSetSchema),
+    handler: todo_set,
   },
   {
     name: 'goals_overview',

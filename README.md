@@ -10,6 +10,8 @@ It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `
 
 A goal is an objective that never finishes. Create one in Claude Code with `/goal-new <name>: <objective>` (it works in the session's directory, and asks how often it should run, suggesting a schedule from the objective), or from the web app's home page (**+ New goal**) with standing instructions too. A goal can also be a **one-off**: it runs once and, when nothing is left open, moves to the pane's **Done** section.
 
+The pane also keeps **your to-do list** for the project (`/todo <text>`, or ask Claude to add something): the ideas and decisions of a long conversation, kept where a context compaction can't lose them. Any to-do can be handed to a one-off goal with **Do it**.
+
 - **Runs.** Each run is a fresh background subagent in your Claude Code session, with its own context: it doesn't interrupt your conversation, and its report goes to the Goals pane, not your chat. It calls `get_goal_brief` — objective, instructions, memory, your decisions since the last run, open items, recent run summaries, latest health — handles what's new, and ends with `end_run` and a summary for the next run.
 - **Triggers.** Every N minutes (with optional active hours), a cron expression, **Run now**, a **webhook** with a per-goal secret, or a failing **health check**.
 - **Work items.** Each thing the agent handles is an item, deduplicated by an external ID (e.g. an email's ID) so it's never handled twice. Resolved items are hidden after 7 days.

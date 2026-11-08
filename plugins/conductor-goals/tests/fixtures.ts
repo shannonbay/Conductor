@@ -74,14 +74,21 @@ export type Call = { tool: string; input: Record<string, unknown> }
 
 const TOOLS = [
   'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'create_goal',
-  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule',
+  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set',
 ] as const
 
 /**
  * The fake `conductor` MCP server. `fail` makes every call fail as if the
  * server were missing; `errors` makes one tool answer an error. Records calls.
  */
-export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string> } = {}) {
+type FakeTodoList = { id: string; name: string; items: { id: string; text: string; status: string; depth: number; notes: string | null }[] }
+
+export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[] } = {}) {
+  const lists: FakeTodoList[] = opts.todos ?? []
+  const listView = () => lists.map((l) => {
+    const done = l.items.filter((i) => i.status === 'completed').length
+    return { ...l, open: l.items.length - done, done }
+  })
   const calls: Call[] = []
   let version = 0
   let runs = 0
@@ -166,6 +173,21 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
           version++
           return ok({ goal_id: g!.id, schedule: g!.schedule, next_run_at: g!.next_run_at }) as never
         }
+        case 'todo_list':
+          return ok({ lists: listView() }) as never
+        case 'todo_add': {
+          let list = input.list_id ? lists.find((l) => l.id === input.list_id) : lists.find((l) => l.name === 'To do')
+          if (!list) lists.unshift(list = { id: `list${lists.length + 1}`, name: 'To do', items: [] })
+          const id = String(list.items.length + 1)
+          list.items.push({ id, text: String(input.text), status: 'pending', depth: 0, notes: null })
+          return ok({ list_id: list.id, item_id: id, created_list: false }) as never
+        }
+        case 'todo_set': {
+          const item = lists.find((l) => l.id === input.list_id)!.items.find((i) => i.id === input.item_id)!
+          item.status = String(input.status)
+          if (typeof input.notes === 'string') item.notes = input.notes
+          return ok({ item }) as never
+        }
         case 'guard_check':
           return ok(input.tool_name === 'mcp__gmail__delete'
             ? { decision: 'deny', category: 'email.delete', reason: 'email.delete is off for this goal' }
@@ -176,6 +198,7 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
 
   return {
     calls,
+    lists,
     /** Calls of one tool, in order. */
     of: (tool: string) => calls.filter((c) => c.tool === tool),
     ended,

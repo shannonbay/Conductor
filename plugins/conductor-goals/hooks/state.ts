@@ -6,7 +6,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { ActiveRun, Confirm, RunEntry, Snapshot } from '../types'
+import type { ActiveRun, Confirm, RunEntry, Snapshot, Todos } from '../types'
 import { EMPTY } from './model'
 
 type $ = EngineInterface
@@ -22,6 +22,7 @@ const confirm = atom({ plugin: 'conductor-goals', key: 'confirm' } as const, nul
 const activeRun = atom({ plugin: 'conductor-goals', key: 'activeRun' } as const, null)
 const runs = atom({ plugin: 'conductor-goals', key: 'runs' } as const, {})
 const guardMissing = atom({ plugin: 'conductor-goals', key: 'guardMissing' } as const, false)
+const todos = atom({ plugin: 'conductor-goals', key: 'todos' } as const, null)
 
 export async function getSnapshot($: $): Promise<Snapshot> {
   return read($, snapshot)
@@ -91,4 +92,11 @@ export async function removeRun($: $, agentId: string): Promise<void> {
     const { [agentId]: _gone, ...rest } = all
     return rest
   })
+}
+
+export async function getTodos($: $): Promise<Todos | null> {
+  return read($, todos)
+}
+export async function setTodos($: $, value: Todos | null): Promise<void> {
+  await update($, todos, () => value)
 }

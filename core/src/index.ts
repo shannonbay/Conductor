@@ -15,6 +15,7 @@ export * from './health.js'
 export * from './guard.js'
 export * from './goal-tick.js'
 export * from './goal-overview.js'
+export * from './todos.js'
 export { runMigrations, REVISION_TRIGGERS } from './migrate.js'
 
 /** `CONDUCTOR_DB` if set, otherwise `~/.conductor/tasks.db`. */

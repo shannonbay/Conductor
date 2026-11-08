@@ -175,6 +175,26 @@ export const SetScheduleSchema = z.object({
   one_off: z.boolean().optional().describe('With schedule null: the goal runs once and is done when its run leaves nothing open'),
 })
 
+// ── The person's to-do lists ────────────────────────────────────────────────────
+
+export const TodoListSchema = z.object({
+  working_dir: z.string().min(1).describe("The project's directory; its lists are the active plans there"),
+})
+
+export const TodoAddSchema = z.object({
+  working_dir: z.string().min(1),
+  text: z.string().trim().min(1).describe('The to-do, in the words the person would use'),
+  list_id: z.string().optional().describe('A list from todo_list; left out, the project\'s "To do" list (made on first use)'),
+  added_by: z.enum(['human', 'agent']).default('human'),
+})
+
+export const TodoSetSchema = z.object({
+  list_id: z.string(),
+  item_id: z.string(),
+  status: z.enum(['pending', 'active', 'completed']).describe('completed ticks it off; pending puts it back'),
+  notes: z.string().optional(),
+})
+
 export const DeleteMemorySchema = z.object({
   goal_id: z.string(),
   memory_id: z.string(),

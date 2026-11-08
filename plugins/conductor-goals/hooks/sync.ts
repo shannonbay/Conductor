@@ -6,10 +6,10 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Snapshot } from '../types'
 import { announce, showStatus } from './alerts'
-import { fetchOverview, settings } from './api'
+import { fetchOverview, fetchTodos, settings } from './api'
 import { toCard } from './model'
 import { kick } from './runner'
-import { getSnapshot, setBusy, setNotice, setSnapshot } from './state'
+import { getSnapshot, setBusy, setNotice, setSnapshot, setTodos } from './state'
 
 type $ = EngineInterface
 
@@ -22,7 +22,11 @@ let timer: { cancel: () => void } | null = null
 
 /** Reads the overview once; a read already under way is shared, not repeated. */
 export function refresh($: $): Promise<Snapshot> {
-  inFlight ??= load($).finally(() => {
+  // The to-do lists are re-read every time, even when the goals overview is unchanged
+  inFlight ??= load($).then(async (s) => {
+    await refreshTodos($)
+    return s
+  }).finally(() => {
     inFlight = null
   })
   return inFlight
@@ -92,4 +96,14 @@ export async function act($: $, key: string, label: string, run: () => Promise<v
   await setBusy($, null)
   await refresh($)
   return ok
+}
+
+/** Re-reads this project's to-do lists (a failed read keeps the last one). */
+export async function refreshTodos($: $): Promise<void> {
+  try {
+    const dir = await $.session.cwd()
+    await setTodos($, { dir, lists: await fetchTodos($, dir) })
+  } catch {
+    // not connected: the pane says so for the goals
+  }
 }

@@ -47,6 +47,7 @@ Updated just now  Refresh
 
 - Under each goal's name is one line saying what its agent is doing. While a run is going, that's the agent's latest step: a progress update, an item it added or finished, or a note it saved. Otherwise it says the run is queued, the goal is paused, what the next run will carry out, or the last run's summary. Claude's `goals_status` tool reports the same line.
 - Below that: the last run and when the next automatic one is due (`· next in 12m`), `· one-off`, or `· no schedule` with a **Set schedule** button (it suggests one, as `/goal-new` does).
+- **Your to-do lists** for this project, each collapsed to its name and count (see below).
 - **Done (n)** at the bottom, collapsed: one-off goals that have finished, each with its last run's summary and **Run again**.
 - **Approve** or **Reject…** each proposal. Rejecting asks what should change, and your answer is saved to the goal's memory.
 - **Run now**, **Cancel run** (asks you to confirm), **Pause** and **Resume**.
@@ -64,9 +65,20 @@ Hotkeys while the pane has focus: `a`/`r` approve or reject the first proposal, 
 | `/goal-new <name>: <objective>` | Create a goal that works in the current directory. It asks how often it should run, with a suggestion first (see below). |
 | `/goal-run <goal>` | Queue a run now |
 | `/goal-pause <goal>`, `/goal-resume <goal>` | Pause or resume a goal |
+| `/todo <text>`, `/todo done <id>`, `/todo` | Add to your to-do list for this project, tick one off, or show the list |
 | `/goal-schedule <goal> <when>` | Set when it runs on its own: `every 30m`, `every 6h`, `every 1d`, optionally `between 08:00-20:00`; `cron 0 9 * * 1-5`; `one-off`; or `off` for on demand only. An interval's first run starts within a minute. |
 
 Goal names match by exact name, then prefix, then any part of the name. If more than one goal matches, the command lists them.
+
+### Your to-do list
+
+Long conversations produce ideas and decisions to come back to, and a context compaction forgets them. The to-do list keeps them outside the conversation, for you:
+
+- `/todo <text>` adds to this project's **To do** list (made the first time). Or ask Claude: "add that to the list". Claude only adds when asked, or offers when an idea is clearly being put off.
+- In the pane, open a list to see its open to-dos. Press one to tick it off (it goes to the done count), add with the box below, or press **Do it** to hand it to a one-off goal that runs now in the background. The to-do shows ◐ until you tick it.
+- After a compaction, say "check my list": Claude reads it with the `todos` tool. Nothing is added to the conversation otherwise: no hooks, no reminders.
+
+A list is any active Conductor plan in the project's directory, and its to-dos are the plan's tasks, so a plan made earlier (like a roadmap) shows up as a list. A plan with one top task over several (`1` over `1.1`, `1.2`, ...) shows the inner ones. Archive a plan to remove its list.
 
 ### Schedules and one-off goals
 
@@ -82,6 +94,7 @@ A **one-off** goal runs once, straight away. When its run ends with nothing left
 | `goal_detail` | One goal's open items, recent runs and memory. Read-only. |
 | `approve_item`, `reject_item` | Approve or reject a proposal. **Asks you first.** |
 | `run_goal` | Queue a run. **Asks you first.** |
+| `todos`, `add_todo`, `complete_todo` | Read your to-do lists, add to one (when you ask, or after offering), tick one off (when you say it's done). |
 | `set_schedule` | Set or clear a goal's schedule (same forms as `/goal-schedule`). **Asks you first.** |
 
 Ask things like "what do my goals need?" or "approve the Alice reply".

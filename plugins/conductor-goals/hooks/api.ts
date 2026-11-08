@@ -6,7 +6,7 @@
  */
 import type { EngineInterface } from 'claude-code'
 
-import type { Schedule } from '../types'
+import type { Schedule, TodoList } from '../types'
 import type { OverviewGoal } from './model'
 
 type $ = EngineInterface
@@ -140,4 +140,18 @@ export async function attachAgent($: $, runId: string, agentId: string): Promise
 /** Ends a run that is still open; `changed` is false when it had already ended (end_run). */
 export async function failRun($: $, runId: string, status: 'failed' | 'timed_out', reason: string): Promise<{ changed: boolean }> {
   return call<{ changed: boolean }>($, 'fail_run', { run_id: runId, status, reason })
+}
+
+// ── The person's to-do lists ──────────────────────────────────────────────────
+
+export async function fetchTodos($: $, dir: string): Promise<TodoList[]> {
+  return (await call<{ lists: TodoList[] }>($, 'todo_list', { working_dir: dir })).lists
+}
+
+export async function addTodo($: $, input: { dir: string; text: string; listId?: string; by?: 'human' | 'agent' }): Promise<{ list_id: string; item_id: string }> {
+  return call($, 'todo_add', { working_dir: input.dir, text: input.text, added_by: input.by ?? 'human', ...(input.listId && { list_id: input.listId }) })
+}
+
+export async function setTodo($: $, listId: string, itemId: string, status: 'pending' | 'active' | 'completed', notes?: string): Promise<void> {
+  await call($, 'todo_set', { list_id: listId, item_id: itemId, status, ...(notes !== undefined && { notes }) })
 }

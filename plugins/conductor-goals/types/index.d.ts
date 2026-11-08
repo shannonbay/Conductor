@@ -65,6 +65,15 @@ export type Snapshot = {
   etag: string | null
 }
 
+/** One to-do on the person's list. */
+export type TodoItem = { id: string; text: string; status: string; depth: number; notes: string | null }
+
+/** A to-do list: an active plan in the project's directory. */
+export type TodoList = { id: string; name: string; items: TodoItem[]; open: number; done: number }
+
+/** The project's to-do lists as last read. */
+export type Todos = { dir: string; lists: TodoList[] }
+
 /** A destructive action waiting for a second press. */
 export type Confirm =
   | { kind: 'cancel-run'; goalId: string }
@@ -102,6 +111,8 @@ declare module 'claude-code' {
       runs: Record<string, RunEntry>
       /** True while the conductor-goals-guard plugin isn't loaded, so no run starts. */
       guardMissing: boolean
+      /** The person's to-do lists for this session's project. */
+      todos: Todos | null
     }
   }
 }
