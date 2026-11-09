@@ -20,7 +20,7 @@ Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, 
 ## How it differs
 
 - **From Claude Code's scheduled tasks (`/schedule`):** scheduled tasks run in Anthropic's cloud, so they keep going with your laptop closed. They suit clear-cut work, like reviewing every PR. A Conductor goal is for ongoing jobs where you want a say: it proposes and waits for you, keeps memory and items between runs, and asks when it's unsure. Its guard holds a run to what you've allowed, outside the model, rather than only asking in the prompt.
-- **From OpenClaw:** OpenClaw is a self-hosted, always-on assistant you message from WhatsApp, Telegram and other chat apps, with broad system access and a large community skills marketplace. Conductor is much smaller: no gateway or server to run, and no third-party skills, just plugins you can read. It uses your Claude Code session, connectors and plan, and works through goals you can see and change, item by item.
+- **From OpenClaw:** OpenClaw is a self-hosted, always-on assistant you message from WhatsApp, Telegram and other chat apps, with broad system access and a large community skills marketplace. Conductor is much smaller: no gateway or server to run, and no marketplace of its own. A goal's run is a Claude Code subagent, so it can use the skills, plugins, MCP servers and connectors you've chosen to install in Claude Code (a job-search goal can use your job-search skill, an inbox goal your Gmail connector), on your Claude plan. It works through goals you can see and change, item by item.
 
 ## Limits
 
