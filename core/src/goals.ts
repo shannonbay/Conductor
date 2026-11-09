@@ -218,3 +218,25 @@ export function updateMemory(db: Database, id: string, fields: Partial<Pick<Goal
 export function deleteMemory(db: Database, id: string): void {
   db.prepare('DELETE FROM goal_memory WHERE id = ?').run(id)
 }
+
+/** The tables that hold a goal's rows, children before the plan itself. */
+const GOAL_TABLES = [
+  'goal_tool_calls', 'goal_health', 'goal_memory', 'goal_runs', 'goal_triggers', 'verifications',
+  'events', 'transcript_messages', 'agent_sessions', 'tasks', 'goals',
+]
+
+/**
+ * Deletes a goal for good: its items, runs, memory, schedule, health checks,
+ * guard decisions and history. Refused while a run is going (cancel it first).
+ */
+export function deleteGoal(db: Database, planId: string): { name: string } {
+  const plan = db.prepare("SELECT name, kind FROM plans WHERE id = ?").get(planId) as { name: string; kind: string } | undefined
+  if (!plan || plan.kind !== 'goal') throw new Error(`Goal ${planId} not found.`)
+  const running = db.prepare("SELECT 1 FROM goal_runs WHERE plan_id = ? AND status IN ('queued', 'running')").get(planId)
+  if (running) throw new Error('This goal has a run in progress: cancel it first, then delete the goal.')
+  db.transaction(() => {
+    for (const table of GOAL_TABLES) db.prepare(`DELETE FROM ${table} WHERE plan_id = ?`).run(planId)
+    db.prepare('DELETE FROM plans WHERE id = ?').run(planId)
+  })()
+  return { name: plan.name }
+}

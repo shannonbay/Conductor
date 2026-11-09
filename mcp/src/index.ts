@@ -37,6 +37,7 @@ import {
   SetScheduleSchema,
   UpdateGoalSchema,
   ReportRunEndSchema,
+  DeleteGoalSchema,
   TodoListSchema,
   TodoAddSchema,
   TodoSetSchema,
@@ -58,7 +59,7 @@ import { verify_task } from './tools/verify_task.js'
 import { list_goals, get_goal_brief, add_item, remember, forget, end_run, run_goal } from './tools/goals.js'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory, set_schedule, update_goal, report_run_end,
+  create_goal, delete_memory, set_schedule, update_goal, report_run_end, delete_goal,
 } from './tools/goal_runner.js'
 import { todo_list, todo_add, todo_set } from './tools/todos.js'
 import { handleListResources, handleReadResource } from './resources.js'
@@ -219,6 +220,7 @@ const TOOLS = [
     ['decide_item', "Records the human's approval or rejection of a goal item.", DecideItemSchema, decide_item],
     ['cancel_run', "Cancels a goal's run in progress.", CancelRunSchema, cancel_run],
     ['set_goal_status', 'Pauses or resumes a goal.', SetGoalStatusSchema, set_goal_status],
+    ['delete_goal', 'Deletes a goal for good, for the human (after they confirm).', DeleteGoalSchema, delete_goal],
     ['attach_agent', 'Records which subagent is doing a goal run.', AttachAgentSchema, attach_agent],
     ['fail_run', 'Marks a goal run failed or timed out.', FailRunSchema, fail_run],
     ['guard_check', "Applies a goal's autonomy to a tool call made during a run.", GuardCheckSchema, guard_check],

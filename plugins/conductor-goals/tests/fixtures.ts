@@ -82,7 +82,7 @@ export type Call = { tool: string; input: Record<string, unknown> }
 
 const TOOLS = [
   'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'create_goal',
-  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set', 'update_goal',
+  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set', 'update_goal', 'delete_goal',
 ] as const
 
 /**
@@ -119,6 +119,12 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
         case 'goals_overview':
           if (input.etag === etag()) return ok({ changed: false, etag: etag() }) as never
           return ok({ changed: true, etag: etag(), goals: goals.map((x) => ({ ...x, open_item_count: x.open_items.length })), hold: opts.hold ?? null }) as never
+        case 'delete_goal': {
+          const at = goals.findIndex((x) => x.id === input.goal_id)
+          if (at >= 0) goals.splice(at, 1)
+          version++
+          return ok({ deleted: input.goal_id }) as never
+        }
         case 'decide_item':
           g!.needs_you = g!.needs_you.filter((t) => t.id !== input.item_id)
           version++

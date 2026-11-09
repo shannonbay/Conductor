@@ -38,6 +38,7 @@ const HUMAN_ONLY = new Set([
   'mcp__conductor__fail_run',
   'mcp__conductor__guard_check',
   'mcp__conductor__create_goal',
+  'mcp__conductor__delete_goal',
   'mcp__conductor__delete_memory',
   'mcp__conductor__set_schedule',
   'mcp__conductor__update_goal',

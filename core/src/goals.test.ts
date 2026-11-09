@@ -5,7 +5,7 @@ import {
   createGoal, getGoal, listGoals, updateGoal, setIntervalTrigger, getIntervalTrigger,
   insertRun, getRun, updateRun, listRuns, getOpenRun, countRunsSince,
   insertMemory, listMemory, updateMemory, deleteMemory, getMemory,
-  type NewTask,
+  deleteGoal, type NewTask,
 } from './index.js'
 
 let db: Database.Database
@@ -115,5 +115,22 @@ describe('work item columns', () => {
     expect(() => insertTask(db, item('2', { external_ref: 'gmail:1' }))).toThrow(/UNIQUE/)
     insertTask(db, item('3'))
     insertTask(db, item('4')) // many items without a ref are fine
+  })
+})
+
+describe('deleteGoal', () => {
+  it('removes the goal and everything it holds; refuses while a run is going', () => {
+    createGoal(db, plan(), { objective: 'Inbox zero' })
+    insertTask(db, item('1'))
+    insertMemory(db, { plan_id: 'g1', kind: 'fact', text: 'x', source: 'human' })
+    const run = insertRun(db, 'g1', 'manual', 'running')
+    expect(() => deleteGoal(db, 'g1')).toThrow(/run in progress/)
+    db.prepare("UPDATE goal_runs SET status = 'completed' WHERE id = ?").run(run.id)
+    expect(deleteGoal(db, 'g1').name).toBeTruthy()
+    expect(getGoal(db, 'g1')).toBeUndefined()
+    for (const t of ['tasks', 'goal_memory', 'goal_runs', 'plans']) {
+      expect((db.prepare(`SELECT COUNT(*) n FROM ${t} WHERE ${t === 'plans' ? 'id' : 'plan_id'} = 'g1'`).get() as { n: number }).n).toBe(0)
+    }
+    expect(() => deleteGoal(db, 'g1')).toThrow(/not found/)
   })
 })

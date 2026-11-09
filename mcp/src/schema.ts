@@ -131,6 +131,10 @@ export const CancelRunSchema = z.object({
   reason: z.string().optional(),
 })
 
+export const DeleteGoalSchema = z.object({
+  goal_id: z.string(),
+})
+
 export const SetGoalStatusSchema = z.object({
   goal_id: z.string(),
   status: z.enum(['active', 'paused']),

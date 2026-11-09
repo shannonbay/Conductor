@@ -7,11 +7,11 @@
 import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
   getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory,
-  setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd,
+  setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd, deleteGoal,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
-  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema,
+  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema, DeleteGoalSchema,
 } from '../schema.js'
 import { existsSync } from 'fs'
 import { nanoid } from 'nanoid'
@@ -174,4 +174,10 @@ export async function report_run_end(args: unknown) {
     record(run.plan_id, run.plan_id, r.outcome === 'held' ? 'run_skipped' : 'agent_failed', { run_id: run.id, ...(r.hold && { hold_until: r.hold.until }), reason: input.answer.slice(0, 200) }, { via: 'plugin' })
   }
   return r
+}
+
+/** Deletes a goal for good, for the person (the plugin confirms first). */
+export async function delete_goal(args: unknown) {
+  const { goal_id } = DeleteGoalSchema.parse(args)
+  return { deleted: goal_id, ...deleteGoal(goal_id) }
 }

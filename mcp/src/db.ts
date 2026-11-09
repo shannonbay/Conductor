@@ -84,3 +84,4 @@ export const clearAllData = () => core.clearAllData(db)
 export function runTransaction<T>(fn: () => T): T {
   return db.transaction(fn)()
 }
+export const deleteGoal = (planId: string) => core.deleteGoal(db, planId)

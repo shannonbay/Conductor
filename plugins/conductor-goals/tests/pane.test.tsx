@@ -223,8 +223,8 @@ test('a goal\'s controls are separated by dots, and a scheduled goal has Resched
   expect(await ui.find({ key: 'reschedule-g1' })).toBeDefined()
   expect(await ui.find({ key: 'schedule-g1' })).toBeUndefined()
   expect(await ui.find({ key: 'reschedule-g2' })).toBeUndefined()
-  // Each goal: Reschedule (or Set schedule) · Run now · Pause, with no dot at either end
-  expect(await ui.findAll({ type: 'Text', text: /^ · $/ })).toHaveLength(4)
+  // Each goal: Reschedule (or Set schedule) · Run now · Pause · Delete, with no dot at either end
+  expect(await ui.findAll({ type: 'Text', text: /^ · $/ })).toHaveLength(6)
   await ui.unmount()
 })
 
@@ -281,5 +281,21 @@ test('a run\'s question waits under Needs you with Answer and Done', async ($, o
     { goal_id: 'g1', item_id: '1', decision: 'answer', feedback: 'Seek and LinkedIn' },
     { goal_id: 'g1', item_id: '2', decision: 'approve' },
   ])
+  await ui.unmount()
+})
+
+test('Delete asks first, then deletes the goal; not while a run is going', async ($, on) => {
+  engine(on)
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Jobs' }), goal({ id: 'g2', name: 'Inbox', open_run: { id: 'r1', status: 'running' } })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'delete-g2' })).toBeUndefined()
+  await ui.press({ key: 'delete-g1' })
+  expect(await ui.find({ type: 'Text', text: /Delete "Jobs" for good/ })).toBeDefined()
+  await ui.press({ key: 'delete-no-g1' })
+  expect(fake.of('delete_goal')).toEqual([])
+  await ui.press({ key: 'delete-g1' })
+  await ui.press({ key: 'delete-yes-g1' })
+  expect(fake.of('delete_goal').map((c) => c.input)).toEqual([{ goal_id: 'g1' }])
   await ui.unmount()
 })

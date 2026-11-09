@@ -9,7 +9,7 @@
 import type { EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
 import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
-import { answerItem, approve, baseUrl, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
+import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
@@ -272,6 +272,27 @@ function proposalRow($: $, e: E, view: View, g: GoalCard, item: GoalCard['needsY
 function controls($: $, e: E, view: View, g: GoalCard) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const isCancelling = view.pending?.kind === 'cancel-run' && view.pending.goalId === g.id
+  const isDeleting = view.pending?.kind === 'delete-goal' && view.pending.goalId === g.id
+
+  if (isDeleting) {
+    return (
+      <Box key={`controls-${g.id}`} flexDirection="column" marginTop={1}>
+        <Text color="yellow">Delete "{g.name}" for good, with its items, runs and memory? This can't be undone.</Text>
+        <Box>
+          <Button
+            key={`delete-yes-${g.id}`}
+            label={view.doing === `delete:${g.id}` ? 'Deleting…' : 'Yes, delete'}
+            onPress={() => {
+              void setConfirm($, null)
+              void act($, `delete:${g.id}`, 'delete the goal', () => deleteGoal($, g.id))
+            }}
+          />
+          <Text dimColor> · </Text>
+          <Button key={`delete-no-${g.id}`} label="Keep it" plain onPress={() => void setConfirm($, null)} />
+        </Box>
+      </Box>
+    )
+  }
 
   if (isCancelling) {
     return (
@@ -333,6 +354,10 @@ function controls($: $, e: E, view: View, g: GoalCard) {
   ) : (
     <Button key={`resume-${g.id}`} label={view.doing === `resume:${g.id}` ? 'Resuming…' : 'Resume'} plain onPress={() => void act($, `resume:${g.id}`, 'resume the goal', () => setGoalStatus($, g.id, 'active'))} />
   ))
+  if (!g.openRun) {
+    // Last, and only without a run going (a run in progress must be cancelled first)
+    buttons.push(<Button key={`delete-${g.id}`} label="Delete" plain onPress={() => void setConfirm($, { kind: 'delete-goal', goalId: g.id })} />)
+  }
 
   return (
     <Box key={`controls-${g.id}`} marginTop={g.needsYou.length > 0 ? 1 : 0}>

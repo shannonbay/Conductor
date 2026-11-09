@@ -106,6 +106,11 @@ export async function updateGoal($: $, goalId: string, changes: GoalChanges): Pr
   return (await call<{ changed: string[] }>($, 'update_goal', { goal_id: goalId, ...changes })).changed
 }
 
+/** Deletes a goal for good (the pane confirms first). */
+export async function deleteGoal($: $, goalId: string): Promise<void> {
+  await call($, 'delete_goal', { goal_id: goalId })
+}
+
 /** The person's answer to a question a run asked. */
 export async function answerItem($: $, goalId: string, itemId: string, text: string): Promise<void> {
   await call($, 'decide_item', { goal_id: goalId, item_id: itemId, decision: 'answer', feedback: text })

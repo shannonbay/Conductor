@@ -88,6 +88,7 @@ export type Confirm =
   | { kind: 'cancel-run'; goalId: string }
   | { kind: 'delete-memory'; goalId: string; memoryId: string }
   | { kind: 'auto'; goalId: string; category: string }
+  | { kind: 'delete-goal'; goalId: string }
 
 /** The goal run this Claude Code session is carrying out. */
 export type ActiveRun = { goalId: string; runId: string; startedAt: number }
