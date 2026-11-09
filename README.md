@@ -12,7 +12,7 @@ What a scheduled prompt (Claude Code's `/schedule`) can't give you: a goal remem
 
 ## Persistent goals
 
-A goal is an objective that never finishes. Type `/goal-new` alone to start from a ready-made goal (unsubscribe from mailing lists, a weekly job scan, tidy your Downloads, inbox triage), each with its rules and schedule set. Or create your own with `/goal-new <name>: <objective>` (it works in the session's directory, and asks how often it should run, suggesting a schedule from the objective), or from the web app's home page (**+ New goal**) with standing instructions too. A goal can also be a **one-off**: it runs once and, when nothing is left open, moves to the pane's **Done** section.
+A goal is an objective that never finishes. Type `/goal-new` alone to start from a ready-made goal (unsubscribe from mailing lists, a weekly job scan, tidy your Downloads, inbox triage, keep your GitHub profile current), each with its rules and schedule set. Or create your own with `/goal-new <name>: <objective>` (it works in the session's directory, and asks how often it should run, suggesting a schedule from the objective), or from the web app's home page (**+ New goal**) with standing instructions too. A goal can also be a **one-off**: it runs once and, when nothing is left open, moves to the pane's **Done** section.
 
 The pane also keeps **your to-do list** for the project (`/todo <text>`, or ask Claude to add something): the ideas and decisions of a long conversation, kept where a context compaction can't lose them. Any to-do can be brought into the conversation with **Plan** (plan mode, for you to review) or **Start**.
 

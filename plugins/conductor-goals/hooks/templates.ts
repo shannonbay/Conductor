@@ -18,8 +18,11 @@ export type Template = {
   tool_map: Record<string, string>
   /** What the goal needs in Claude Code, said once it's created. */
   needs: string
-  /** A question whose answer completes the instructions. */
-  ask?: { question: string; later: string; fill: (answer: string) => string }
+  /**
+   * A question whose answer goes before the instructions: `fill` turns a typed
+   * answer into text; choosing `later` puts `laterText` there instead.
+   */
+  ask?: { question: string; later: string; laterText: string; fill: (answer: string) => string }
   /** Also ask for a CV, to rank results against (the job scan). */
   cv?: boolean
 }
@@ -68,6 +71,7 @@ export const TEMPLATES: Template[] = [
     ask: {
       question: "What jobs should I look for? Type it under Other: the role, location, minimum pay and job sites, e.g. senior software engineer, Wellington or remote, $140k+, on seek.co.nz and LinkedIn.",
       later: 'Ask me in the first run',
+      laterText: '', // set below: ASK_LATER is declared after the templates
       fill: (answer) => [
         `What I'm looking for: ${answer}.`,
         'Each run, search the job sites named (or the main ones for that location) for ads from the last week, skip ads you have already reported (keep their ids in memory), and pick the 3 that fit best.',
@@ -111,7 +115,40 @@ export const TEMPLATES: Template[] = [
     }),
     needs: 'the Gmail connector (connect it with /mcp)',
   },
+  {
+    label: 'Keep my GitHub profile current',
+    name: 'GitHub Profile',
+    objective: "Keep my GitHub profile README up to date with what I've been building",
+    instructions: '', // set below: GITHUB_PROFILE
+    schedule: { kind: 'interval', minutes: 7 * DAY },
+    autonomy: { 'profile.readme_edit': 'propose' },
+    tool_map: {},
+    needs: "the GitHub CLI, gh (the first run installs it if it's missing; you sign in once with gh auth login)",
+    ask: {
+      question: "Where is your profile README checked out (the <username>/<username> repo)? Type its path under Other, or I'll find it or clone it.",
+      later: 'Find or clone it',
+      laterText: '', // set below: GITHUB_FIND
+      fill: (answer) => `My profile README repo is checked out at ${answer}.`,
+    },
+  },
 ]
+
+/** How many templates the first question shows; the rest are behind "More…" (a question holds 4 choices). */
+export const FIRST_CHOICES = 3
+export const MORE = 'More…'
+
+/** The GitHub profile template's standing instructions, after where the repo is. */
+export const GITHUB_PROFILE = [
+  'Each run, check my recent public activity with gh (my repos sorted by last push, and my public events) since the last run.',
+  "When something notable happened in one of my own projects (a release, a new project, a big feature), propose one profile.readme_edit item with the exact new text for the README; once approved, edit the README, commit and push it, and complete the item.",
+  "Only my own projects: small contributions to other people's projects don't belong on the profile. Never change other files or other repos.",
+  "If gh isn't installed, install it for this user only (winget --scope user, brew or apt). If gh isn't signed in, ask me (add_item with ask_person) to run gh auth login, and carry on next run.",
+  'Keep a memory of what the profile already covers, so you never propose the same thing twice.',
+].join(' ')
+
+/** Where the repo is, when the person asked to have it found. */
+export const GITHUB_FIND = "Find my profile README repo (<username>/<username>, with gh api user for my username) checked out on this computer; if there's none, clone it next to my other repos. Say in your summary where it is."
+
 
 /** The optional CV question: find the latest one, a path typed under Other, or skip. */
 export const CV_QUESTION = 'Where is your CV? With it, I rank jobs against your experience. Type its path under Other, or let me find the latest one.'
@@ -137,3 +174,10 @@ export const ASK_LATER = [
   'Each run, search the job sites (the main ones for the location if none are named) for ads from the last week, skip ads you have already reported (keep their ids in memory), and put the 3 that fit best in your end_run summary (title, employer, link and why each fits).',
   'Never apply for a job or contact an employer.',
 ].join(' ') + " I'll answer by discussing this goal."
+
+// Texts declared after the list, put in place
+const jobScan = TEMPLATES.find((t) => t.name === 'Weekly Job Scan')!
+jobScan.ask!.laterText = ASK_LATER
+const github = TEMPLATES.find((t) => t.name === 'GitHub Profile')!
+github.instructions = GITHUB_PROFILE
+github.ask!.laterText = GITHUB_FIND

@@ -190,7 +190,7 @@ test('/goal-new alone offers ready-made goals, each with its rules and schedule'
 })
 
 test('the inbox template maps Gmail tools, whichever Gmail server it is', async ($, on) => {
-  engine(on, { answer: 'Inbox triage' })
+  engine(on, { answers: ['More…', 'Inbox triage'] })
   const fake = fakeConductor(on, [])
   await $.session.start(START)
   await $.command.run(typed('goal-new', ''))
@@ -250,4 +250,18 @@ test('answer_item answers a run\'s question from the conversation; a proposal is
   const no = await $.tool.call({ tool: 'mcp__conductor-goals__answer_item', goal: 'jobs', item_id: '2', answer: 'yes' } as never)
   expect(String(no.result)).toContain('is a proposal, not a question')
   expect(fake.of('decide_item').map((c) => c.input)).toEqual([{ goal_id: 'g1', item_id: '1', decision: 'answer', feedback: 'Seek' }])
+})
+
+test('/goal-new offers three templates and More…, which holds the rest', async ($, on) => {
+  const { asked } = engine(on, { answers: ['More…', 'Keep my GitHub profile current', 'Find or clone it'] })
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', ''))
+  expect(asked[1]).toContain('More ready-made goals')
+  expect(asked[2]).toContain('Where is your profile README checked out')
+  expect(made.text).toContain('Created the goal "GitHub Profile"')
+  const input = fake.of('create_goal')[0]?.input as { instructions: string; autonomy: Record<string, string> }
+  expect(input.instructions).toContain('Find my profile README repo')
+  expect(input.instructions).toContain('propose one profile.readme_edit item')
+  expect(input.autonomy).toEqual({ 'profile.readme_edit': 'propose' })
 })

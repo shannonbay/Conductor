@@ -13,7 +13,7 @@ import { askSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
 import { act, refresh, refreshTodos } from './sync'
 import { readLastAlert, readLastPoll, readTrace } from './alerts'
-import { ASK_LATER, CV_FIND, CV_QUESTION, CV_SKIP, cvInstructions, TEMPLATES } from './templates'
+import { CV_FIND, CV_QUESTION, CV_SKIP, cvInstructions, FIRST_CHOICES, MORE, TEMPLATES } from './templates'
 
 type $ = EngineInterface
 
@@ -269,7 +269,11 @@ export async function goalCommand($: $, command: 'goal-run' | 'goal-pause' | 'go
 async function newFromTemplate($: $): Promise<string> {
   let picked: string
   try {
-    picked = await $.ui.ask("What should I look after? Pick a ready-made goal, or type your own under Other (e.g. keep my inbox under 20 unread).", TEMPLATES.map((t) => t.label))
+    // A question holds 4 choices: the first few templates, then More… for the rest
+    const first = TEMPLATES.slice(0, FIRST_CHOICES).map((t) => t.label)
+    const rest = TEMPLATES.slice(FIRST_CHOICES).map((t) => t.label)
+    picked = await $.ui.ask("What should I look after? Pick a ready-made goal, or type your own under Other (e.g. keep my inbox under 20 unread).", rest.length ? [...first, MORE] : first)
+    if (picked === MORE) picked = await $.ui.ask('More ready-made goals: pick one, or type your own under Other.', rest.length > 1 ? rest : [...rest, 'Cancel'])
   } catch {
     return 'No goal created.'
   }
@@ -284,7 +288,8 @@ async function newFromTemplate($: $): Promise<string> {
       return 'No goal created.'
     }
     if (answer === 'Cancel' || !answer.trim()) return 'No goal created.'
-    instructions = answer === template.ask.later ? ASK_LATER : template.ask.fill(answer.trim())
+    const first = answer === template.ask.later ? template.ask.laterText : template.ask.fill(answer.trim())
+    instructions = [first, template.instructions].filter(Boolean).join(' ')
   }
   if (template.cv) {
     let answer = CV_SKIP
