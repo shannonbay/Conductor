@@ -118,8 +118,15 @@ async function reportRunEnd($: $, runId: string, answer: string, reason: string,
   }
 }
 
+/**
+ * Conductor tools with an effect outside the computer: a run may use them only
+ * as the goal's guard allows (its tool rules map them to an action category).
+ */
+const GUARDED_CONDUCTOR = new Set(['mcp__conductor__unsubscribe_one_click'])
+
 /** Fixed rules for a run's agent; null when the goal's guard or the session decides. */
 function fixedVerdict(tool: string) {
+  if (GUARDED_CONDUCTOR.has(tool)) return null
   if (HUMAN_ONLY.has(tool) || tool === 'mcp__conductor__run_goal' || tool.startsWith('mcp__conductor-goals__')) return deny(HUMAN_ONLY_REASON)
   if (tool === 'Agent') return deny('Goal runs work on their own; they do not start other agents.')
   if (tool.startsWith('mcp__conductor__') || (tool as string) === 'SubagentHandback') return allow
@@ -190,13 +197,13 @@ export const register: Register = (on) => {
     const runId = await runIdFor($, e.agentId)
     if (!runId) return next(e)
     if ((e.tool as string) === 'SubagentHandback') return { result: { success: true, message: 'Report saved by Conductor (end_run).' } } as never
-    if (e.tool.startsWith('mcp__conductor__')) return next({ ...e, run_scope: runId } as typeof e)
+    if (e.tool.startsWith('mcp__conductor__') && !GUARDED_CONDUCTOR.has(e.tool)) return next({ ...e, run_scope: runId } as typeof e)
     if (fixedVerdict(e.tool) === null) {
       const verdict = await guardCheck($, runId, e.tool)
       if (verdict.decision === 'deny') return { deny: verdict.reason ?? "Not allowed by the goal's autonomy." }
       if (verdict.category) approvedCalls.add(e.tool_use_id)
     }
-    return next(e)
+    return e.tool.startsWith('mcp__conductor__') ? next({ ...e, run_scope: runId } as typeof e) : next(e)
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {

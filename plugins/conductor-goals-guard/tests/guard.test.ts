@@ -9,6 +9,8 @@ const START = { cwd: '/work/project', surface: 'terminal', isInteractive: true }
  * conductor MCP server answering guard_check. Records the run_scope each
  * Conductor call arrived with.
  */
+const unsubscribeApproved = { value: false }
+
 function world(on: On) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.register', (_, e) => ({ value: { tool: `mcp__conductor-goals-guard__${e.name}` } }))
@@ -28,7 +30,9 @@ function world(on: On) {
     const name = (e as unknown as { tool_name: string }).tool_name
     return { result: JSON.stringify(name === 'mcp__gmail__delete'
       ? { decision: 'deny', category: 'email.delete', reason: 'email.delete is off for this goal' }
-      : { decision: 'allow' }) } as never
+      : name === 'mcp__conductor__unsubscribe_one_click' && !unsubscribeApproved.value
+        ? { decision: 'deny', category: 'email.unsubscribe', reason: 'email.unsubscribe needs approval first' }
+        : { decision: 'allow' }) } as never
   })
   return { scopes }
 }
@@ -94,4 +98,21 @@ test("a run stopped by the usage limit is reported to Conductor; an ordinary tur
   await turn("You've hit your 5-hour limit · resets 8:10pm", 'model-agent')
   await turn("You've hit your 5-hour limit · resets 8:10pm", 'run-agent')
   expect(reports).toEqual([{ run_id: 'run_abc123', answer: "You've hit your 5-hour limit · resets 8:10pm", reason: 'answer' }])
+})
+
+test("one-click unsubscribe goes through the goal's guard, and carries the run once allowed", async ($, on) => {
+  const { scopes } = world(on)
+  const sent: unknown[] = []
+  on('tool.call', { tool: 'mcp__conductor__unsubscribe_one_click' }, (_, e) => {
+    sent.push((e as unknown as { run_scope?: unknown }).run_scope)
+    return { result: '{"unsubscribed":true}' } as never
+  })
+  await $.session.start(START)
+  unsubscribeApproved.value = false
+  const refused = await $.tool.call(call({ tool: 'mcp__conductor__unsubscribe_one_click', url: 'https://x.example/u', agentId: 'run-agent' }))
+  expect(said(refused)).toContain('needs approval')
+  unsubscribeApproved.value = true
+  await $.tool.call(call({ tool: 'mcp__conductor__unsubscribe_one_click', url: 'https://x.example/u', agentId: 'run-agent' }))
+  expect(sent).toEqual(['run_abc123'])
+  expect(scopes).toEqual([])
 })

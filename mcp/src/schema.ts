@@ -131,6 +131,10 @@ export const CancelRunSchema = z.object({
   reason: z.string().optional(),
 })
 
+export const UnsubscribeOneClickSchema = z.object({
+  url: z.string().describe("The https link from the message's List-Unsubscribe header (only when its List-Unsubscribe-Post header is List-Unsubscribe=One-Click)"),
+})
+
 export const DeleteGoalSchema = z.object({
   goal_id: z.string(),
 })

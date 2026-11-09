@@ -38,6 +38,7 @@ import {
   UpdateGoalSchema,
   ReportRunEndSchema,
   DeleteGoalSchema,
+  UnsubscribeOneClickSchema,
   TodoListSchema,
   TodoAddSchema,
   TodoSetSchema,
@@ -62,6 +63,7 @@ import {
   create_goal, delete_memory, set_schedule, update_goal, report_run_end, delete_goal,
 } from './tools/goal_runner.js'
 import { todo_list, todo_add, todo_set } from './tools/todos.js'
+import { unsubscribe_one_click } from './tools/unsubscribe.js'
 import { handleListResources, handleReadResource } from './resources.js'
 import { getRun } from './db.js'
 import { withScope } from './session.js'
@@ -221,6 +223,7 @@ const TOOLS = [
     ['cancel_run', "Cancels a goal's run in progress.", CancelRunSchema, cancel_run],
     ['set_goal_status', 'Pauses or resumes a goal.', SetGoalStatusSchema, set_goal_status],
     ['delete_goal', 'Deletes a goal for good, for the human (after they confirm).', DeleteGoalSchema, delete_goal],
+    ['unsubscribe_one_click', "Unsubscribes from a mailing list with RFC 8058 one-click: one POST to the https List-Unsubscribe link of a message whose List-Unsubscribe-Post header is 'List-Unsubscribe=One-Click'. No browser needed. In a goal run, only for an approved unsubscribe.", UnsubscribeOneClickSchema, unsubscribe_one_click],
     ['attach_agent', 'Records which subagent is doing a goal run.', AttachAgentSchema, attach_agent],
     ['fail_run', 'Marks a goal run failed or timed out.', FailRunSchema, fail_run],
     ['guard_check', "Applies a goal's autonomy to a tool call made during a run.", GuardCheckSchema, guard_check],
