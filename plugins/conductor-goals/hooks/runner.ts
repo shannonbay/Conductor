@@ -53,7 +53,7 @@ export async function registerRunnerAgent($: $): Promise<void> {
     // guard_check stays callable: the plugin calls it inside the run's loop (the guard refuses it to the agent)
     disallowedTools: [
       ...RUN_AGENT_DENIED_TOOLS.filter((t) => t !== 'mcp__conductor__guard_check'),
-      'mcp__conductor-goals__approve_item', 'mcp__conductor-goals__reject_item', 'mcp__conductor-goals__run_goal', 'mcp__conductor-goals__set_schedule', 'mcp__conductor-goals__update_goal',
+      'mcp__conductor-goals__approve_item', 'mcp__conductor-goals__reject_item', 'mcp__conductor-goals__answer_item', 'mcp__conductor-goals__run_goal', 'mcp__conductor-goals__set_schedule', 'mcp__conductor-goals__update_goal',
     ],
     background: true,
   })

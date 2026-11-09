@@ -9,7 +9,7 @@
 import type { EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
 import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
-import { approve, baseUrl, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
+import { answerItem, approve, baseUrl, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
@@ -203,6 +203,38 @@ function proposalRow($: $, e: E, view: View, g: GoalCard, item: GoalCard['needsY
     void act($, `reject:${key}`, 'reject', () => reject($, g.id, item.id, text.trim())).then((ok) => {
       if (ok) void setRejecting($, null)
     })
+  }
+  const reply = (text: string) => {
+    if (!text.trim()) return
+    void act($, `answer:${key}`, 'answer', () => answerItem($, g.id, item.id, text.trim())).then((ok) => {
+      if (ok) void setRejecting($, null)
+    })
+  }
+
+  // A run's question or request: answer it, or mark it done (e.g. after connecting a service)
+  if (item.asksPerson) {
+    return (
+      <Box key={key} flexDirection="column" marginTop={1}>
+        <Text color="yellow">? {item.title}</Text>
+        {view.open === key && Input ? (
+          <Box flexDirection="column">
+            <Input key={`answer-${key}`} label="Your answer (saved to the goal's memory)" submitLabel="Send" autoFocus onSubmit={reply} />
+            <Button key={`cancel-${key}`} label="Cancel" plain onPress={() => void setRejecting($, null)} />
+          </Box>
+        ) : (
+          <Box>
+            <Button key={`answer-btn-${key}`} label="Answer…" variant="primary" hotkey={isFirst ? 'a' : undefined} onPress={() => void setRejecting($, key)} />
+            <Text dimColor> · </Text>
+            <Button
+              key={`done-${key}`}
+              label={view.doing === `approve:${key}` ? 'Marking…' : 'Done'}
+              plain
+              onPress={() => void act($, `approve:${key}`, 'mark it done', () => approve($, g.id, item.id))}
+            />
+          </Box>
+        )}
+      </Box>
+    )
   }
 
   return (

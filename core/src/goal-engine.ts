@@ -43,6 +43,12 @@ export interface AddItemInput {
   status?: 'pending' | 'active'
   result?: string
   notes?: string
+  /**
+   * Something only the person can give or do (a choice, information, connecting
+   * a service, allowing a site): the item waits under Needs you, like a proposal,
+   * until they answer it or mark it done.
+   */
+  ask_person?: boolean
 }
 
 export interface AddItemResult {
@@ -85,7 +91,11 @@ export function addItem(db: Database, planId: string, runId: string | null, inpu
   }
 
   if (!input.action) {
-    insertTask(db, { ...base, status: input.status ?? 'pending', state: {} })
+    if (input.ask_person) {
+      insertTask(db, { ...base, status: 'active', state: { asks_person: true }, requires_approval: true, review_requested_at: now })
+    } else {
+      insertTask(db, { ...base, status: input.status ?? 'pending', state: {} })
+    }
     return { task: getTask(db, planId, id)!, existing: false }
   }
 

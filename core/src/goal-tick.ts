@@ -8,9 +8,9 @@
  * takes a lease: only the lease holder runs health checks and claims runs.
  */
 import type { Database } from 'better-sqlite3'
-import { getTask } from './queries.js'
-import { approveTask, isProposal, rejectTask } from './gates.js'
-import { getGoal, getOpenRun, getRun, listGoals, updateGoal, updateRun, insertRun } from './goals.js'
+import { getTask, updateTask } from './queries.js'
+import { approveTask, isProposal, rejectTask, asksPerson } from './gates.js'
+import { getGoal, getOpenRun, getRun, listGoals, updateGoal, updateRun, insertRun, insertMemory } from './goals.js'
 import { archiveResolved, decideTick, failRun, nextIntervalRun, queueRun, recordSkip, GoalError } from './goal-engine.js'
 import { healthDue, runHealthCheck } from './health.js'
 import type { GoalRun, Task } from './types.js'
@@ -62,6 +62,7 @@ export function goalRunPrompt(p: { goalId: string; runId: string; name: string; 
     `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
     `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries.`,
     'Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal\'s state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category\'s autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Conductor goal guard means: propose it with add_item instead.',
+    'When you need something only the person can give or do (a choice, details you can\'t find, connecting a service, allowing a site), add_item with ask_person: true and one clear question, and carry on with what you can; don\'t guess. Their answer arrives as memory and the item is completed.',
     'Save anything future runs should know with remember.',
     'Your summary, items and memory are read by the person who owns this goal: write to them as "you", and never guess their gender or pronouns.',
     `You have about ${p.maxRunMinutes} minutes; leave the rest for the next run. Don't wait on long background commands. Finish with end_run and a short summary: that summary is your report, so your final message can be one line.`,
@@ -212,14 +213,26 @@ export async function schedulerPass(db: Database, opts: PassOptions): Promise<Pa
  * one saves the feedback as goal memory (in rejectTask).
  */
 export function decideItem(
-  db: Database, planId: string, taskId: string, input: { decision: 'approve' | 'reject'; feedback?: string },
+  db: Database, planId: string, taskId: string, input: { decision: 'approve' | 'reject' | 'answer'; feedback?: string },
 ): { task: Task; queuedRun: GoalRun | null } {
   const task = getTask(db, planId, taskId)
   if (!task) throw new GoalError(`Item ${taskId} not found.`)
   let queuedRun: GoalRun | null = null
-  if (input.decision === 'approve') {
+  const active = () => getGoal(db, planId)?.status === 'active'
+  if (input.decision === 'answer') {
+    // The person's answer to a question a run asked: saved to the item and the
+    // goal's memory, and a run is queued to carry on with it
+    const answer = (input.feedback ?? '').trim()
+    if (!answer) throw new GoalError('An answer is needed.')
+    if (!asksPerson(task)) throw new GoalError(`Item ${taskId} isn't a question for you; approve or reject it instead.`)
     approveTask(db, planId, taskId)
-    if (isProposal(task) && getGoal(db, planId)?.status === 'active') queuedRun = queueRun(db, planId)
+    updateTask(db, planId, taskId, { result: `Your answer: ${answer}`, updated_at: new Date().toISOString() })
+    insertMemory(db, { plan_id: planId, kind: 'fact', text: `You answered "${task.goal}": ${answer}`, source: 'human', source_ref: taskId })
+    if (active()) queuedRun = queueRun(db, planId)
+  } else if (input.decision === 'approve') {
+    approveTask(db, planId, taskId)
+    // An approved proposal is carried out by a run; a done request lets the run carry on
+    if ((isProposal(task) || asksPerson(task)) && active()) queuedRun = queueRun(db, planId)
   } else {
     rejectTask(db, planId, taskId, input.feedback ?? '')
     // A one-off has no schedule to bring the next run: queue one to revise or drop the proposal

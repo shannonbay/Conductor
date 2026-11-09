@@ -100,6 +100,24 @@ describe('expireStaleRuns', () => {
 })
 
 describe('decideItem', () => {
+  it('a question for the person waits under Needs you; answering it saves the answer and queues a run', () => {
+    const q = addItem(db, 'g1', null, { goal: 'Which job sites should I search?', ask_person: true }).task
+    expect(q).toMatchObject({ status: 'active', review_requested_at: expect.any(String) })
+    expect(buildOverview(db).goals[0]!.needs_you[0]).toMatchObject({ id: q.id, asks_person: true })
+    expect(() => decideItem(db, 'g1', q.id, { decision: 'answer', feedback: ' ' })).toThrow(/answer is needed/)
+    const r = decideItem(db, 'g1', q.id, { decision: 'answer', feedback: 'Seek and LinkedIn' })
+    expect(r.task).toMatchObject({ status: 'completed', result: 'Your answer: Seek and LinkedIn' })
+    expect(r.queuedRun).not.toBeNull()
+    expect(listMemory(db, 'g1').map((m) => m.text)).toContain('You answered "Which job sites should I search?": Seek and LinkedIn')
+  })
+
+  it('a request marked done completes and queues a run; a proposal cannot be answered', () => {
+    const q = addItem(db, 'g1', null, { goal: 'Connect Gmail', ask_person: true }).task
+    expect(decideItem(db, 'g1', q.id, { decision: 'approve' })).toMatchObject({ task: { status: 'completed' }, queuedRun: expect.anything() })
+    const p = addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply' } }).task
+    expect(() => decideItem(db, 'g1', p.id, { decision: 'answer', feedback: 'yes' })).toThrow(/isn't a question/)
+  })
+
   it('approving a proposal keeps it active and queues a run', () => {
     addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply' } })
     const r = decideItem(db, 'g1', '1', { decision: 'approve' })

@@ -106,6 +106,11 @@ export async function updateGoal($: $, goalId: string, changes: GoalChanges): Pr
   return (await call<{ changed: string[] }>($, 'update_goal', { goal_id: goalId, ...changes })).changed
 }
 
+/** The person's answer to a question a run asked. */
+export async function answerItem($: $, goalId: string, itemId: string, text: string): Promise<void> {
+  await call($, 'decide_item', { goal_id: goalId, item_id: itemId, decision: 'answer', feedback: text })
+}
+
 export async function approve($: $, goalId: string, itemId: string): Promise<void> {
   await call($, 'decide_item', { goal_id: goalId, item_id: itemId, decision: 'approve' })
 }

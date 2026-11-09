@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { BAND, engine, fakeConductor, goal, proposal, START, SURFACES } from './fixtures'
+import { BAND, engine, fakeConductor, goal, proposal, START, SURFACES, question } from './fixtures'
 
 /** A command typed at the prompt. */
 const typed = (command: string, args: string) =>
@@ -239,4 +239,15 @@ test('a typed CV path goes into the instructions; Skip leaves the CV out', async
   await $.command.run(typed('goal-new', ''))
   expect(String(fake.of('create_goal')[0]?.input.instructions)).toContain('My CV is at C:/Users/me/Documents/cv.pdf.')
   expect(String(fake.of('create_goal')[1]?.input.instructions)).not.toContain('CV')
+})
+
+test('answer_item answers a run\'s question from the conversation; a proposal is refused', async ($, on) => {
+  engine(on)
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Jobs', needs_you: [question('1', 'Which job sites?'), proposal('2', 'Email the top 3')] })])
+  await $.session.start(START)
+  const ok = await $.tool.call({ tool: 'mcp__conductor-goals__answer_item', goal: 'jobs', item_id: '1', answer: 'Seek' } as never)
+  expect(String(ok.result)).toContain('Answered "Which job sites?"')
+  const no = await $.tool.call({ tool: 'mcp__conductor-goals__answer_item', goal: 'jobs', item_id: '2', answer: 'yes' } as never)
+  expect(String(no.result)).toContain('is a proposal, not a question')
+  expect(fake.of('decide_item').map((c) => c.input)).toEqual([{ goal_id: 'g1', item_id: '1', decision: 'answer', feedback: 'Seek' }])
 })

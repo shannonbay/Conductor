@@ -6,7 +6,7 @@
 import { createHash } from 'crypto'
 import type { Database } from 'better-sqlite3'
 import { compareTaskIds, deserializeTask, getEvents } from './queries.js'
-import { isProposal } from './gates.js'
+import { isProposal, asksPerson } from './gates.js'
 import { getOpenRun, getGoal, listGoals, listMemory, listRuns } from './goals.js'
 import { autonomyFor } from './goal-engine.js'
 import { getSchedule } from './schedule.js'
@@ -44,6 +44,7 @@ export function itemView(t: Task) {
     external_ref: t.external_ref,
     run_id: t.run_id,
     action: isProposal(t) ? t.state.action : null,
+    asks_person: asksPerson(t),
     awaiting_review: t.review_requested_at !== null,
     approved_to_execute: isProposal(t) && t.approved_at !== null && t.status === 'active',
     updated_at: t.updated_at,

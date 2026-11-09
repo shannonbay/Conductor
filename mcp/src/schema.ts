@@ -81,6 +81,8 @@ export const AddItemSchema = z.object({
   }).optional().describe(
     'An action this item is about. "propose" categories create an item that waits for human approval; "auto" categories record an action you already took; "off" categories are refused.'),
   status: z.enum(['pending', 'active']).optional().describe('For items without an action (default pending)'),
+  ask_person: z.boolean().optional().describe(
+    'true: this item asks the person for something only they can give or do (a choice, details, connecting a service, allowing a site). It waits under Needs you and alerts them; their answer arrives as memory.'),
   result: z.string().optional().describe('For auto actions: what you did'),
   notes: z.string().optional(),
 })
@@ -120,8 +122,8 @@ export const GoalsOverviewSchema = z.object({
 export const DecideItemSchema = z.object({
   goal_id: z.string(),
   item_id: z.string(),
-  decision: z.enum(['approve', 'reject']),
-  feedback: z.string().optional().describe('Required when rejecting'),
+  decision: z.enum(['approve', 'reject', 'answer']),
+  feedback: z.string().optional().describe('Required when rejecting; the answer when answering a question item'),
 })
 
 export const CancelRunSchema = z.object({

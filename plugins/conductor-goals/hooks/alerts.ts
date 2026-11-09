@@ -186,11 +186,13 @@ export async function announce($: $, goals: GoalCard[], now: number): Promise<vo
 }
 
 /** What the phone shows: the alert and how to answer it from there. */
-export function phoneText(proposals: { goal: GoalCard; item: { title: string } }[], failures: { goal: GoalCard }[]): string {
+export function phoneText(proposals: { goal: GoalCard; item: { title: string; asksPerson?: boolean } }[], failures: { goal: GoalCard }[]): string {
   const parts: string[] = []
   if (proposals.length === 1) {
     const { goal, item } = proposals[0]!
-    parts.push(`${goal.name} asks: "${item.title}". Reply "approve" or "reject, because ..." in Claude.`)
+    parts.push(item.asksPerson
+      ? `${goal.name} needs you: "${item.title}". Reply with your answer in Claude.`
+      : `${goal.name} asks: "${item.title}". Reply "approve" or "reject, because ..." in Claude.`)
   } else if (proposals.length > 1) {
     parts.push(`${proposals.length} proposals need you. Reply "what needs me?" in Claude.`)
   }

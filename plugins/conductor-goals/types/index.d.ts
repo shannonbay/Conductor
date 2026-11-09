@@ -1,5 +1,5 @@
 /** A goal work item: a proposal waiting for the person, or an open item. */
-export type Item = { id: string; title: string; category: string | null; summary: string | null }
+export type Item = { id: string; title: string; category: string | null; summary: string | null; /** A question or request for the person, not a proposal. */ asksPerson?: boolean }
 
 /** One goal run. */
 export type Run = {

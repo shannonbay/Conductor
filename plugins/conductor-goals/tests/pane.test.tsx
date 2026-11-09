@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { engine, fakeConductor, goal, PANE, proposal, START, SURFACES } from './fixtures'
+import { engine, fakeConductor, goal, PANE, proposal, START, SURFACES, question } from './fixtures'
 
 test('the pane shows a proposal with hotkeys, and Approve records it in Conductor', async ($, on) => {
   const { statuses } = engine(on)
@@ -264,5 +264,22 @@ test('a category approved every time lately can be switched to auto, after a sec
   await ui.press({ key: 'auto-g1-file.delete' })
   await ui.press({ key: 'auto-yes-g1-file.delete' })
   expect(fake.of('update_goal').map((c) => c.input)).toEqual([{ goal_id: 'g1', autonomy: { 'file.delete': 'auto' } }])
+  await ui.unmount()
+})
+
+test('a run\'s question waits under Needs you with Answer and Done', async ($, on) => {
+  engine(on)
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Jobs', needs_you: [question('1', 'Which job sites should I search?'), question('2', 'Connect Gmail')] })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /\? Which job sites should I search\?/ })).toBeDefined()
+  expect(await ui.find({ key: 'approve-g1/1' })).toBeUndefined() // not a proposal
+  await ui.press({ key: 'answer-btn-g1/1' })
+  await ui.input({ key: 'answer-g1/1', text: 'Seek and LinkedIn' })
+  await ui.press({ key: 'done-g1/2' })
+  expect(fake.of('decide_item').map((c) => c.input)).toEqual([
+    { goal_id: 'g1', item_id: '1', decision: 'answer', feedback: 'Seek and LinkedIn' },
+    { goal_id: 'g1', item_id: '2', decision: 'approve' },
+  ])
   await ui.unmount()
 })

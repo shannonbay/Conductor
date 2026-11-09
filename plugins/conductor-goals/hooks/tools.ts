@@ -6,7 +6,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
-import { addTodo, approve, createGoal, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
+import { addTodo, answerItem, approve, createGoal, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
 import { ago, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize, type GoalChanges } from './model'
 import { kick } from './runner'
 import { askSchedule, suggestSchedule } from './schedule'
@@ -40,6 +40,11 @@ export const TOOLS = [
     name: 'reject_item',
     description: "Rejects a Conductor proposal with feedback; the feedback is saved to the goal's memory so later runs learn from it. The person is asked to confirm first.",
     inputSchema: { type: 'object', properties: { goal: GOAL, item_id: ITEM, feedback: { type: 'string', description: 'What should change.' } }, required: ['goal', 'item_id', 'feedback'] },
+  },
+  {
+    name: 'answer_item',
+    description: "Answers a question a Conductor goal's run asked the person (an item marked as a question), with the person's own words. Only when they've given the answer.",
+    inputSchema: { type: 'object', properties: { goal: GOAL, item_id: ITEM, answer: { type: 'string', description: "The person's answer." } }, required: ['goal', 'item_id', 'answer'] },
   },
   {
     name: 'run_goal',
@@ -197,6 +202,15 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
     return fail(`No proposal ${String(input.item_id)} waits in ${goal.name}.${waiting ? ` Waiting: ${waiting}.` : ' Nothing is waiting.'}`)
   }
   const key = `${goal.id}/${item.id}`
+
+  if (name === 'answer_item') {
+    const text = String(input.answer ?? '').trim()
+    if (!text) return fail('An answer is needed.')
+    if (!item.asksPerson) return fail(`"${item.title}" is a proposal, not a question: approve or reject it.`)
+    return (await act($, `answer:${key}`, 'answer', () => answerItem($, goal.id, item.id, text)))
+      ? { text: `Answered "${item.title}"; ${goal.name}'s next run carries on with it (queued now).`, isError: false }
+      : fail('The answer failed; see the Goals pane.')
+  }
 
   if (name === 'approve_item') {
     const what = `"${item.title}"${item.summary ? ` (${item.summary})` : ''}`

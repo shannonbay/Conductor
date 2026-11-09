@@ -231,6 +231,11 @@ export function isProposal(task: Task): boolean {
   return typeof task.state?.action === 'object' && task.state.action !== null
 }
 
+/** An item asking the person for something only they can give or do (add_item with ask_person). */
+export function asksPerson(task: Task): boolean {
+  return task.state?.asks_person === true
+}
+
 /**
  * Approves a task waiting for review. Normally this completes it. A goal
  * proposal (state.action) stays active instead: approval means "go ahead",
