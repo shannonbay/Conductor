@@ -1,14 +1,34 @@
 # Conductor
 
-Standing goals for AI agents — "keep my inbox under control", "triage new issues", "keep dependencies current" — run by Claude Code, checked by you.
+A personal assistant that lives in Claude Code: it keeps looking after the things you hand it, asks before it does anything you haven't allowed, and remembers what you decided.
 
-An agent session ends; the work doesn't. Conductor keeps everything a long-lived goal needs **outside** the agent: its instructions, what's open, what you approved or rejected, and the rules it has learned. On a schedule (or a webhook, or a failing health check) it starts a fresh run in a background Claude Code subagent, hands it a one-call brief, and records what the run did for the next one. You stay in charge from the **Goals pane** beside your Claude Code chat: approve or reject proposed actions, and let the agent act on its own one category at a time once you trust it.
-
-It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `conductor-goals` runs goals and shows the Goals pane, and `conductor-goals-guard` keeps each run within its goal. An optional **web app** adds goal pages in a browser and webhook triggers. Everything lives in one local SQLite database.
-
-What a scheduled prompt (Claude Code's `/schedule`) can't give you: a goal remembers between runs (its items, memory and your past decisions), and it can't act beyond what you've approved, because the approval gate is enforced outside the model, not just asked for in the prompt.
+You give it **goals**, things you want kept true: "unsubscribe me from mailing lists I never read", "find me the three best new job ads each week", "keep my GitHub profile up to date", "clear old installers out of Downloads". Each goal runs on its own schedule in the background of your Claude Code session, on your Claude plan. When it wants to act, it proposes, and you approve or reject from the **Goals pane** beside your chat, or from your phone.
 
 ![The Goals pane: five goals with their last and next runs and Reschedule, Run now and Pause, then the to-do lists, with an expanded to-do showing Ask, Plan and Start](docs/goals-pane.png)
+
+## What it's like
+
+- **It asks first.** "Unsubscribe from Chess.com (13 messages in 60 days, none opened) and bin its mail?" waits under **Needs you** until you approve. Rejected with "too formal"? That feedback becomes memory, and later runs follow it.
+- **It reaches you when you're away.** With Remote Control connected, a new proposal or question pushes to the Claude app on your phone. Reply "approve" and it's done.
+- **It asks when it's stuck.** When a run needs something only you can give (which job sites, signing in to `gh`), it asks under Needs you instead of guessing, and carries on with your answer.
+- **It earns trust one kind of action at a time.** Each kind of action (send mail, delete a file, archive) is *off*, *propose* or *auto*. After 10 approvals in a row, the pane offers to switch that kind to auto.
+- **It remembers.** Each goal keeps its own memory, its open items (never handling the same email twice) and its run history, outside any one conversation.
+- **You see what it costs.** Each run shows its tokens and time, e.g. `· 48k tokens · 2m`.
+
+Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, a weekly job scan with your CV, tidy Downloads, inbox triage, keep your GitHub profile current) or type your own. Schedules can be plain words: "30d", "weekdays at 9", "the first of every month".
+
+## How it differs
+
+- **From Claude Code's scheduled tasks (`/schedule`):** scheduled tasks run in Anthropic's cloud, so they keep going with your laptop closed. They suit clear-cut work, like reviewing every PR. A Conductor goal is for ongoing jobs where you want a say: it proposes and waits for you, keeps memory and items between runs, and asks when it's unsure. Its guard holds a run to what you've allowed, outside the model, rather than only asking in the prompt.
+- **From OpenClaw:** OpenClaw is a self-hosted, always-on assistant you message from WhatsApp, Telegram and other chat apps, with broad system access and a large community skills marketplace. Conductor is much smaller: no gateway or server to run, and no third-party skills, just plugins you can read. It uses your Claude Code session, connectors and plan, and works through goals you can see and change, item by item.
+
+## Limits
+
+- **It runs while Claude Code is open** on your computer. Runs don't happen with your laptop closed (yet).
+- **Phone alerts need Remote Control** connected and mobile push on in `/config`; a short Claude turn sends each one.
+- **It's early.** It's built and used daily by one person, on Windows; expect rough edges.
+
+It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `conductor-goals` runs goals and shows the Goals pane, and `conductor-goals-guard` keeps each run within its goal. An optional **web app** adds goal pages in a browser and webhook triggers. Everything lives in one local SQLite database. Setup: [Quickstart](#quickstart).
 
 ## Persistent goals
 
