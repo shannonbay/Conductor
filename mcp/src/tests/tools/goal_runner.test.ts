@@ -232,3 +232,13 @@ describe('update_goal and report_run_end', () => {
     expect(await tick('session-A')).toMatchObject({ claimed: [], hold: expect.anything() })
   })
 })
+
+describe('create_goal with autonomy and tool rules', () => {
+  it('stores them, so a template\'s approvals work from the first run', async () => {
+    const r = await create_goal({
+      name: 'Inbox', objective: 'triage', working_dir: process.cwd(),
+      autonomy: { 'email.send': 'off' }, tool_map: { 'mcp__*Gmail*__send_message': 'email.send' },
+    })
+    expect(getGoal(r.id)).toMatchObject({ autonomy: { 'email.send': 'off' }, tool_map: { 'mcp__*Gmail*__send_message': 'email.send' } })
+  })
+})

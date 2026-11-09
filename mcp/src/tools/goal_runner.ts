@@ -110,8 +110,9 @@ export async function create_goal(args: unknown) {
   const id = `plan_${nanoid(10)}`
   createGoal(
     { id, name: input.name, description: input.objective, status: 'active', working_dir: input.working_dir, created_at: now, updated_at: now },
-    { objective: input.objective, instructions: input.instructions ?? '', autonomy: {}, one_off: input.one_off ?? false },
+    { objective: input.objective, instructions: input.instructions ?? '', autonomy: input.autonomy ?? {}, one_off: input.one_off ?? false },
   )
+  if (input.tool_map && Object.keys(input.tool_map).length) applyGoalChanges(id, { tool_map: input.tool_map })
   record(id, id, 'plan_created', { kind: 'goal', one_off: input.one_off ?? false }, human)
   const applied = input.schedule ? applySchedule(id, input.schedule) : { schedule: null, next_run_at: null }
   // A one-off runs straight away; a new interval is due now (the next tick starts it)

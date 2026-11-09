@@ -63,6 +63,7 @@ export function goalRunPrompt(p: { goalId: string; runId: string; name: string; 
     `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries.`,
     'Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal\'s state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category\'s autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Conductor goal guard means: propose it with add_item instead.',
     'Save anything future runs should know with remember.',
+    'Your summary, items and memory are read by the person who owns this goal: write to them as "you", and never guess their gender or pronouns.',
     `You have about ${p.maxRunMinutes} minutes; leave the rest for the next run. Don't wait on long background commands. Finish with end_run and a short summary: that summary is your report, so your final message can be one line.`,
   ].join('\n\n')
 }

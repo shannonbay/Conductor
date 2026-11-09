@@ -142,6 +142,9 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
           const oneOff = input.one_off === true
           const made = goal({
             id: `g${goals.length + 1}`, name: String(input.name), objective: String(input.objective), schedule, one_off: oneOff,
+            ...(input.instructions !== undefined && { instructions: String(input.instructions) }),
+            ...(input.autonomy !== undefined && { autonomy: input.autonomy as Record<string, string> }),
+            ...(input.tool_map !== undefined && { tool_map: input.tool_map as Record<string, string> }),
             next_run_at: schedule ? new Date(NOW).toISOString() : null,
             open_run: oneOff ? { id: `r${++runs}`, status: 'queued' } : null,
           })
@@ -225,7 +228,7 @@ export function fakeConductor(on: On, goals: FakeGoal[], opts: { fail?: boolean;
 }
 
 /** Answers the engine nouns the plugin calls; records what it shows. */
-export function engine(on: On, opts: { answer?: string; guarded?: boolean; suggestion?: string | null } = {}) {
+export function engine(on: On, opts: { answer?: string; answers?: string[]; guarded?: boolean; suggestion?: string | null } = {}) {
   const toasts: string[] = []
   const notifications: string[] = []
   const statuses: (string | undefined)[] = []
@@ -259,7 +262,9 @@ export function engine(on: On, opts: { answer?: string; guarded?: boolean; sugge
   on('tool.call', { tool: 'AskUserQuestion' }, (_, e) => {
     const question = e.questions[0]!.question
     asked.push(question)
-    return { result: { questions: e.questions, answers: { [question]: opts.answer ?? 'Cancel' } } }
+    // `answers` are given in order, one per question; otherwise `answer` to every one
+    const answer = opts.answers ? (opts.answers[asked.length - 1] ?? 'Cancel') : (opts.answer ?? 'Cancel')
+    return { result: { questions: e.questions, answers: { [question]: answer } } }
   })
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: 'session-1' }))

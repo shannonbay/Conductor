@@ -165,6 +165,8 @@ export const CreateGoalSchema = z.object({
   objective: z.string().trim().min(1),
   working_dir: z.string().min(1).describe('Where its runs work'),
   instructions: z.string().optional(),
+  autonomy: z.record(z.enum(['off', 'propose', 'auto'])).optional().describe('Category → off | propose | auto'),
+  tool_map: z.record(z.string()).optional().describe('Tool name pattern → category'),
   schedule: GoalScheduleSchema.optional().describe('When it runs on its own; left out or null, on demand'),
   one_off: z.boolean().optional().describe('Runs once now; done when its run leaves nothing open'),
 })

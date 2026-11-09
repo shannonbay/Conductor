@@ -64,6 +64,7 @@ Hotkeys while the pane has focus: `a`/`r` approve or reject the first proposal, 
 | Command | What it does |
 | --- | --- |
 | `/goals` | Open the Goals pane |
+| `/goal-new` | Pick a ready-made goal: unsubscribe from mailing lists, a weekly job scan (it asks what to look for, and for your CV to rank against: a path, or it finds the latest), tidy your Downloads, or inbox triage. Each comes with instructions, a schedule, autonomy and tool rules (`hooks/templates.ts`). Or type your own. |
 | `/goal-new <objective>` | Create a goal that works in the current directory. It suggests a title (or give one: `/goal-new <name>: <objective>`) and asks how often it should run, with a suggestion first (see below). |
 | `/goal-run <goal>` | Queue a run now |
 | `/goal-pause <goal>`, `/goal-resume <goal>` | Pause or resume a goal |

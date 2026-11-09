@@ -1,0 +1,139 @@
+/**
+ * Ready-made goals: what typing /goal-new alone offers. Each comes with its
+ * instructions, schedule, autonomy and tool rules, so approvals work from the
+ * first run (a tool rule is what lets an approved action through Claude Code's
+ * own check). Nothing here depends on the person's own setup beyond the
+ * connectors named in `needs`.
+ */
+import type { Schedule } from '../types'
+
+export type Template = {
+  /** The choice in /goal-new's question (keep it short). */
+  label: string
+  name: string
+  objective: string
+  instructions: string
+  schedule: Schedule
+  autonomy: Record<string, 'off' | 'propose' | 'auto'>
+  tool_map: Record<string, string>
+  /** What the goal needs in Claude Code, said once it's created. */
+  needs: string
+  /** A question whose answer completes the instructions. */
+  ask?: { question: string; later: string; fill: (answer: string) => string }
+  /** Also ask for a CV, to rank results against (the job scan). */
+  cv?: boolean
+}
+
+const DAY = 1440
+
+/** Tool rules for Gmail tools, whichever Gmail connector or server the session has. */
+function gmail(rules: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(rules).flatMap(([tool, category]) => [
+    [`mcp__*Gmail*__${tool}`, category],
+    [`mcp__*gmail*__${tool}`, category],
+  ]))
+}
+
+export const TEMPLATES: Template[] = [
+  {
+    label: 'Unsubscribe from mailing lists',
+    name: 'Unsubscribe Stale Mailing Lists',
+    objective: "Unsubscribe from mailing lists I no longer read, and clear their mail from my inbox",
+    instructions: [
+      'A sender is stale when its mail has a List-Unsubscribe header and none of its messages from the last 60 days has been opened, with at least 3 messages in that time.',
+      'Never unsubscribe from or delete mail from banks, receipts or orders, or anything marked important.',
+      'Propose one item per stale sender (external_ref gmail-sender:<address>), saying the sender, how many messages, and when one was last opened.',
+      'To unsubscribe, open only the List-Unsubscribe link in Chrome (or email the List-Unsubscribe address if it has no link) and confirm on that page; never browse anywhere else.',
+      'If Chrome asks for permission to use a site, stop and add an item asking me to allow it.',
+      'Delete means move to the bin, never delete permanently. When a sender\'s unsubscribe and clean-up are done, complete its item.',
+    ].join(' '),
+    schedule: { kind: 'interval', minutes: DAY },
+    autonomy: { 'email.unsubscribe': 'propose', 'email.delete': 'propose', 'email.send': 'off' },
+    tool_map: {
+      'mcp__claude-in-chrome__*': 'email.unsubscribe',
+      ...gmail({ send_message: 'email.unsubscribe', 'trash_*': 'email.delete', 'mark_*_spam': 'email.delete', reply: 'email.send', forward: 'email.send' }),
+    },
+    needs: 'the Gmail connector (connect it with /mcp) and Claude in Chrome',
+  },
+  {
+    label: 'Weekly job scan',
+    name: 'Weekly Job Scan',
+    objective: "Once a week, find new job ads that match what I'm looking for and tell me the top three",
+    instructions: '',
+    schedule: { kind: 'interval', minutes: 7 * DAY },
+    autonomy: { 'email.send': 'propose' },
+    tool_map: gmail({ send_message: 'email.send', reply: 'email.send', forward: 'email.send' }),
+    needs: 'Claude in Chrome or web access to search job sites; the Gmail connector only if you want the top 3 emailed',
+    cv: true,
+    ask: {
+      question: "What jobs should I look for? Type it under Other: the role, location, minimum pay and job sites, e.g. senior software engineer, Wellington or remote, $140k+, on seek.co.nz and LinkedIn.",
+      later: 'Ask me in the first run',
+      fill: (answer) => [
+        `What I'm looking for: ${answer}.`,
+        'Each run, search the job sites named (or the main ones for that location) for ads from the last week, skip ads you have already reported (keep their ids in memory), and pick the 3 that fit best.',
+        'Put them in your end_run summary (title, employer, link and why each fits), so they show in the Goals pane.',
+        'If the Gmail connector is available and you know my address, also propose one email.send item with the top 3; send it once I approve.',
+        'Never apply for a job or contact an employer.',
+      ].join(' '),
+    },
+  },
+  {
+    label: 'Tidy my Downloads',
+    name: 'Tidy Downloads',
+    objective: 'Delete installers older than 30 days from my Downloads folder',
+    instructions: [
+      'Look in my Downloads folder (top level only) for installers (.exe, .msi, .msix, .dmg, .pkg, .deb, .rpm, .AppImage) last changed more than 30 days ago.',
+      'Propose one file.delete item per file (external_ref file:<full path>), with its size and date.',
+      'Once approved, move it to the Recycle Bin or Trash, never delete permanently, and complete the item.',
+      "Leave anything that isn't an installer alone.",
+    ].join(' '),
+    schedule: { kind: 'interval', minutes: 7 * DAY },
+    autonomy: { 'file.delete': 'propose' },
+    tool_map: {},
+    needs: 'nothing extra',
+  },
+  {
+    label: 'Inbox triage',
+    name: 'Inbox Triage',
+    objective: 'Keep my inbox down to what needs me: archive newsletters and notifications, and tell me what matters',
+    instructions: [
+      'Each run, look at inbox mail that arrived since the last run.',
+      "Archive newsletters, promotions and automatic notifications I don't need to act on: propose one email.archive item per sender or kind, saying how many messages; once approved, archive them (remove the INBOX label) and complete the item.",
+      'Never delete or send mail.',
+      'In your end_run summary, list what looks like it needs a reply or action from me, with sender and subject.',
+    ].join(' '),
+    schedule: { kind: 'interval', minutes: 360 },
+    autonomy: { 'email.archive': 'propose', 'email.delete': 'off', 'email.send': 'off' },
+    tool_map: gmail({
+      'label_*': 'email.archive', 'unlabel_*': 'email.archive', update_message_labels: 'email.archive',
+      'trash_*': 'email.delete', 'mark_*_spam': 'email.delete',
+      send_message: 'email.send', reply: 'email.send', forward: 'email.send',
+    }),
+    needs: 'the Gmail connector (connect it with /mcp)',
+  },
+]
+
+/** The optional CV question: find the latest one, a path typed under Other, or skip. */
+export const CV_QUESTION = 'Where is your CV? With it, I rank jobs against your experience. Type its path under Other, or let me find the latest one.'
+export const CV_FIND = 'Find my latest CV'
+export const CV_SKIP = 'Skip'
+
+const PROFILE = 'Read it and save a short profile as one memory starting "CV profile:" (under 800 characters: skills, seniority, the kinds of roles that fit, and what to avoid; no contact details, no address). Rank ads against that profile, and say in "why it fits" which of my experience matches. Note the CV file and its last-modified date in the profile, and read it again when the file changes.'
+
+/** What the instructions add for the CV answer; empty when skipped. */
+export function cvInstructions(answer: string): string {
+  if (answer === CV_FIND) {
+    return `My CV: in your first run, find my most recent CV in my Documents folder (then Desktop and Downloads if there's none): a .pdf, .docx or .md file named like CV, resume or résumé, the newest one. Say in your summary which file you used. ${PROFILE}`
+  }
+  if (answer === CV_SKIP || !answer.trim()) return ''
+  return `My CV is at ${answer.trim()}. ${PROFILE}`
+}
+
+/** The instructions for a job scan whose criteria the person will give later. */
+export const ASK_LATER = [
+  "What I'm looking for: not set yet.",
+  'If my CV is available, work it out from my CV profile (the roles that fit, at my level, near where I live or remote) and scan in your first run anyway: put the top 3 in your summary, say what you assumed, and add one item asking me to confirm or correct the role, location, minimum pay and job sites.',
+  'Without a CV, add that item and wait for my answer before scanning.',
+  'Each run, search the job sites (the main ones for the location if none are named) for ads from the last week, skip ads you have already reported (keep their ids in memory), and put the 3 that fit best in your end_run summary (title, employer, link and why each fits).',
+  'Never apply for a job or contact an employer.',
+].join(' ') + " I'll answer by discussing this goal."

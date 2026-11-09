@@ -140,7 +140,10 @@ export async function setSchedule($: $, goalId: string, schedule: Schedule | nul
 export type CreatedGoal = { id: string; next_run_at: string | null; one_off: boolean; queued_run: string | null }
 
 export async function createGoal(
-  $: $, input: { name: string; objective: string; working_dir: string; schedule?: Schedule | null; one_off?: boolean },
+  $: $, input: {
+    name: string; objective: string; working_dir: string; schedule?: Schedule | null; one_off?: boolean
+    instructions?: string; autonomy?: Record<string, string>; tool_map?: Record<string, string>
+  },
 ): Promise<CreatedGoal> {
   return call<CreatedGoal>($, 'create_goal', input)
 }

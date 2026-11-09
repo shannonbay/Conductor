@@ -55,8 +55,8 @@ test('/goal-new creates a goal in the session directory; /goal-pause pauses it',
   const fake = fakeConductor(on, goals)
   await $.session.start(START)
 
-  const usage = await $.command.run(typed('goal-new', '  '))
-  expect(usage.text).toContain('Usage')
+  const none = await $.command.run(typed('goal-new', '  ')) // offers the templates; the fake dismisses
+  expect(none.text).toBe('No goal created.')
 
   const made = await $.command.run(typed('goal-new', 'Inbox: keep my inbox under 20 unread'))
   expect(made.text).toContain('Created the goal "Inbox"')
@@ -172,4 +172,71 @@ test('/goal-new without the conductor server says how to add it', async ($, on) 
   await $.session.start(START)
   const made = await $.command.run(typed('goal-new', 'Inbox: keep my inbox under 20 unread'))
   expect(made.text).toContain('claude mcp add --scope user conductor')
+})
+
+test('/goal-new alone offers ready-made goals, each with its rules and schedule', async ($, on) => {
+  const { asked } = engine(on, { answer: 'Tidy my Downloads' })
+  const goals: ReturnType<typeof goal>[] = []
+  const fake = fakeConductor(on, goals)
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', ''))
+  expect(asked[0]).toContain('What should I look after?')
+  expect(made.text).toContain('Created the goal "Tidy Downloads"')
+  expect(made.text).toContain('running every 7d')
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({
+    name: 'Tidy Downloads', working_dir: '/work/project', schedule: { kind: 'interval', minutes: 10080 },
+    autonomy: { 'file.delete': 'propose' }, instructions: expect.stringContaining('Recycle Bin'),
+  })
+})
+
+test('the inbox template maps Gmail tools, whichever Gmail server it is', async ($, on) => {
+  engine(on, { answer: 'Inbox triage' })
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', ''))
+  const input = fake.of('create_goal')[0]?.input as { tool_map: Record<string, string>; autonomy: Record<string, string> }
+  expect(input.tool_map).toMatchObject({ 'mcp__*Gmail*__send_message': 'email.send', 'mcp__*gmail*__trash_*': 'email.delete' })
+  expect(input.autonomy).toEqual({ 'email.archive': 'propose', 'email.delete': 'off', 'email.send': 'off' })
+})
+
+test('the job scan template asks what to look for and puts the answer in its instructions', async ($, on) => {
+  const { asked } = engine(on, { answer: 'Weekly job scan' }) // the fake gives the same answer to both questions
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', ''))
+  expect(asked[1]).toContain('What jobs should I look for?')
+  expect(made.text).toContain('Created the goal "Weekly Job Scan"')
+  expect(String(fake.of('create_goal')[0]?.input.instructions)).toContain("What I'm looking for: Weekly job scan.")
+})
+
+test('a goal typed under Other goes the usual way', async ($, on) => {
+  engine(on, { answer: 'Inbox: keep my inbox under 20 unread' })
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', ''))
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({ name: 'Inbox', objective: 'keep my inbox under 20 unread' })
+})
+
+test('the job scan also asks for a CV: find the latest, a typed path, or skip', async ($, on) => {
+  const answers = ['Weekly job scan', 'senior engineer, remote, $150k+', 'Find my latest CV']
+  const { asked } = engine(on, { answers })
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', ''))
+  expect(asked[2]).toContain('Where is your CV?')
+  const instructions = String(fake.of('create_goal')[0]?.input.instructions)
+  expect(instructions).toContain("What I'm looking for: senior engineer, remote, $150k+.")
+  expect(instructions).toContain('find my most recent CV in my Documents folder')
+  expect(instructions).toContain('CV profile:')
+})
+
+test('a typed CV path goes into the instructions; Skip leaves the CV out', async ($, on) => {
+  const answers = ['Weekly job scan', 'data analyst, London', 'C:/Users/me/Documents/cv.pdf', 'Weekly job scan', 'data analyst, London', 'Skip']
+  engine(on, { answers })
+  const fake = fakeConductor(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', ''))
+  await $.command.run(typed('goal-new', ''))
+  expect(String(fake.of('create_goal')[0]?.input.instructions)).toContain('My CV is at C:/Users/me/Documents/cv.pdf.')
+  expect(String(fake.of('create_goal')[1]?.input.instructions)).not.toContain('CV')
 })

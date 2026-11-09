@@ -13,6 +13,7 @@ import { askSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
 import { act, refresh, refreshTodos } from './sync'
 import { readLastAlert, readLastPoll, readTrace } from './alerts'
+import { ASK_LATER, CV_FIND, CV_QUESTION, CV_SKIP, cvInstructions, TEMPLATES } from './templates'
 
 type $ = EngineInterface
 
@@ -248,12 +249,60 @@ export async function goalCommand($: $, command: 'goal-run' | 'goal-pause' | 'go
 }
 
 /**
+ * /goal-new alone: offers the ready-made goals, or takes one typed under Other.
+ * A template's own question (the job scan's criteria) completes it.
+ */
+async function newFromTemplate($: $): Promise<string> {
+  let picked: string
+  try {
+    picked = await $.ui.ask("What should I look after? Pick a ready-made goal, or type your own under Other (e.g. keep my inbox under 20 unread).", TEMPLATES.map((t) => t.label))
+  } catch {
+    return 'No goal created.'
+  }
+  const template = TEMPLATES.find((t) => t.label === picked)
+  if (!template) return picked.trim() && !/^cancel$/i.test(picked.trim()) ? newGoal($, picked) : 'No goal created.'
+  let instructions = template.instructions
+  if (template.ask) {
+    let answer: string
+    try {
+      answer = await $.ui.ask(template.ask.question, [template.ask.later, 'Cancel'])
+    } catch {
+      return 'No goal created.'
+    }
+    if (answer === 'Cancel' || !answer.trim()) return 'No goal created.'
+    instructions = answer === template.ask.later ? ASK_LATER : template.ask.fill(answer.trim())
+  }
+  if (template.cv) {
+    let answer = CV_SKIP
+    try {
+      answer = await $.ui.ask(CV_QUESTION, [CV_FIND, CV_SKIP])
+    } catch {
+      // dismissed: no CV
+    }
+    const cv = /^cancel$/i.test(answer.trim()) ? '' : cvInstructions(answer)
+    if (cv) instructions = `${instructions} ${cv}`
+  }
+  const cwd = await $.session.root()
+  try {
+    await createGoal($, {
+      name: template.name, objective: template.objective, working_dir: cwd, schedule: template.schedule,
+      instructions, autonomy: template.autonomy, tool_map: template.tool_map,
+    })
+  } catch (err) {
+    return `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}`
+  }
+  await kick($)
+  await refresh($)
+  return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute. It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.`
+}
+
+/**
  * /goal-new <objective> (a title is suggested) or /goal-new <name>: <objective>.
- * Asks how often it runs, with a suggestion first.
+ * Asks how often it runs, with a suggestion first. Alone, it offers templates.
  */
 export async function newGoal($: $, args: string): Promise<string> {
   const { name: given, objective } = splitGoalArgs(args)
-  if (!objective) return 'Usage: /goal-new <objective>, e.g. /goal-new keep my inbox under 20 unread (or /goal-new <name>: <objective>)'
+  if (!objective) return newFromTemplate($)
   const cwd = await $.session.root()
   const suggestion = await suggestSchedule($, given, objective)
   const name = given ?? suggestion.title ?? fallbackTitle(objective)
