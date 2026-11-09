@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkDatabase, checkUserScope, formatResults,
+  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkDatabase, checkUserScope, nativeLoadProblem, formatResults,
   type DoctorOptions,
 } from '../doctor.js'
 
@@ -159,5 +159,13 @@ describe('checkGoals', () => {
 
     expect(await checkGoals(opts, okR)).toMatchObject({ level: 'ok', detail: expect.stringContaining('Inbox') })
     expect(await checkGoals(opts, { ...warnR, detail: 'conductor-goals-guard@conductor not installed' })).toMatchObject({ level: 'warn', detail: expect.stringContaining('conductor-goals-guard') })
+  })
+})
+
+describe('nativeLoadProblem', () => {
+  it('tells a version mismatch from a native part that was never built', () => {
+    expect(nativeLoadProblem('was compiled against a different Node.js version using NODE_MODULE_VERSION 127')?.fix).toContain('npm rebuild better-sqlite3')
+    expect(nativeLoadProblem('Could not locate the bindings file. Tried: .../better_sqlite3.node')?.fix).toContain('npm install-scripts approve better-sqlite3')
+    expect(nativeLoadProblem("Cannot find module '@conductor/core'")).toBeNull()
   })
 })

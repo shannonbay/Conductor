@@ -51,19 +51,35 @@ export function checkNode(o: DoctorOptions): CheckResult {
     : fail('Node.js', `v${o.nodeVersion} is too old (better-sqlite3 13 needs Node 22+)`, 'Install Node.js 22 or newer, then run `npm install`.')
 }
 
+/**
+ * Why better-sqlite3's native part didn't load, and the fix; null when the error
+ * is something else. Never built usually means npm held back its install script
+ * (npm 11 asks before running install scripts).
+ */
+export function nativeLoadProblem(msg: string): { detail: string; fix: string } | null {
+  if (/NODE_MODULE_VERSION/.test(msg)) {
+    return { detail: 'better-sqlite3 was built for a different Node.js version', fix: 'Run `npm rebuild better-sqlite3` (or `npm install`) from the repo root.' }
+  }
+  if (/bindings file|better_sqlite3\.node|Cannot find module.*better-sqlite3|was compiled against|prebuild/i.test(msg)) {
+    return {
+      detail: "better-sqlite3's native part isn't built (npm may have held back its install script)",
+      fix: 'From the repo root, run `npm install-scripts approve better-sqlite3` (npm 11+), then `npm rebuild better-sqlite3`.',
+    }
+  }
+  return null
+}
+
 export async function checkDatabase(o: DoctorOptions): Promise<CheckResult[]> {
   let core: typeof import('@conductor/core')
   try {
     core = await import('@conductor/core')
   } catch (e) {
     const msg = (e as Error).message
-    const nativeMismatch = /NODE_MODULE_VERSION|bindings file|better_sqlite3\.node/.test(msg)
+    const native = nativeLoadProblem(msg)
     return [fail(
       'SQLite native module',
-      nativeMismatch ? 'better-sqlite3 was built for a different Node.js version' : `could not load @conductor/core: ${firstLine(msg)}`,
-      nativeMismatch
-        ? 'Run `npm rebuild better-sqlite3` (or `npm install`) from the repo root.'
-        : 'Run `npm install` and `npm run build --prefix core` from the repo root.',
+      native ? native.detail : `could not load @conductor/core: ${firstLine(msg)}`,
+      native ? native.fix : 'Run `npm install` and `npm run build --prefix core` from the repo root.',
     )]
   }
 

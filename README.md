@@ -91,6 +91,8 @@ npm install
 cd mcp && npm run build
 ```
 
+With npm 11 or newer, `npm install` may say it held back some install scripts. Conductor's database library, `better-sqlite3`, usually ships a ready-built binary, but if `npm run doctor` (or the MCP server) says it can't load, run `npm install-scripts approve better-sqlite3` and then `npm rebuild better-sqlite3` from the repo root.
+
 Add the server for your user, so goals work in every Claude Code session, whatever folder it starts in:
 
 ```bash
