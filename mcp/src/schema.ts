@@ -221,6 +221,11 @@ export const ReportRunEndSchema = z.object({
   run_id: z.string(),
   answer: z.string().describe("The run agent's final message"),
   reason: z.string().optional().describe("turn.complete's reason, e.g. error"),
+  usage: z.object({
+    input_tokens: z.number(), output_tokens: z.number(),
+    cache_read_input_tokens: z.number(), cache_creation_input_tokens: z.number(),
+    model: z.string().optional(),
+  }).optional().describe("The turn's token counts, added to the run"),
 })
 
 export const DeleteMemorySchema = z.object({

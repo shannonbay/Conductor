@@ -11,6 +11,8 @@ export type Run = {
   endedAt: string | null
   /** The subagent that did it (its transcript has what it actually did). */
   agentId: string | null
+  /** Tokens the run's agent used, all kinds summed (0 when unknown). */
+  tokens?: number
 }
 
 /** One memory entry the goal's runs read. */

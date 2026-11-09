@@ -87,3 +87,14 @@ describe('the usage limit', () => {
     expect(getRunHold(db)).not.toBeNull()
   })
 })
+
+describe('run usage', () => {
+  it('adds each turn\'s tokens to the run, after end_run too, and the overview shows the total', () => {
+    const run = claimRun(db, 'g1', { holder: 'session-A' })!
+    reportRunEnd(db, run.run_id, { answer: 'working', usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 1000, cache_creation_input_tokens: 200, model: 'claude-sonnet-5-5' } })
+    db.prepare("UPDATE goal_runs SET status = 'completed' WHERE id = ?").run(run.run_id)
+    reportRunEnd(db, run.run_id, { answer: 'Done.', usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
+    expect(getRun(db, run.run_id)).toMatchObject({ input_tokens: 110, output_tokens: 55, cache_read_tokens: 1000, cache_write_tokens: 200, model: 'claude-sonnet-5-5' })
+    expect(buildOverview(db).goals[0]!.runs[0]).toMatchObject({ tokens: 1365, model: 'claude-sonnet-5-5' })
+  })
+})

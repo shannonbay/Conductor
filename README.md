@@ -24,7 +24,7 @@ The pane also keeps **your to-do list** for the project (`/todo <text>`, or ask 
 - **Health.** A command that exits 0 while the goal is being met; the last number it prints is charted (e.g. unread mail older than a day). A failure can start a run.
 - **Memory.** Rules, facts and preferences — written by you, learned by the agent, or taken from your feedback. Pin what must always be included.
 
-Goals run while Claude Code is open with both plugins installed. With several sessions open, one at a time runs them. `npm run doctor` tells you when they can't run. Design: [`specs/persistent-goals.md`](specs/persistent-goals.md).
+Goals run while Claude Code is open with both plugins installed. With several sessions open, one at a time runs them, so after updating the plugins, reload them in every open session. `npm run doctor` tells you when they can't run. Design: [`specs/persistent-goals.md`](specs/persistent-goals.md).
 
 ## Under the hood: plans
 

@@ -169,7 +169,7 @@ export async function update_goal(args: unknown) {
 export async function report_run_end(args: unknown) {
   const input = ReportRunEndSchema.parse(args)
   const run = getRun(input.run_id)
-  const r = reportRunEnd(input.run_id, { answer: input.answer, reason: input.reason })
+  const r = reportRunEnd(input.run_id, { answer: input.answer, reason: input.reason, usage: input.usage })
   if (run && r.outcome !== 'unchanged') {
     record(run.plan_id, run.plan_id, r.outcome === 'held' ? 'run_skipped' : 'agent_failed', { run_id: run.id, ...(r.hold && { hold_until: r.hold.until }), reason: input.answer.slice(0, 200) }, { via: 'plugin' })
   }

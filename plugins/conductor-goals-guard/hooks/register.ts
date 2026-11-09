@@ -109,10 +109,10 @@ async function guardCheck($: $, runId: string, tool: string): Promise<Verdict> {
 /** A final message that may mean the run was stopped (Conductor decides which, in report_run_end). */
 const STOPPED = /limit|rate|quota|credits|overloaded|api error/i
 
-async function reportRunEnd($: $, runId: string, answer: string, reason: string): Promise<void> {
+async function reportRunEnd($: $, runId: string, answer: string, reason: string, usage?: unknown): Promise<void> {
   guardCallsInFlight++
   try {
-    await $.tool.call({ tool: 'mcp__conductor__report_run_end', run_id: runId, answer, reason } as never)
+    await $.tool.call({ tool: 'mcp__conductor__report_run_end', run_id: runId, answer, reason, ...(usage ? { usage } : {}) } as never)
   } finally {
     guardCallsInFlight--
   }
@@ -135,6 +135,8 @@ function isRunnerTool(tool: string): boolean {
 
 /** Each run agent's last answer, to recognise it when it is handed back to the conversation. */
 const lastAnswers = new Map<string, string>()
+/** The last few agent turn ends (diagnostic, shown by the status tool). */
+const lastTurns: unknown[] = []
 const HAND_BACK_FROM = /<agent-message from="([^"]+)">/
 
 function isRunReport(text: string): boolean {
@@ -162,7 +164,7 @@ export const register: Register = (on) => {
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'mcp__conductor-goals-guard__status' }, () => ({
-    result: JSON.stringify({ guarded: true, runs: runIds.size }),
+    result: JSON.stringify({ guarded: true, runs: runIds.size, lastTurns }),
   })).catch(() => ({ result: JSON.stringify({ guarded: true }) }))
 
   // Permission
@@ -200,10 +202,16 @@ export const register: Register = (on) => {
   on('turn.complete', async ($, e, next) => {
     const r = await next(e)
     const runId = await runIdFor($, e.agentId)
+    // A diagnostic for the status tool: what the last few agent turn ends carried
+    if (e.agentId) {
+      lastTurns.push({ agentId: e.agentId, runId: runId ?? null, reason: e.reason, usage: e.usage ?? null, resultUsage: (r as { usage?: unknown }).usage ?? null })
+      lastTurns.splice(0, Math.max(0, lastTurns.length - 4))
+    }
     if (e.agentId && runId) {
       lastAnswers.set(e.agentId, e.answer)
-      // Stopped by the usage limit or an error: Conductor skips (and holds runs) or fails it with the reason
-      if (e.reason === 'error' || STOPPED.test(e.answer)) await reportRunEnd($, runId, e.answer, e.reason).catch(() => {})
+      // Every turn's end goes to Conductor: its tokens count toward the run, and a stop by
+      // the usage limit or an error skips (and holds runs) or fails it with the reason
+      if (e.usage || e.reason === 'error' || STOPPED.test(e.answer)) await reportRunEnd($, runId, e.answer, e.reason, e.usage).catch(() => {})
     }
     return r
   }).catch(($, e, next) => next(e))

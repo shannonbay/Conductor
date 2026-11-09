@@ -197,6 +197,7 @@ export function buildOverview(db: Database) {
         }),
         runs: runs.map((r) => ({
           id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, started_at: r.started_at, ended_at: r.ended_at, agent_id: r.agent_id,
+          tokens: r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens, model: r.model,
         })),
         needs_you: open.filter((t) => t.review_requested_at).map(overviewItem),
         open_items: open.filter((t) => !t.review_requested_at).slice(0, OPEN_ITEMS).map(overviewItem),

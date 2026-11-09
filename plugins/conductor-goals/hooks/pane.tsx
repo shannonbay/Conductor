@@ -12,7 +12,7 @@ import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, scheduleLabel, spark } from './model'
+import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, runCost, scheduleLabel, spark } from './model'
 import { sendToChat } from './chat'
 import { getAddingTo, getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setConfirm, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, toggleTodo, workFromPane } from './todos'
@@ -122,6 +122,7 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
       {activityLine($, e, view, g)}
       <Text dimColor>
         {run ? <Text color={isFailed(run.status) ? 'red' : undefined}>last run {run.status} {ago(run.endedAt ?? run.startedAt, view.now)}</Text> : 'no runs yet'}
+        {run && runCost(run) ? ` · ${runCost(run)}` : ''}
         {nextRunText(g, view.now)}
         {g.openItemCount > 0 ? ` · ${g.openItemCount} open` : ''}
       </Text>
@@ -389,7 +390,7 @@ function details($: $, e: E, view: View, g: GoalCard) {
           <Text key={`run-row-${r.id}`}>
             {'  '}
             <Text color={isFailed(r.status) ? 'red' : r.status === 'completed' ? 'green' : 'cyan'}>{r.status}</Text>
-            <Text dimColor> {r.trigger} · {ago(r.endedAt ?? r.startedAt, view.now)}</Text>
+            <Text dimColor> {r.trigger} · {ago(r.endedAt ?? r.startedAt, view.now)}{runCost(r) ? ` · ${runCost(r)}` : ''}</Text>
             {r.summary ? ` — ${r.summary}` : ''}
           </Text>
           {r.status !== 'running' && r.status !== 'queued' && (

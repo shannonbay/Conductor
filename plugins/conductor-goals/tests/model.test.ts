@@ -4,8 +4,7 @@ import { phoneText } from '../hooks/alerts'
 
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
-  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs,
-} from '../hooks/model'
+  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost} from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -127,4 +126,10 @@ test('phoneText keeps the answer instructions and fits a push', () => {
   expect(phoneText([], [{ goal: g }, { goal: g }])).toBe('Conductor: 2 goal runs failed.')
   expect(phoneText([{ goal: g, item: { title: 'a' } }, { goal: g, item: { title: 'b' } }], [{ goal: g }]))
     .toBe('Conductor: 2 proposals need you. Reply "what needs me?" in Claude. Tidy downloads: run failed.')
+})
+
+test('runCost shows tokens and time, or nothing when unknown', () => {
+  expect(runCost({ tokens: 48_200, startedAt: '2026-11-09T00:00:00Z', endedAt: '2026-11-09T00:02:10Z' })).toBe('48k tokens · 2m')
+  expect(runCost({ tokens: 1_250_000, startedAt: '2026-11-09T00:00:00Z', endedAt: '2026-11-09T00:00:40Z' })).toBe('1.3M tokens · 40s')
+  expect(runCost({ tokens: 0, startedAt: '2026-11-09T00:00:00Z', endedAt: null })).toBe('')
 })

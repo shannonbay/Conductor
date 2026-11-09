@@ -147,11 +147,26 @@ export function parseLimitReset(text: string, now: Date = new Date()): Date | nu
  * reset. If it stopped on another error, the run fails with that message.
  * Otherwise nothing changes (the runner settles the run when its agent ends).
  */
+/** A turn's token counts, as Claude Code reports them. */
+export type RunUsage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number; model?: string }
+
+/** Adds a turn's tokens to its run (a run's agent may take several turns). */
+export function addRunUsage(db: Database, runId: string, usage: RunUsage): void {
+  db.prepare(`
+    UPDATE goal_runs SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?,
+      cache_read_tokens = cache_read_tokens + ?, cache_write_tokens = cache_write_tokens + ?, model = COALESCE(?, model)
+    WHERE id = ?
+  `).run(usage.input_tokens || 0, usage.output_tokens || 0, usage.cache_read_input_tokens || 0, usage.cache_creation_input_tokens || 0, usage.model ?? null, runId)
+}
+
 export function reportRunEnd(
-  db: Database, runId: string, input: { answer: string; reason?: string }, now: Date = new Date(),
+  db: Database, runId: string, input: { answer: string; reason?: string; usage?: RunUsage }, now: Date = new Date(),
 ): { outcome: 'held' | 'failed' | 'unchanged'; hold?: RunHold } {
   const run = getRun(db, runId)
-  if (!run || run.status !== 'running') return { outcome: 'unchanged' }
+  if (!run) return { outcome: 'unchanged' }
+  // Tokens count whatever the run's state: its last turn can end after end_run
+  if (input.usage) addRunUsage(db, runId, input.usage)
+  if (run.status !== 'running') return { outcome: 'unchanged' }
   const answer = input.answer.trim()
   if (isUsageLimit(answer)) {
     const until = (parseLimitReset(answer, now) ?? new Date(now.getTime() + DEFAULT_HOLD_MS)).toISOString()

@@ -246,7 +246,12 @@ export function runMigrations(db: Database): void {
       items_created  INTEGER NOT NULL DEFAULT 0,
       items_resolved INTEGER NOT NULL DEFAULT 0,
       started_at     TEXT NOT NULL,
-      ended_at       TEXT
+      ended_at       TEXT,
+      input_tokens   INTEGER NOT NULL DEFAULT 0,
+      output_tokens  INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      model          TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
 
@@ -292,6 +297,11 @@ export function runMigrations(db: Database): void {
     try { db.exec(`ALTER TABLE goals ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
   }
   try { db.exec('ALTER TABLE goal_runs ADD COLUMN cc_session_id TEXT') } catch { /* already exists */ }
+  // What each run cost, from its agent's turns (reported by the guard plugin)
+  for (const col of ['input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens']) {
+    try { db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
+  }
+  try { db.exec('ALTER TABLE goal_runs ADD COLUMN model TEXT') } catch { /* already exists */ }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS goal_health (

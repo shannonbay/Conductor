@@ -18,7 +18,7 @@ export type OverviewGoal = {
   tool_map?: Record<string, string>
   open_run: { id: string; status: string } | null
   activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
-  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null }[]
+  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null; tokens?: number }[]
   needs_you: OverviewItem[]
   open_items: OverviewItem[]
   open_item_count: number
@@ -48,7 +48,7 @@ export function toCard(g: OverviewGoal): GoalCard {
     openItems: g.open_items.map(toItem),
     openItemCount: g.open_item_count,
     openRun: g.open_run ? { id: g.open_run.id, status: g.open_run.status } : null,
-    runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at, agentId: r.agent_id ?? null })),
+    runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at, agentId: r.agent_id ?? null, tokens: r.tokens ?? 0 })),
     nextRunAt: g.next_run_at,
     schedule: g.schedule ?? null,
     oneOff: g.one_off ?? false,
@@ -142,7 +142,7 @@ export function summarize(goals: GoalCard[], now: number): string {
       `## ${g.name} (id ${g.id}, ${g.status === 'retired' ? 'done' : g.status}${g.oneOff ? ', one-off' : ''})`,
       `Objective: ${g.objective}`,
       g.activity.text ? `Now: ${g.activity.text}` : null,
-      g.openRun ? `Run ${g.openRun.status} now.` : `Last run: ${run ? `${run.status} ${ago(run.endedAt ?? run.startedAt, now)}${run.summary ? ` — ${run.summary}` : ''}` : 'none'}.`,
+      g.openRun ? `Run ${g.openRun.status} now.` : `Last run: ${run ? `${run.status} ${ago(run.endedAt ?? run.startedAt, now)}${runCost(run) ? ` (${runCost(run)})` : ''}${run.summary ? ` — ${run.summary}` : ''}` : 'none'}.`,
       g.health ? `Health: ${g.health.passed ? 'passing' : 'failing'}${g.health.value !== null ? ` (${g.health.value})` : ''}.` : null,
       `Open items: ${g.openItemCount}.`,
       g.needsYou.length === 0
@@ -404,4 +404,16 @@ export function holdUntilText(until: string, now: number): string {
   const d = new Date(until)
   const time = d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
   return new Date(now).toDateString() === d.toDateString() ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
+}
+
+/** "48k tokens · 2m": what a finished run used, and how long it took; '' when unknown. */
+export function runCost(run: { tokens?: number; startedAt: string; endedAt: string | null }): string {
+  const parts: string[] = []
+  const t = run.tokens ?? 0
+  if (t > 0) parts.push(`${t >= 1_000_000 ? `${(t / 1_000_000).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : t} tokens`)
+  if (run.endedAt) {
+    const s = Math.max(0, Math.round((Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 1000))
+    parts.push(s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`)
+  }
+  return parts.join(' · ')
 }

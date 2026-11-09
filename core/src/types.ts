@@ -195,6 +195,13 @@ export interface GoalRun {
   items_resolved: number
   started_at: string
   ended_at: string | null
+  /** What the run's agent used, summed over its turns. */
+  input_tokens: number
+  output_tokens: number
+  cache_read_tokens: number
+  cache_write_tokens: number
+  /** The model that answered the run's last turn. */
+  model: string | null
 }
 
 export type MemoryKind = 'fact' | 'rule' | 'preference'
