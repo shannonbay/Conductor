@@ -59,10 +59,10 @@ test('parseSchedule reads intervals, windows, cron and off, and explains the res
   expect(parseSchedule('cron 0 9 * * 1-5')).toEqual({ schedule: { kind: 'cron', expr: '0 9 * * 1-5' } })
   expect(parseSchedule('off')).toEqual({ schedule: null })
   expect(parseSchedule('every 2m')).toEqual({ error: expect.stringContaining('5 minutes') })
-  expect(parseSchedule('every 6 weeks')).toEqual({ error: expect.stringContaining('m, h or d') })
+  expect(parseSchedule('every 6 weeks')).toEqual({ schedule: { kind: 'interval', minutes: 60480 } })
   expect(parseSchedule('every 1h between 25:00-26:00')).toEqual({ error: expect.stringContaining('24-hour') })
   expect(parseSchedule('cron 0 9 *')).toEqual({ error: expect.stringContaining('5 fields') })
-  expect(parseSchedule('sometimes')).toEqual({ error: expect.stringContaining('every 6h') })
+  expect(parseSchedule('sometimes')).toEqual({ error: expect.stringContaining('every 30m | 6h | 30d') })
 })
 
 test('scheduleLabel and nextRunText say when a goal runs next', async () => {
@@ -132,4 +132,17 @@ test('runCost shows tokens and time, or nothing when unknown', () => {
   expect(runCost({ tokens: 48_200, startedAt: '2026-11-09T00:00:00Z', endedAt: '2026-11-09T00:02:10Z' })).toBe('48k tokens · 2m')
   expect(runCost({ tokens: 1_250_000, startedAt: '2026-11-09T00:00:00Z', endedAt: '2026-11-09T00:00:40Z' })).toBe('1.3M tokens · 40s')
   expect(runCost({ tokens: 0, startedAt: '2026-11-09T00:00:00Z', endedAt: null })).toBe('')
+})
+
+test('parseSchedule takes intervals with or without "every", in weeks, and as words', () => {
+  const minutes = (t: string) => { const r = parseSchedule(t); return 'error' in r ? r.error : (r.schedule as { minutes: number }).minutes }
+  expect(minutes('30d')).toBe(43200)
+  expect(minutes('30 days')).toBe(43200)
+  expect(minutes('every 30 days')).toBe(43200)
+  expect(minutes('2 weeks')).toBe(20160)
+  expect(minutes('monthly')).toBe(43200)
+  expect(minutes('weekly')).toBe(10080)
+  expect(minutes('hourly')).toBe(60)
+  expect(parseSchedule('daily between 08:00-20:00')).toEqual({ schedule: { kind: 'interval', minutes: 1440, active_hours: '08:00-20:00' } })
+  expect(minutes('30 fortnights')).toContain('minutes, hours, days or weeks')
 })

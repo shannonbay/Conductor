@@ -265,3 +265,16 @@ test('/goal-new offers three templates and More…, which holds the rest', async
   expect(input.instructions).toContain('propose one profile.readme_edit item')
   expect(input.autonomy).toEqual({ 'profile.readme_edit': 'propose' })
 })
+
+test('/goal-schedule takes "<goal> 30d" and plain words read by the small model', async ($, on) => {
+  engine(on, { suggestion: 'cron 0 9 * * 1-5' })
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Unsubscribe Stale Mailing Lists' })])
+  await $.session.start(START)
+  await $.command.run(typed('goal-schedule', 'unsubscribe stale mailing lists 30d'))
+  const words = await $.command.run(typed('goal-schedule', 'unsubscribe weekdays at nine'))
+  expect(fake.of('set_schedule').map((c) => c.input)).toEqual([
+    { goal_id: 'g1', schedule: { kind: 'interval', minutes: 43200 } },
+    { goal_id: 'g1', schedule: { kind: 'cron', expr: '0 9 * * 1-5' } },
+  ])
+  expect(words.text).toContain('Read "weekdays at nine" as cron 0 9 * * 1-5.')
+})

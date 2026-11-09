@@ -299,3 +299,27 @@ test('Delete asks first, then deletes the goal; not while a run is going', async
   expect(fake.of('delete_goal').map((c) => c.input)).toEqual([{ goal_id: 'g1' }])
   await ui.unmount()
 })
+
+test('Reschedule takes "30d", and explains an answer it can\'t read', async ($, on) => {
+  const { toasts } = engine(on, { answers: ['30d', 'every fortnight-ish'] })
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reschedule-g1' })
+  expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 43200 } }])
+  await ui.press({ key: 'reschedule-g1' })
+  expect(toasts.at(-1)).toContain('Couldn\'t read "every fortnight-ish"')
+  expect(fake.of('set_schedule')).toHaveLength(1)
+  await ui.unmount()
+})
+
+test('Reschedule hands an answer it can\'t read to the small model, and says how it read it', async ($, on) => {
+  const { toasts } = engine(on, { answers: ['every other week'], suggestion: 'every 2w' })
+  const fake = fakeConductor(on, [goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'reschedule-g1' })
+  expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 20160 } }])
+  expect(toasts.at(-1)).toBe('Inbox now runs every 14d (read "every other week" as every 2w).')
+  await ui.unmount()
+})

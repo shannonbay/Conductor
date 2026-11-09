@@ -202,9 +202,18 @@ export function ago(iso: string | null, now: number): string {
 
 // ── Schedules ─────────────────────────────────────────────────────────────────
 
-export const SCHEDULE_USAGE = 'every 30m | every 6h | every 1d [between 08:00-20:00] | cron <5 fields> | one-off | off'
+export const SCHEDULE_USAGE = 'every 30m | 6h | 30d | 2 weeks | daily | weekly | monthly [between 08:00-20:00] | cron <5 fields> | one-off | off'
 
-const UNIT_MINUTES: Record<string, number> = { m: 1, min: 1, mins: 1, minute: 1, minutes: 1, h: 60, hr: 60, hrs: 60, hour: 60, hours: 60, d: 1440, day: 1440, days: 1440 }
+const UNIT_MINUTES: Record<string, number> = {
+  m: 1, min: 1, mins: 1, minute: 1, minutes: 1, h: 60, hr: 60, hrs: 60, hour: 60, hours: 60,
+  d: 1440, day: 1440, days: 1440, w: 10080, wk: 10080, wks: 10080, week: 10080, weeks: 10080,
+}
+
+/** Words for common intervals ("monthly" is every 30 days). */
+const WORD_INTERVALS: Record<string, string> = {
+  hourly: '1h', daily: '1d', 'every day': '1d', nightly: '1d', weekly: '1w', 'every week': '1w',
+  fortnightly: '2w', biweekly: '2w', monthly: '30d', 'every month': '30d', 'every hour': '1h',
+}
 
 /** "every 6h", "every 30m between 08:00-20:00", "cron 0 9 * * 1-5" or "off": a schedule, null (on demand), or why not. */
 export function parseSchedule(text: string): { schedule: Schedule | null; oneOff?: boolean } | { error: string } {
@@ -217,10 +226,13 @@ export function parseSchedule(text: string): { schedule: Schedule | null; oneOff
       ? { schedule: { kind: 'cron', expr } }
       : { error: 'A cron expression has 5 fields (minute hour day month weekday), e.g. "cron 0 9 * * 1-5".' }
   }
-  const m = /^every (\d+) ?([a-z]+)(?: between (\d{1,2}):(\d{2}) ?- ?(\d{1,2}):(\d{2}))?$/.exec(t)
+  // "every 30d", "30d", "30 days", "every 2 weeks", "weekly", each with optional active hours
+  const words = Object.entries(WORD_INTERVALS).find(([w]) => t === w || t.startsWith(`${w} between `))
+  const spelled = words ? `${words[1]}${t.slice(words[0].length)}` : t
+  const m = /^(?:every )?(\d+) ?([a-z]+)(?: between (\d{1,2}):(\d{2}) ?- ?(\d{1,2}):(\d{2}))?$/.exec(spelled)
   if (!m) return { error: `Say when it runs: ${SCHEDULE_USAGE}.` }
   const unit = UNIT_MINUTES[m[2]!]
-  if (!unit) return { error: 'Use m, h or d for the interval, e.g. "every 6h".' }
+  if (!unit) return { error: 'Use minutes, hours, days or weeks for the interval, e.g. "every 6h" or "30d".' }
   const minutes = Number(m[1]) * unit
   if (minutes < 5) return { error: 'Goals run at most every 5 minutes.' }
   const schedule: Schedule = { kind: 'interval', minutes }
@@ -253,7 +265,7 @@ export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt'
 // ── Choosing a schedule ───────────────────────────────────────────────────────
 
 export type ChoiceKey = 'hourly' | '6h' | 'daily' | 'weekly' | 'one-off' | 'on-demand' | 'custom'
-export type ScheduleChoice = { key: ChoiceKey; label: string; schedule: Schedule | null; oneOff: boolean }
+export type ScheduleChoice = { key: ChoiceKey; label: string; schedule: Schedule | null; oneOff: boolean; /** How a typed answer was read, when a model read it. */ read?: string }
 export type Suggestion = { choice: Exclude<ChoiceKey, 'on-demand'>; reason: string; /** A short name for a goal created without one. */ title?: string }
 
 /** The choices offered when a goal is created or given a schedule. */
@@ -283,14 +295,20 @@ export function choiceOptions(suggested: ChoiceKey): string[] {
  * ("every 12h", "cron 0 9 * * 1-5", "off"). Null when dismissed or unreadable.
  */
 export function choiceFromAnswer(answer: string | null): ScheduleChoice | null {
-  if (!answer) return null
+  const read = readAnswer(answer)
+  return read && 'choice' in read ? read.choice : null
+}
+
+/** An answer read: the choice it names, why a typed one can't be read, or null when dismissed. */
+export function readAnswer(answer: string | null): { choice: ScheduleChoice } | { error: string } | null {
+  if (!answer || /^cancel$/i.test(answer.trim())) return null
   const label = answer.endsWith(SUGGESTED) ? answer.slice(0, -SUGGESTED.length) : answer
   const listed = SCHEDULE_CHOICES.find((c) => c.label === label)
-  if (listed) return listed
+  if (listed) return { choice: listed }
   const typed = parseSchedule(answer)
-  if ('error' in typed) return null
+  if ('error' in typed) return { error: typed.error }
   const text = typed.oneOff ? 'one-off' : scheduleLabel(typed.schedule)
-  return { key: 'custom', label: text, schedule: typed.schedule, oneOff: typed.oneOff ?? false }
+  return { choice: { key: 'custom', label: text, schedule: typed.schedule, oneOff: typed.oneOff ?? false } }
 }
 
 const KEYWORDS: [RegExp, Suggestion][] = [

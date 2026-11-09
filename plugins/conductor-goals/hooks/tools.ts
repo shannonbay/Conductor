@@ -9,7 +9,7 @@ import type { GoalCard } from '../types'
 import { addTodo, answerItem, approve, createGoal, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
 import { ago, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize, type GoalChanges } from './model'
 import { kick } from './runner'
-import { askSchedule, suggestSchedule } from './schedule'
+import { askSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
 import { act, refresh, refreshTodos } from './sync'
 import { readLastAlert, readLastPoll, readTrace } from './alerts'
@@ -181,7 +181,7 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
   }
 
   if (name === 'set_schedule') {
-    const parsed = parseSchedule(String(input.schedule ?? ''))
+    const parsed = await readSchedule($, String(input.schedule ?? ''))
     if ('error' in parsed) return fail(parsed.error)
     const label = parsed.oneOff ? 'once (one-off)' : scheduleLabel(parsed.schedule)
     if (!(await confirmWith($, `Run the goal "${goal.name}" ${label}?`, 'Set schedule'))) return fail('The person declined; the schedule is unchanged.')
@@ -356,13 +356,28 @@ async function applySchedule($: $, goal: GoalCard, schedule: Parameters<typeof s
 
 /** /goal-schedule <goal> <every …|cron …|off>: the person typed it, so no confirm. */
 export async function scheduleCommand($: $, args: string): Promise<string> {
-  const m = /^(.*?)\s+((?:every|cron)\s.*|off|manual|none|one-?off|once)$/i.exec(args.trim())
-  if (!m || !m[1]!.trim()) return `Usage: /goal-schedule <goal> ${SCHEDULE_USAGE}. E.g. /goal-schedule inbox every 6h`
-  const parsed = parseSchedule(m[2]!)
+  const usage = `Usage: /goal-schedule <goal> <when>, e.g. /goal-schedule inbox every 6h, or 30d, weekly, cron 0 9 * * 1-5, off (${SCHEDULE_USAGE})`
+  const words = args.trim().split(/\s+/).filter(Boolean)
+  if (words.length < 2) return usage
+  // The goal is the longest leading run of words that names one; the rest is when
+  let goal: GoalCard | null = null
+  let when = ''
+  const s = await refresh($)
+  for (let i = words.length - 1; i >= 1 && !goal; i--) {
+    const found = findGoal(s.goals, words.slice(0, i).join(' '))
+    if ('goal' in found) {
+      goal = found.goal
+      when = words.slice(i).join(' ')
+    }
+  }
+  if (!goal) {
+    const found = await resolveGoal($, words[0])
+    return 'error' in found ? found.error : usage
+  }
+  const parsed = await readSchedule($, when)
   if ('error' in parsed) return parsed.error
-  const found = await resolveGoal($, m[1]!.trim())
-  if ('error' in found) return found.error
-  return applySchedule($, found.goal, parsed.schedule, parsed.oneOff)
+  const text = await applySchedule($, goal, parsed.schedule, parsed.oneOff)
+  return parsed.interpreted ? `${text} (Read "${when}" as ${parsed.interpreted}.)` : text
 }
 
 /** The to-do tools: no confirm, since the person asked and every change is undone with one press. */
