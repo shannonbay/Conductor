@@ -46,6 +46,7 @@ function fake(over: Partial<InstallDeps> = {}) {
     readState: () => world.state,
     writeState: (s) => { world.state = s },
     platform: 'win32',
+    insideClaudeCode: false,
     cliPath: 'C:\\plugins\\quarterdeck-goals\\0.14.0\\server\\quarterdeck-cli.mjs',
     user: 'PC\\me',
     node: 'C:\\Program Files\\nodejs\\node.exe',
@@ -53,6 +54,8 @@ function fake(over: Partial<InstallDeps> = {}) {
     removeFile: (path) => { delete world.files[path] },
     schtasks: (args) => {
       world.tasks.push(args)
+      // Running the task runs `ensure`, as Task Scheduler would
+      if (args[0] === '/run') ensure(deps)
       if (args[0] === '/query' && !world.tasks.some((t) => t[0] === '/create')) throw new Error('ERROR: The system cannot find the file specified.')
       return 'SUCCESS'
     },
@@ -140,6 +143,8 @@ describe('the standing session', () => {
     expect(world.files[join(DIR, 'cli-path')]).toBe(deps.cliPath)
     expect(world.tasks[0]).toEqual(['/create', '/tn', TASK_NAME, '/xml', join(DIR, 'task.xml'), '/f'])
     expect(world.files[join(DIR, 'task.xml')]!.startsWith('\ufeff<?xml')).toBe(true)
+    // The task starts the session, not this command: started from inside Claude Code it would end with that window
+    expect(world.tasks[1]).toEqual(['/run', '/tn', TASK_NAME])
     expect(started(world)).toHaveLength(1)
     expect(text).toMatch(/no Claude Code window open/)
 
@@ -149,10 +154,10 @@ describe('the standing session', () => {
     expect(world.rows.filter((r) => r.kind === 'background')).toHaveLength(0)
   })
 
-  it('the task runs at logon and every 15 minutes, as the person, on battery too, with no window', () => {
+  it('the task runs at logon and every 5 minutes, as the person, on battery too, with no window', () => {
     const x = taskXml({ user: 'PC\\me', node: 'C:\\Program Files\\nodejs\\node.exe', launcher: 'C:\\Users\\R&D\\launch.mjs', now: new Date('2026-11-11T02:03:04Z') })
     expect(x).toContain('<LogonTrigger>')
-    expect(x).toContain('<Interval>PT15M</Interval>')
+    expect(x).toContain('<Interval>PT5M</Interval>')
     expect(x).toContain('<UserId>PC\\me</UserId>')
     expect(x).toContain('<LogonType>InteractiveToken</LogonType>')
     expect(x).toContain('<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>')
@@ -164,8 +169,18 @@ describe('the standing session', () => {
   it('install needs the built CLI, and other systems get a crontab line', () => {
     expect(() => install(fake({ cliPath: null }).deps)).toThrow(/built CLI/)
     const { deps, world } = fake({ platform: 'linux', node: '/usr/bin/node', dir: '/home/me/.quarterdeck/runner' })
-    expect(install(deps)).toMatch(/\*\/15 \* \* \* \* "\/usr\/bin\/node" ".*launch\.mjs"/)
+    expect(install(deps)).toMatch(/\*\/5 \* \* \* \* "\/usr\/bin\/node" ".*launch\.mjs"/)
     expect(world.tasks).toHaveLength(0)
+  })
+
+  it('start goes through the task once it is installed, and warns when it would end with this window', async () => {
+    const { deps, world } = fake({ insideClaudeCode: true })
+    expect((await runnerCommand(['start'], deps)).text).toMatch(/stops when this window closes/)
+    stop(deps)
+    world.tasks.push(['/create'])
+    expect((await runnerCommand(['start', '--permission-mode', 'auto'], deps)).text).not.toMatch(/stops when/)
+    expect(world.tasks.at(-1)).toEqual(['/run', '/tn', TASK_NAME])
+    expect(started(world).at(-1)).toContain('auto')
   })
 
   it('the command answers text and an exit code', async () => {

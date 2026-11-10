@@ -18,7 +18,7 @@ import { fileURLToPath } from 'url'
 
 export const SESSION_NAME = 'Quarterdeck goals'
 export const TASK_NAME = 'Quarterdeck goals runner'
-export const ENSURE_MINUTES = 15
+export const ENSURE_MINUTES = 5
 const PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan']
 
 /** What `ensure` remembers between its runs (runner/state.json). */
@@ -249,6 +249,8 @@ export function taskXml(p: { user: string; node: string; launcher: string; now?:
 
 export interface InstallDeps extends RunnerDeps {
   platform: NodeJS.Platform
+  /** True when this command runs inside a Claude Code session (its Bash tool): what it starts ends with that window. */
+  insideClaudeCode: boolean
   /** The built CLI to run (server/quarterdeck-cli.mjs), or null when this isn't one (tsx in a checkout). */
   cliPath: string | null
   /** `DOMAIN\user`, for the task. */
@@ -276,9 +278,27 @@ export function install(deps: InstallDeps, opts: { permissionMode?: string } = {
     lines.push(`Scheduled tasks are set up on Windows only. Add this line to your crontab (crontab -e) to keep the standing session running:`,
       `*/${ENSURE_MINUTES} * * * * "${deps.node}" "${launcher}"`)
   }
-  lines.push(start(deps, opts).text)
+  lines.push(deps.platform === 'win32' ? startByTask(deps, opts).text : start(deps, opts).text)
   lines.push('Goals now run while this computer is on and you are logged in, with no Claude Code window open. Remove with: quarterdeck runner uninstall')
   return lines.join('\n')
+}
+
+/**
+ * Starts the session by running the scheduled task, so Task Scheduler is its
+ * parent. Started from a command inside Claude Code, the background service
+ * and the session end when that window closes (seen Nov 2026).
+ */
+export function startByTask(deps: InstallDeps, opts: { permissionMode?: string } = {}): StartResult {
+  if (opts.permissionMode && !PERMISSION_MODES.includes(opts.permissionMode)) throw new Error(`Unknown permission mode "${opts.permissionMode}" (one of: ${PERMISSION_MODES.join(', ')}).`)
+  const live = runnerSessions(deps).find(alive)
+  if (live) return { started: false, sessionId: live.sessionId ?? null, text: `The standing session is already running (${live.sessionId}).` }
+  // The task's `ensure` reads the permission mode from the state
+  if (opts.permissionMode) deps.writeState({ sessionId: deps.readState()?.sessionId ?? '', build: deps.build, permissionMode: opts.permissionMode })
+  deps.schtasks(['/run', '/tn', TASK_NAME])
+  let made: AgentRow | undefined
+  for (let i = 0; i < 40 && !made?.sessionId; i++) made = runnerSessions(deps).find(alive)
+  if (!made?.sessionId) throw new Error(`The scheduled task ran but no session appeared. See ${join(deps.dir, 'ensure.log')}.`)
+  return { started: true, sessionId: made.sessionId, text: `Started the standing session (${made.sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` }
 }
 
 /** Deletes the scheduled task and stops the session. The folder stays (its settings and log). */
@@ -375,6 +395,7 @@ export async function realDeps(): Promise<InstallDeps> {
       else rmSync(stateFile, { force: true })
     },
     platform: process.platform,
+    insideClaudeCode: process.env.CLAUDECODE === '1',
     cliPath: /quarterdeck-cli\.mjs$/.test(script) ? script : null,
     user: process.platform === 'win32' && process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${userInfo().username}` : userInfo().username,
     node: process.execPath,
@@ -409,7 +430,12 @@ export async function runnerCommand(args: string[], deps?: InstallDeps): Promise
     switch (command) {
       case 'install': return { text: install(d, { permissionMode }), code: 0 }
       case 'uninstall': return { text: uninstall(d), code: 0 }
-      case 'start': return { text: start(d, { permissionMode }).text, code: 0 }
+      case 'start': {
+        if (d.platform === 'win32' && taskInstalled(d)) return { text: startByTask(d, { permissionMode }).text, code: 0 }
+        const r = start(d, { permissionMode })
+        const warning = r.started && d.insideClaudeCode ? '\nStarted from inside Claude Code, so it stops when this window closes. Run `quarterdeck runner install` (or start it from a terminal of its own) to keep it.' : ''
+        return { text: r.text + warning, code: 0 }
+      }
       case 'stop': return { text: stop(d).text, code: 0 }
       case 'status': {
         const s = status(d)

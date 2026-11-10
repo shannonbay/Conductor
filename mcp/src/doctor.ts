@@ -313,7 +313,7 @@ export async function checkRunner(o: DoctorOptions, deps?: InstallDeps): Promise
     const d = deps ?? await realDeps()
     const s = status(d)
     const task = d.platform !== 'win32' || taskInstalled(d)
-    if (!s.running) return warn(name, `not running${task ? ' (the scheduled task starts it within 15 minutes)' : ''}, so goals run only while a Claude Code window is open`, 'Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.')
+    if (!s.running) return warn(name, `not running${task ? ' (the scheduled task starts it within 5 minutes)' : ''}, so goals run only while a Claude Code window is open`, 'Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.')
     if (!task) return warn(name, `${statusText(s)} But the scheduled task "${TASK_NAME}" is missing, so nothing restarts it after a logon or an update`, 'Run `quarterdeck runner install`.')
     return ok(name, statusText(s))
   } catch (e) {

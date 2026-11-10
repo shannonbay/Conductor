@@ -157,7 +157,7 @@ node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install
 
 (Without a clone: `node ~/.claude/plugins/cache/quarterdeck/quarterdeck-goals/<version>/server/quarterdeck-cli.mjs` `runner install`.)
 
-This starts the **standing session**: one background Claude Code session (`claude --bg`) in `~/.quarterdeck/runner`, with Remote Control on. It is an ordinary session with both plugins, so runs, the guard, alerts and approvals work in it as in any window. A scheduled task ("Quarterdeck goals runner", Windows Task Scheduler) checks at logon and every 15 minutes that it is running, and restarts it after a Quarterdeck update once no run is going.
+This starts the **standing session**: one background Claude Code session (`claude --bg`) in `~/.quarterdeck/runner`, with Remote Control on. It is an ordinary session with both plugins, so runs, the guard, alerts and approvals work in it as in any window. A scheduled task ("Quarterdeck goals runner", Windows Task Scheduler) checks at logon and every 5 minutes that it is running, and restarts it after a Quarterdeck update once no run is going.
 
 - **Who starts runs:** one session at a time, as always. While a Claude Code window is open, that window may be the one; when it closes, the standing session takes over within 90 seconds. `runner status` says which.
 - **From your phone:** the standing session appears as "Quarterdeck goals" in the Claude app and at claude.ai/code. Alerts arrive there, and you can approve, reject or answer by replying.
