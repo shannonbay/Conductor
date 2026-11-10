@@ -70,8 +70,29 @@ test('without the guard plugin no run is claimed or started, and the pane says w
   await settle()
   expect(fake.of('goals_tick')).toEqual([])
   expect(spawned).toEqual([])
+  await clock.advance(12_000)
+  await clock.settle()
+  expect(fake.of('goals_tick')).toEqual([])
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ type: 'Text', text: /quarterdeck-guard/ }))?.text).toContain('Goal runs are paused')
+  await ui.unmount()
+})
+
+test('a guard plugin that loads a moment late starts the run without any warning', async ($, on) => {
+  const { spawned, clock, setGuarded } = engine(on, { guarded: false })
+  settle = () => clock.settle()
+  fakeQuarterdeck(on, [queued()])
+  await $.session.start(START)
+  await settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Goal runs are paused/ })).toBeUndefined()
+  expect(spawned).toEqual([])
+
+  setGuarded(true)
+  await clock.advance(2_000)
+  await clock.settle()
+  expect(await ui.find({ type: 'Text', text: /Goal runs are paused/ })).toBeUndefined()
+  expect(spawned.map((x) => x.prompt)).toEqual(['Run Inbox'])
   await ui.unmount()
 })
 
@@ -81,6 +102,8 @@ test('the paused warning goes once the guard plugin loads, and the queued run st
   fakeQuarterdeck(on, [queued()])
   await $.session.start(START)
   await settle()
+  await clock.advance(12_000)
+  await clock.settle()
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /Goal runs are paused/ })).toBeDefined()
 
