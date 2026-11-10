@@ -3,7 +3,7 @@ import './globals.css'
 
 export const metadata: Metadata = {
   title: 'Quarterdeck',
-  description: 'Visual task tree management for AI agents',
+  description: 'Persistent goals for AI agents: goal pages and webhooks',
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

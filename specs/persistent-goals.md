@@ -1,6 +1,6 @@
 # Persistent Goals — Standing Objectives for Long-Lived Agent Work
 
-**Status:** Phases 1–2 built (2026-11-07) · **Date:** 2026-11-07 · **Builds on:** `task-tree-mcp.md`, verification gates (`core/src/gates.ts`)
+**Status:** Phases 1, 2 and 2.5 built; phase 3 waits on the platform · **Date:** 2026-11-07 · **Builds on:** `task-tree-mcp.md`, verification gates (`core/src/gates.ts`)
 
 A persistent goal is an objective that never finishes — "keep my inbox under control", "keep dependencies up to date", "triage new GitHub issues". Instead of one task tree that an agent works through and archives, a goal wakes an agent up on a schedule, gives it a short brief, lets it handle whatever is new, and records what it did for the next run. Work items come and go; the goal, its instructions and what it has learned persist.
 
