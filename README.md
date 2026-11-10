@@ -26,7 +26,7 @@ Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, 
 
 ## Limits
 
-- **It runs while Claude Code is open** on your computer. Runs don't happen with your laptop closed (yet).
+- **It runs on your computer.** Goals run while a Claude Code window is open, or with none open once you set up the [standing session](#running-with-claude-code-closed). Either way the computer must be on and you logged in: runs don't happen with your laptop asleep or off (yet).
 - **Phone alerts need Remote Control** connected and mobile push on in `/config`; a short Claude turn sends each one.
 - **It's early.** It's built and used daily by one person, on Windows; expect rough edges.
 
@@ -149,13 +149,29 @@ Open [http://localhost:3000](http://localhost:3000) for goal pages and webhooks.
 4. Optional: add **tool rules** (tool name → category) so the guard plugin blocks actions the goal doesn't allow, and a **health check** command to chart how the goal is doing.
 5. Approve or reject what the Goals pane shows under **Needs you** (`/goals`). Your rejections become memory, so the agent improves run by run.
 
+## Running with Claude Code closed
+
+```bash
+node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install
+```
+
+(Without a clone: `node ~/.claude/plugins/cache/quarterdeck/quarterdeck-goals/<version>/server/quarterdeck-cli.mjs` `runner install`.)
+
+This starts the **standing session**: one background Claude Code session (`claude --bg`) in `~/.quarterdeck/runner`, with Remote Control on. It is an ordinary session with both plugins, so runs, the guard, alerts and approvals work in it as in any window. A scheduled task ("Quarterdeck goals runner", Windows Task Scheduler) checks at logon and every 15 minutes that it is running, and restarts it after a Quarterdeck update once no run is going.
+
+- **Who starts runs:** one session at a time, as always. While a Claude Code window is open, that window may be the one; when it closes, the standing session takes over within 90 seconds. `runner status` says which.
+- **From your phone:** the standing session appears as "Quarterdeck goals" in the Claude app and at claude.ai/code. Alerts arrive there, and you can approve, reject or answer by replying.
+- **Permissions:** the session uses your default permission mode. Nobody is at its terminal, so a mode that doesn't stop to ask suits it: `runner install --permission-mode auto`. (Answering a permission prompt from the phone hasn't been tried yet.)
+- **Limits:** the computer must be on, awake, and you logged in. The standing session uses your subscription only when it works (a run, or passing an alert to your phone). An update that arrives while no window is open is picked up the next time you open one.
+- **Other commands:** `runner status`, `runner stop`, `runner start`, `runner uninstall`. On macOS and Linux `runner install` prints a crontab line instead of making a scheduled task (not yet tried there).
+
 ## Checking your setup
 
 ```bash
 npm run doctor
 ```
 
-Rebuilds `core/` and `mcp/`, then checks Node.js, the database and its schema version, the server bundle, where the `quarterdeck` server comes from (the plugin, and no second hand-added copy), leftover hooks from older versions, both goal plugins, whether updates are automatic, old permission rules, the optional web app, and whether your active goals can run. Anything wrong comes with the command to fix it. Without a clone, run the same checks with the copy inside the plugin: `node ~/.claude/plugins/cache/quarterdeck/quarterdeck-goals/<version>/server/quarterdeck-cli.mjs doctor`.
+Rebuilds `core/` and `mcp/`, then checks Node.js, the database and its schema version, the server bundle, where the `quarterdeck` server comes from (the plugin, and no second hand-added copy), leftover hooks from older versions, both goal plugins, whether updates are automatic, old permission rules, the optional web app, whether your active goals can run, and the standing session if you set one up. Anything wrong comes with the command to fix it. Without a clone, run the same checks with the copy inside the plugin: `node ~/.claude/plugins/cache/quarterdeck/quarterdeck-goals/<version>/server/quarterdeck-cli.mjs doctor`.
 
 ## Database
 
@@ -169,7 +185,7 @@ Quarterdeck/
   mcp/               MCP server (stdio transport, no HTTP)
     src/
       index.ts       Entry point — registers tools and dispatches calls
-      cli.ts         `quarterdeck doctor` setup checker
+      cli.ts         `quarterdeck doctor` setup checker, `quarterdeck runner` (the standing session)
       schema.ts      Zod schemas for all tool inputs
       db.ts          Binds @quarterdeck/core queries to one connection
       history.ts     Records MCP changes in the events log

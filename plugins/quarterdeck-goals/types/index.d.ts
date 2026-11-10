@@ -80,6 +80,8 @@ export type Snapshot = {
   hold: { until: string; reason: string } | null
   /** Set when a newer Quarterdeck in another session has upgraded the database: this session should /reload-plugins. */
   outdated?: boolean
+  /** Set while the standing session (`quarterdeck runner`) is the one starting goal runs. */
+  standing?: boolean
 }
 
 /** One to-do on the person's list. */

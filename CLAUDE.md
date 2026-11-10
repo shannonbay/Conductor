@@ -170,6 +170,8 @@ npm run release -- 0.12.0 [--push]   # Release (see Distribution and updates)
 
 **`next_task`** walks the open plan in tree order and returns `continue` (active leaf), `start` (pending leaf with dependencies met), `complete` (all children resolved) or `none` with blockers.
 
+**Standing session** (`mcp/src/runner-session.ts`, CLI `quarterdeck runner install|uninstall|start|stop|status|ensure`): runs goals with no Claude Code window open. It is one background Claude Code session (`claude --bg --remote-control`) in `~/.quarterdeck/runner`, an ordinary session that competes for the scheduler lease, so the runner, guard and alerts need nothing special. A Task Scheduler task runs `launch.mjs` → `runner ensure` every 15 minutes: start if missing, restart when the build (`currentBuild`: plugin version + bundle time) differs from `state.json`, never while a run is going. The MCP server rewrites `runner/cli-path` at start-up (`recordCliPath`) because an installed plugin's folder changes with its version. Sessions are found with `claude agents --json` (background, cwd = the runner folder; alive = has a `pid`). `goals_overview` carries `standing: true` while that session holds the lease. The functions take `RunnerDeps`, so tests fake Claude Code.
+
 **Setup check**: `npm run doctor` from the repo root (rebuilds core/mcp, then runs `mcp/src/doctor.ts`). Add a check there when you add a new piece of setup.
 
 **`working_dir` is required on every plan** and is never null. MCP's `create_plan` defaults it to `process.cwd()` (the directory Claude Code was launched from). A goal run works in its goal's `working_dir`.

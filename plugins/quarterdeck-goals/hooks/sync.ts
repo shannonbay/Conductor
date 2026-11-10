@@ -50,7 +50,7 @@ async function load($: $): Promise<Snapshot> {
       next = { ...previous, reachable: true, error: null, fetchedAt: now }
     } else {
       const goals = res.goals.map(toCard)
-      next = { reachable: true, error: null, goals, fetchedAt: now, etag: res.etag, hold: res.hold, ...(res.outdated ? { outdated: true } : {}) }
+      next = { reachable: true, error: null, goals, fetchedAt: now, etag: res.etag, hold: res.hold, ...(res.outdated ? { outdated: true } : {}), ...(res.standing ? { standing: true } : {}) }
       await announce($, goals, now)
     }
   } catch (err) {

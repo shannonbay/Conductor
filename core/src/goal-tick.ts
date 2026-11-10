@@ -43,6 +43,12 @@ export function releaseLease(db: Database, holder: string): void {
   db.prepare('DELETE FROM scheduler_lease WHERE name = ? AND holder = ?').run(LEASE_NAME, holder)
 }
 
+/** The session scheduling goal runs now, or null when nobody holds a live lease. */
+export function leaseHolder(db: Database, now: Date = new Date()): string | null {
+  const row = db.prepare('SELECT holder FROM scheduler_lease WHERE name = ? AND expires_at > ?').get(LEASE_NAME, now.toISOString()) as { holder: string } | undefined
+  return row?.holder ?? null
+}
+
 // ── Claiming runs ─────────────────────────────────────────────────────────────
 
 /** A run the caller should start an agent for. */

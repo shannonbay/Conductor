@@ -68,6 +68,9 @@ import { handleListResources, handleReadResource } from './resources.js'
 import { getRun } from './db.js'
 import { withScope } from './session.js'
 import { isListed } from './tool-filter.js'
+import { recordCliPath } from './runner-session.js'
+import { dirname } from 'path'
+import { fileURLToPath } from 'url'
 
 const COMPACT_TOOLS = new Set(['goals_overview', 'goals_tick'])
 
@@ -289,6 +292,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 server.setRequestHandler(ListResourcesRequestSchema, handleListResources)
 server.setRequestHandler(ReadResourceRequestSchema, handleReadResource)
+
+// The standing session's launcher runs the CLI beside this server, wherever this version is installed
+recordCliPath(dirname(fileURLToPath(import.meta.url)))
 
 const transport = new StdioServerTransport()
 await server.connect(transport)

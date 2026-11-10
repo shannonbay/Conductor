@@ -16,6 +16,7 @@ import {
 import { existsSync } from 'fs'
 import { nanoid } from 'nanoid'
 import { record } from '../history.js'
+import { standingSessionId } from '../runner-session.js'
 
 const human = { actor: 'human' as const, via: 'plugin' }
 
@@ -38,7 +39,7 @@ export async function goals_tick(args: unknown) {
 
 export async function goals_overview(args: unknown) {
   const input = GoalsOverviewSchema.parse(args)
-  const { body, etag } = overviewWithEtag(input.detail ?? 'all')
+  const { body, etag } = overviewWithEtag(input.detail ?? 'all', standingSessionId())
   if (input.etag === etag) return { changed: false, etag }
   return { changed: true, etag, ...JSON.parse(body) as object }
 }

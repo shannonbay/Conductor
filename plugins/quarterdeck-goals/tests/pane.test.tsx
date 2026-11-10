@@ -389,6 +389,15 @@ test('when a newer Quarterdeck has upgraded the database, the pane asks for /rel
   await ui.unmount()
 })
 
+test('while the standing session starts goal runs, the pane says so', async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })], { standing: true })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /standing session/ }))?.text).toContain('with this window closed')
+  await ui.unmount()
+})
+
 test('offline, the pane dates the goals it still shows, not the last failed read', async ($, on) => {
   const { clock } = engine(on)
   const opts = { fail: false }

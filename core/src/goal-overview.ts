@@ -14,6 +14,7 @@ import { listHealth } from './health.js'
 import type { Event, Goal, GoalRun, Task } from './types.js'
 import { getRunHold } from './goal-changes.js'
 import { schemaOutdated } from './migrate.js'
+import { leaseHolder } from './goal-tick.js'
 
 const RUNS = 5
 const OPEN_ITEMS = 10
@@ -191,7 +192,8 @@ const NEEDS_YOU = 5
 /** The longest text a card's fields carry (its title line, objective and waiting items). */
 const CARD_TEXT = 160
 
-export function buildOverview(db: Database, detail: OverviewDetail = 'all') {
+/** `standingSession`: the standing session's id (`quarterdeck runner`), to say when it is the one starting runs. */
+export function buildOverview(db: Database, detail: OverviewDetail = 'all', standingSession: string | null = null) {
   const all = listGoals(db)
   // Done one-offs (retired) are listed too, the newest few; other retired goals are not
   const done = all.filter(({ goal }) => goal.status === 'retired' && goal.one_off)
@@ -254,13 +256,14 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all') {
         runs: g.runs.slice(0, 1), open_items: [], memory: [], instructions: '', tool_map: {},
       }
     })
-  return { goals, hold: getRunHold(db), ...(schemaOutdated(db) ? { outdated: true as const } : {}) }
+  const standing = standingSession !== null && leaseHolder(db) === standingSession
+  return { goals, hold: getRunHold(db), ...(schemaOutdated(db) ? { outdated: true as const } : {}), ...(standing ? { standing: true as const } : {}) }
 }
 
 export type Overview = ReturnType<typeof buildOverview>
 
 /** The overview's JSON and a strong ETag for it (quoted, as HTTP sends it). */
-export function overviewWithEtag(db: Database, detail: OverviewDetail = 'all'): { body: string; etag: string } {
-  const body = JSON.stringify(buildOverview(db, detail))
+export function overviewWithEtag(db: Database, detail: OverviewDetail = 'all', standingSession: string | null = null): { body: string; etag: string } {
+  const body = JSON.stringify(buildOverview(db, detail, standingSession))
   return { body, etag: `"${createHash('sha256').update(body).digest('base64url').slice(0, 27)}"` }
 }

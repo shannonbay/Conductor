@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
+import { realDeps, status, statusText, taskInstalled, TASK_NAME, type InstallDeps } from './runner-session.js'
 
 export type Level = 'ok' | 'warn' | 'fail'
 
@@ -301,6 +302,25 @@ export async function checkGoals(o: DoctorOptions, plugins: CheckResult): Promis
         plugins.fix ?? 'Install the quarterdeck-goals and quarterdeck-guard plugins (see the Claude Code plugins check above).')
 }
 
+/**
+ * The standing session (`quarterdeck runner install`), which runs goals with no
+ * Claude Code window open. Null until it has been set up.
+ */
+export async function checkRunner(o: DoctorOptions, deps?: InstallDeps): Promise<CheckResult | null> {
+  const name = 'Standing session'
+  if (!existsSync(join(o.home, '.quarterdeck', 'runner', 'launch.mjs'))) return null
+  try {
+    const d = deps ?? await realDeps()
+    const s = status(d)
+    const task = d.platform !== 'win32' || taskInstalled(d)
+    if (!s.running) return warn(name, `not running${task ? ' (the scheduled task starts it within 15 minutes)' : ''}, so goals run only while a Claude Code window is open`, 'Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.')
+    if (!task) return warn(name, `${statusText(s)} But the scheduled task "${TASK_NAME}" is missing, so nothing restarts it after a logon or an update`, 'Run `quarterdeck runner install`.')
+    return ok(name, statusText(s))
+  } catch (e) {
+    return warn(name, `could not be checked: ${firstLine((e as Error).message)}`, 'Check that `claude agents --json` works in a terminal.')
+  }
+}
+
 // ── Runner ────────────────────────────────────────────────────────────────────
 
 export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<CheckResult[]> {
@@ -318,7 +338,7 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
     plugins,
     ...[checkUpdates(o), checkPermissionRules(o), checkRenameLeftovers(o)].filter((r): r is CheckResult => r !== null),
     web,
-    ...[await checkGoals(o, plugins)].filter((r): r is CheckResult => r !== null),
+    ...[await checkGoals(o, plugins), await checkRunner(o)].filter((r): r is CheckResult => r !== null),
   ]
 }
 

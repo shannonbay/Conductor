@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, updateGoal, getGoal, queueRun, getRun, updateRun, addItem, getTask, listMemory, listRuns,
-  takeLease, releaseLease, claimRun, schedulerPass, expireStaleRuns, decideItem, attachAgent, guardToolCallForRun,
+  takeLease, releaseLease, leaseHolder, claimRun, schedulerPass, expireStaleRuns, decideItem, attachAgent, guardToolCallForRun,
   buildOverview, overviewWithEtag, LEASE_MS, insertRun, endRun, updateTask, reviveIfDone, insertMemory,
   SCHEMA_VERSION, dbSchemaVersion, schemaOutdated, runMigrations,
 } from './index.js'
@@ -26,6 +26,17 @@ describe('scheduler lease', () => {
     expect(takeLease(db, 'A', new Date(t.getTime() + 1000 + LEASE_MS + 2))).toBe(false)
     releaseLease(db, 'B')
     expect(takeLease(db, 'A', new Date(t.getTime() + 1000 + LEASE_MS + 3))).toBe(true)
+  })
+
+  it('the overview says when the standing session is the one starting runs', () => {
+    expect(leaseHolder(db)).toBeNull()
+    takeLease(db, 'standing')
+    expect(leaseHolder(db)).toBe('standing')
+    expect(buildOverview(db, 'all', 'standing')).toMatchObject({ standing: true })
+    expect(buildOverview(db, 'all', 'another')).not.toHaveProperty('standing')
+    expect(buildOverview(db)).not.toHaveProperty('standing')
+    // A lease that ran out is nobody's
+    expect(leaseHolder(db, new Date(Date.now() + LEASE_MS + 1000))).toBeNull()
   })
 })
 
