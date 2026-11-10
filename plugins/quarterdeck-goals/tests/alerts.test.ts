@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { engine, fakeQuarterdeck, goal, proposal, START } from './fixtures'
+import { engine, fakeQuarterdeck, goal, PANE, proposal, START } from './fixtures'
 
 const poll = async (clock: { advance: (ms: number) => Promise<void>; settle: () => Promise<void> }) => {
   await clock.advance(15_000)
@@ -32,8 +32,8 @@ test('with phone_push on, a new proposal is pushed to the phone by the plugin', 
   expect(pushes).toEqual(['Quarterdeck: Inbox asks: "Archive the newsletter". Reply "approve" or "reject, because ..." in Claude.'])
 })
 
-test('by default the plugin sends no push itself', async ($, on) => {
-  const { pushes, notifications, clock } = engine(on)
+test('by default the plugin tries its own push only to learn whether the person is there, then relays', async ($, on) => {
+  const { pushes, prompts, notifications, clock } = engine(on)
   const goals = [goal({ id: 'g1', name: 'Inbox' })]
   const fake = fakeQuarterdeck(on, goals)
   await $.session.start(START)
@@ -41,7 +41,34 @@ test('by default the plugin sends no push itself', async ($, on) => {
   fake.bump()
   await poll(clock)
   expect(notifications).toHaveLength(1)
+  expect(pushes).toHaveLength(1)
+  expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(1)
+})
+
+test('at the terminal without typing, an alert is not relayed and goals_status says why', async ($, on) => {
+  const { prompts, toasts, clock } = engine(on, { present: true })
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeQuarterdeck(on, goals)
+  await $.session.start(START)
+  goals[0]!.needs_you.push(proposal('12', 'Archive the newsletter'))
+  fake.bump()
+  await poll(clock)
+  expect(toasts).toHaveLength(1)
+  expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(0)
+  const r = await $.tool.call({ tool: 'mcp__quarterdeck-goals__goals_status' } as never)
+  expect(String(r.result)).toContain("Phone: not relayed (you're at the terminal).")
+})
+
+test('with phone_relay off, the plugin sends no push at all', { options: { phone_relay: false } }, async ($, on) => {
+  const { pushes, prompts, clock } = engine(on)
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeQuarterdeck(on, goals)
+  await $.session.start(START)
+  goals[0]!.needs_you.push(proposal('1', 'A'))
+  fake.bump()
+  await poll(clock)
   expect(pushes).toEqual([])
+  expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(0)
 })
 
 test('several new proposals fold into one alert, and notifications are rate limited per goal', async ($, on) => {
@@ -146,4 +173,60 @@ test('a proposal that arrives while the plugin restarts still raises its alert',
   fake.bump()
   await $.session.start(START)
   expect(toasts).toEqual(['Quarterdeck · Inbox: "Arrived during the restart" needs you'])
+})
+
+test('without Remote Control an alert is not relayed; the pane says so and Connect runs /remote-control', async ($, on) => {
+  const { prompts, clock } = engine(on, { phone: 'no_transport' })
+  const ran: string[] = []
+  on('command.list', () => ({ value: [{ name: 'remote-control', description: 'Connect this session', source: 'builtin' }] }) as never)
+  on('command.run', { command: 'remote-control' }, (_, e) => {
+    ran.push(e.command)
+    return { text: 'connected' } as never
+  })
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeQuarterdeck(on, goals)
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'phone-connect' })).toBeUndefined()
+
+  goals[0]!.needs_you.push(proposal('12', 'Archive the newsletter'))
+  fake.bump()
+  await poll(clock)
+  expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(0)
+  const r = await $.tool.call({ tool: 'mcp__quarterdeck-goals__goals_status' } as never)
+  expect(String(r.result)).toContain("Phone: not relayed (Remote Control isn't connected: run /remote-control).")
+  expect((await ui.find({ type: 'Text', text: /reach your phone/ }))?.text).toContain("Remote Control isn't connected")
+
+  await ui.press({ key: 'phone-connect' })
+  expect(ran).toEqual(['remote-control'])
+  expect(await ui.find({ key: 'phone-connect' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('with mobile push off an alert is not relayed and the pane points at /config', async ($, on) => {
+  const { prompts, clock } = engine(on, { phone: 'config_off' })
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeQuarterdeck(on, goals)
+  await $.session.start(START)
+  goals[0]!.needs_you.push(proposal('12', 'Archive the newsletter'))
+  fake.bump()
+  await poll(clock)
+  expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(0)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /reach your phone/ }))?.text).toContain('mobile push is off')
+  await ui.unmount()
+})
+
+test('a new goal says how to get phone alerts, until a message from the phone shows Remote Control is connected', async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  const typed = (args: string) => ({ command: 'goal-new', args, origin: { kind: 'composer' } }) as never
+  const first = await $.command.run(typed('Inbox: keep my inbox under 20 unread'))
+  expect(first.text).toContain('connect Remote Control in this session (/remote-control)')
+
+  await $.prompt.submit({ text: 'what needs me?', origin: { kind: 'bridge' } } as never)
+  const second = await $.command.run(typed('Bills: pay my bills on time'))
+  expect(second.text).toContain('Created the goal "Bills"')
+  expect(second.text).not.toContain('Remote Control')
 })

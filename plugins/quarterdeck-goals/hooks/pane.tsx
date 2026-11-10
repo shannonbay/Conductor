@@ -13,8 +13,9 @@ import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, rej
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, runCost, scheduleLabel, spark } from './model'
+import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
-import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
+import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, editFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
@@ -70,6 +71,7 @@ export async function renderPane($: $, e: E) {
   const addingTo = await getAddingTo($)
   const askingAbout = await getAskingAbout($)
   const editing = await getEditingTodo($)
+  const phone = await getPhone($)
 
   // Not read yet (a new session, or just after /clear): that is not a failed connection
   if (!s.reachable && s.fetchedAt === 0 && !s.error) {
@@ -120,6 +122,16 @@ export async function renderPane($: $, e: E) {
       {guardMissing && <Text color="yellow">{GUARD_MISSING}</Text>}
       {s.outdated && <Text color="yellow">Quarterdeck was updated in another session: run /reload-plugins here to use the new version (this session won't start goal runs until then).</Text>}
       {s.hold && <Text color="yellow">Goal runs are on hold until {holdUntilText(s.hold.until, view.now)}: the usage limit is reached. Due runs start after that.</Text>}
+      {phone === 'no_transport' && (
+        <Box>
+          <Text color="yellow">Alerts can't reach your phone: Remote Control isn't connected in this session. </Text>
+          {action($, e, { key: 'phone-connect', label: view.doing === 'phone-connect' ? 'Connecting…' : 'Connect', onPress: () => void act($, 'phone-connect', 'connect Remote Control', async () => {
+            const failed = await connectRemote($)
+            if (failed) throw new Error(failed)
+          }) })}
+        </Box>
+      )}
+      {phone === 'config_off' && <Text color="yellow">Alerts can't reach your phone: mobile push is off. Turn it on in /config.</Text>}
       {!s.reachable && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
       {current.length === 0 && done.length === 0 && !todos?.lists.length && welcome($, e)}
       {current.length === 0 && (done.length > 0 || !!todos?.lists.length) && (

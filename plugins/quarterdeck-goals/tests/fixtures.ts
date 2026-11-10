@@ -241,7 +241,7 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
 }
 
 /** Answers the engine nouns the plugin calls; records what it shows. */
-export function engine(on: On, opts: { answer?: string; answers?: string[]; guarded?: boolean; suggestion?: string | null } = {}) {
+export function engine(on: On, opts: { answer?: string; answers?: string[]; guarded?: boolean; suggestion?: string | null; /** The person is at the terminal: Claude Code drops phone pushes. */ present?: boolean; /** Why no push can go out: no Remote Control, or mobile push off. */ phone?: 'no_transport' | 'config_off' } = {}) {
   const toasts: string[] = []
   const notifications: string[] = []
   const statuses: (string | undefined)[] = []
@@ -264,7 +264,10 @@ export function engine(on: On, opts: { answer?: string; answers?: string[]; guar
   // Claude Code's phone push (sent only while Remote Control is connected and the person is away)
   const pushes: string[] = []
   on('tool.call', { tool: 'PushNotification' }, (_, e) => {
-    pushes.push(String((e as unknown as { message: string }).message))
+    const message = String((e as unknown as { message: string }).message)
+    if (opts.phone) return { result: { message, disabledReason: opts.phone } } as never
+    if (opts.present) return { result: { message, disabledReason: 'user_present' } } as never
+    pushes.push(message)
     return { result: { message: 'sent', pushSent: true } } as never
   })
   on('ui.status', (_, e) => {

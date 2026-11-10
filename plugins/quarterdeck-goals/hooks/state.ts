@@ -6,7 +6,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { ActiveRun, Confirm, RunEntry, Snapshot, Todos } from '../types'
+import type { ActiveRun, Confirm, PhoneState, RunEntry, Snapshot, Todos } from '../types'
 import { EMPTY } from './model'
 
 type $ = EngineInterface
@@ -27,6 +27,15 @@ const activeRun = atom({ plugin: 'quarterdeck-goals', key: 'activeRun' } as cons
 const runs = atom({ plugin: 'quarterdeck-goals', key: 'runs' } as const, {})
 const guardMissing = atom({ plugin: 'quarterdeck-goals', key: 'guardMissing' } as const, false)
 const todos = atom({ plugin: 'quarterdeck-goals', key: 'todos' } as const, null)
+const phone = atom({ plugin: 'quarterdeck-goals', key: 'phone' } as const, 'unknown')
+
+export async function getPhone($: $): Promise<PhoneState> {
+  return read($, phone)
+}
+/** Writes only on a change, so the pane redraws only when it does. */
+export async function setPhone($: $, value: PhoneState): Promise<void> {
+  if ((await read($, phone)) !== value) await update($, phone, () => value)
+}
 
 export async function getSnapshot($: $): Promise<Snapshot> {
   return read($, snapshot)

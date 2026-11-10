@@ -6,7 +6,7 @@
  */
 import type { EngineInterface, Register } from 'claude-code'
 
-import { resetAlerts, markActive } from './alerts'
+import { resetAlerts, markActive, markRemote } from './alerts'
 import { configure } from './api'
 import { ago } from './model'
 import { renderPane } from './pane'
@@ -92,6 +92,7 @@ export const register: Register = (on, options) => {
     // The person typed (or sent from the phone): no phone relay for a while. Task
     // notifications and other automatic prompts don't count.
     if (byPerson(e.origin)) void $.clock.now().then((t) => markActive($, t))
+    if (e.origin?.kind === 'bridge') void markRemote($)
     return next(e)
   }).catch(passOn)
 
@@ -100,6 +101,7 @@ export const register: Register = (on, options) => {
   on('session.receive', async ($, e, next) => {
     await safeStart($, false)
     if (!e.agentId && byPerson(e.origin)) void $.clock.now().then((t) => markActive($, t))
+    if (!e.agentId && e.origin?.kind === 'bridge') void markRemote($)
     return next(e)
   }).catch(passOn)
 
