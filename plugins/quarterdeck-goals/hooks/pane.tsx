@@ -14,7 +14,7 @@ import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, runCost, scheduleLabel, spark } from './model'
 import { sendToChat } from './chat'
-import { getAddingTo, getAskingAbout, getBusy, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setEditingTodo, setRejecting, toggleExpanded } from './state'
+import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, editFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
@@ -32,10 +32,29 @@ type View = {
   open: string | null
   shown: string[]
   pending: Confirm | null
+  /** "goal:<id>" or "run:<id>" while that Discuss question box is open. */
+  discussing: string | null
   /** The first proposal in the pane, which a / r act on. */
   first: string | null
   /** The goal n runs. */
   runnable: string | null
+}
+
+/** The colour of every action you can press that is drawn as plain words: the theme's own, so it follows the person's theme. */
+const ACTION_COLOR = 'suggestion'
+
+/**
+ * A plain button for an action (Pause, Delete, Ask…, Cancel): the label in the
+ * one action colour, so it reads as something to press and not as text. Rows
+ * that are content you press (a goal's name, a to-do's text, ☐) stay uncoloured.
+ */
+function action($: $, e: E, p: { key: string; label: string; hotkey?: string; onPress: () => void }) {
+  const { Button, Text } = $.ui.resolve(e)
+  return (
+    <Button key={p.key} plain label={p.label} hotkey={p.hotkey} onPress={p.onPress}>
+      <Text color={ACTION_COLOR}>{p.label}</Text>
+    </Button>
+  )
 }
 
 function canRun(g: GoalCard): boolean {
@@ -91,6 +110,7 @@ export async function renderPane($: $, e: E) {
     open: await getRejecting($),
     shown: await getExpanded($),
     pending: await getConfirm($),
+    discussing: await getDiscussing($),
     first: firstWithProposal ? `${firstWithProposal.id}/${firstWithProposal.needsYou[0]!.id}` : null,
     runnable: current.find(canRun)?.id ?? null,
   }
@@ -114,7 +134,7 @@ export async function renderPane($: $, e: E) {
       {message && <Text color="red">{message}</Text>}
       <Box>
         <Text dimColor>Updated {ago(new Date(s.fetchedAt).toISOString(), view.now)} </Text>
-        <Button key="refresh" label="Refresh" plain hotkey="g" onPress={() => void refresh($)} />
+        {action($, e, { key: 'refresh', label: 'Refresh', hotkey: 'g', onPress: () => void refresh($) })}
       </Box>
     </Box>
   )
@@ -196,12 +216,12 @@ function autoSuggestion($: $, e: E, view: View, g: GoalCard, s: GoalCard['sugges
               }}
             />
             <Text dimColor> · </Text>
-            <Button key={`auto-no-${key}`} label="Keep asking" plain onPress={() => void setConfirm($, null)} />
+            {action($, e, { key: `auto-no-${key}`, label: 'Keep asking', onPress: () => void setConfirm($, null) })}
           </Box>
         </Box>
       ) : (
         <Box>
-          <Button key={`auto-${key}`} label={`Switch ${s.category} to auto`} plain onPress={() => void setConfirm($, { kind: 'auto', goalId: g.id, category: s.category })} />
+          {action($, e, { key: `auto-${key}`, label: `Switch ${s.category} to auto`, onPress: () => void setConfirm($, { kind: 'auto', goalId: g.id, category: s.category }) })}
           <Text dimColor> · </Text>
           <Link key={`autonomy-${key}`} href={`${view.base}/goals/${encodeURIComponent(g.id)}`} label="open the goal page" />
         </Box>
@@ -252,18 +272,13 @@ function proposalRow($: $, e: E, view: View, g: GoalCard, item: GoalCard['needsY
         {view.open === key && Input ? (
           <Box flexDirection="column">
             <Input key={`answer-${key}`} label="Your answer (saved to the goal's memory)" submitLabel="Send" autoFocus onSubmit={reply} />
-            <Button key={`cancel-${key}`} label="Cancel" plain onPress={() => void setRejecting($, null)} />
+            {action($, e, { key: `cancel-${key}`, label: 'Cancel', onPress: () => void setRejecting($, null) })}
           </Box>
         ) : (
           <Box>
             <Button key={`answer-btn-${key}`} label="Answer…" variant="primary" hotkey={isFirst ? 'a' : undefined} onPress={() => void setRejecting($, key)} />
             <Text dimColor> · </Text>
-            <Button
-              key={`done-${key}`}
-              label={view.doing === `approve:${key}` ? 'Marking…' : 'Done'}
-              plain
-              onPress={() => void act($, `approve:${key}`, 'mark it done', () => approve($, g.id, item.id))}
-            />
+            {action($, e, { key: `done-${key}`, label: view.doing === `approve:${key}` ? 'Marking…' : 'Done', onPress: () => void act($, `approve:${key}`, 'mark it done', () => approve($, g.id, item.id)) })}
           </Box>
         )}
       </Box>
@@ -283,7 +298,7 @@ function proposalRow($: $, e: E, view: View, g: GoalCard, item: GoalCard['needsY
       {view.open === key && Input ? (
         <Box flexDirection="column">
           <Input key={`feedback-${key}`} label="What should change? (saved to the goal's memory)" submitLabel="Send back" autoFocus onSubmit={sendBack} />
-          <Button key={`cancel-${key}`} label="Cancel" plain onPress={() => void setRejecting($, null)} />
+          {action($, e, { key: `cancel-${key}`, label: 'Cancel', onPress: () => void setRejecting($, null) })}
         </Box>
       ) : (
         <Box>
@@ -321,7 +336,7 @@ function controls($: $, e: E, view: View, g: GoalCard) {
             }}
           />
           <Text dimColor> · </Text>
-          <Button key={`delete-no-${g.id}`} label="Keep it" plain onPress={() => void setConfirm($, null)} />
+          {action($, e, { key: `delete-no-${g.id}`, label: 'Keep it', onPress: () => void setConfirm($, null) })}
         </Box>
       </Box>
     )
@@ -340,7 +355,7 @@ function controls($: $, e: E, view: View, g: GoalCard) {
           }}
         />
         <Text> </Text>
-        <Button key={`cancel-run-no-${g.id}`} label="Keep running" plain onPress={() => void setConfirm($, null)} />
+        {action($, e, { key: `cancel-run-no-${g.id}`, label: 'Keep running', onPress: () => void setConfirm($, null) })}
       </Box>
     )
   }
@@ -353,43 +368,27 @@ function controls($: $, e: E, view: View, g: GoalCard) {
   }
   if (g.status === 'active' && !g.oneOff) {
     buttons.push(g.schedule ? (
-      <Button
-        key={`reschedule-${g.id}`}
-        label={view.doing === `schedule:${g.id}` ? 'Choosing…' : 'Reschedule'}
-        plain
-        onPress={() => void act($, `schedule:${g.id}`, 'change the schedule', () => rescheduleGoal($, g))}
-      />
+      action($, e, { key: `reschedule-${g.id}`, label: view.doing === `schedule:${g.id}` ? 'Choosing…' : 'Reschedule', onPress: () => void act($, `schedule:${g.id}`, 'change the schedule', () => rescheduleGoal($, g)) })
     ) : (
-      <Button
-        key={`schedule-${g.id}`}
-        label={view.doing === `schedule:${g.id}` ? 'Choosing…' : 'Set schedule'}
-        plain
-        onPress={() => void act($, `schedule:${g.id}`, 'set the schedule', async () => void (await chooseSchedule($, g)))}
-      />
+      action($, e, { key: `schedule-${g.id}`, label: view.doing === `schedule:${g.id}` ? 'Choosing…' : 'Set schedule', onPress: () => void act($, `schedule:${g.id}`, 'set the schedule', async () => void (await chooseSchedule($, g))) })
     ))
   }
   if (canRun(g)) {
     buttons.push(
-      <Button
-        key={`run-${g.id}`}
-        label={view.doing === `run:${g.id}` ? 'Starting…' : 'Run now'}
-        plain
-        hotkey={view.runnable === g.id ? 'n' : undefined}
-        onPress={() => void act($, `run:${g.id}`, 'start the run', () => runNow($, g.id))}
-      />,
+      action($, e, { key: `run-${g.id}`, label: view.doing === `run:${g.id}` ? 'Starting…' : 'Run now', hotkey: view.runnable === g.id ? 'n' : undefined, onPress: () => void act($, `run:${g.id}`, 'start the run', () => runNow($, g.id)) }),
     )
   }
   if (g.openRun) {
-    buttons.push(<Button key={`cancel-run-${g.id}`} label="Cancel run" plain onPress={() => void setConfirm($, ({ kind: 'cancel-run', goalId: g.id }))} />)
+    buttons.push(action($, e, { key: `cancel-run-${g.id}`, label: 'Cancel run', onPress: () => void setConfirm($, ({ kind: 'cancel-run', goalId: g.id })) }))
   }
   buttons.push(g.status === 'active' ? (
-    <Button key={`pause-${g.id}`} label={view.doing === `pause:${g.id}` ? 'Pausing…' : 'Pause'} plain onPress={() => void act($, `pause:${g.id}`, 'pause the goal', () => setGoalStatus($, g.id, 'paused'))} />
+    action($, e, { key: `pause-${g.id}`, label: view.doing === `pause:${g.id}` ? 'Pausing…' : 'Pause', onPress: () => void act($, `pause:${g.id}`, 'pause the goal', () => setGoalStatus($, g.id, 'paused')) })
   ) : (
-    <Button key={`resume-${g.id}`} label={view.doing === `resume:${g.id}` ? 'Resuming…' : 'Resume'} plain onPress={() => void act($, `resume:${g.id}`, 'resume the goal', () => setGoalStatus($, g.id, 'active'))} />
+    action($, e, { key: `resume-${g.id}`, label: view.doing === `resume:${g.id}` ? 'Resuming…' : 'Resume', onPress: () => void act($, `resume:${g.id}`, 'resume the goal', () => setGoalStatus($, g.id, 'active')) })
   ))
   if (!g.openRun) {
     // Last, and only without a run going (a run in progress must be cancelled first)
-    buttons.push(<Button key={`delete-${g.id}`} label="Delete" plain onPress={() => void setConfirm($, { kind: 'delete-goal', goalId: g.id })} />)
+    buttons.push(action($, e, { key: `delete-${g.id}`, label: 'Delete', onPress: () => void setConfirm($, { kind: 'delete-goal', goalId: g.id }) }))
   }
 
   return (
@@ -400,7 +399,21 @@ function controls($: $, e: E, view: View, g: GoalCard) {
 }
 
 function details($: $, e: E, view: View, g: GoalCard) {
-  const { Box, Text, Button, Link } = $.ui.resolve(e)
+  const { Box, Text, Button, Link, Input } = $.ui.resolve(e)
+  // Discuss opens a box for the person's question, like a to-do's Ask…; Enter on an empty box asks the usual one
+  const discussBox = (kind: 'goal' | 'run', id: string, run?: GoalCard['runs'][number]) => (
+    <Box key={`discuss-${kind}-box-${id}`} flexDirection="column">
+      <Input
+        key={`discuss-${kind}-input-${id}`}
+        label="Your question"
+        placeholder="type a question, or Enter for the usual one"
+        submitLabel={view.doing === `discuss:${g.id}` ? 'Sending…' : 'Discuss'}
+        autoFocus
+        onSubmit={(text: string) => void discuss($, g, run, text)}
+      />
+      {action($, e, { key: `discuss-${kind}-cancel-${id}`, label: 'Cancel', onPress: () => void setDiscussing($, null) })}
+    </Box>
+  )
   if (!g.detail) return <Text key={`details-${g.id}`} dimColor>  Loading… (if this stays, collapse some other goals: too many open at once)</Text>
   return (
     <Box key={`details-${g.id}`} flexDirection="column" marginTop={1}>
@@ -414,7 +427,9 @@ function details($: $, e: E, view: View, g: GoalCard) {
       ))}
       {g.openItemCount > g.openItems.length && <Text dimColor>  … and {g.openItemCount - g.openItems.length} more</Text>}
 
-      <Button key={`discuss-goal-${g.id}`} plain label="Discuss this goal" onPress={() => void discuss($, g)} />
+      {view.discussing === `goal:${g.id}`
+        ? discussBox('goal', g.id)
+        : action($, e, { key: `discuss-goal-${g.id}`, label: 'Discuss this goal…', onPress: () => void setDiscussing($, `goal:${g.id}`) })}
 
       <Text bold>Recent runs</Text>
       {g.runs.length === 0 && <Text dimColor>  none</Text>}
@@ -426,8 +441,9 @@ function details($: $, e: E, view: View, g: GoalCard) {
             <Text dimColor> {r.trigger} · {ago(r.endedAt ?? r.startedAt, view.now)}{runCost(r) ? ` · ${runCost(r)}` : ''}</Text>
             {r.summary ? ` — ${r.summary}` : ''}
           </Text>
-          {r.status !== 'running' && r.status !== 'queued' && (
-            <Button key={`discuss-run-${r.id}`} plain label="    Discuss this run" onPress={() => void discuss($, g, r)} />
+          {r.status !== 'running' && r.status !== 'queued' && (view.discussing === `run:${r.id}`
+            ? discussBox('run', r.id, r)
+            : action($, e, { key: `discuss-run-${r.id}`, label: '    Discuss this run…', onPress: () => void setDiscussing($, `run:${r.id}`) })
           )}
         </Box>
       ))}
@@ -441,20 +457,15 @@ function details($: $, e: E, view: View, g: GoalCard) {
             <Text>  {m.pinned ? '📌 ' : ''}<Text dimColor>[{m.kind}]</Text> {m.text} </Text>
             {isConfirming ? (
               <Box>
-                <Button
-                  key={`forget-yes-${m.id}`}
-                  label="Delete it"
-                  plain
-                  onPress={() => {
+                {action($, e, { key: `forget-yes-${m.id}`, label: 'Delete it', onPress: () => {
                     void setConfirm($, null)
                     void act($, `forget:${m.id}`, 'delete the memory', () => deleteMemory($, g.id, m.id))
-                  }}
-                />
+                  } })}
                 <Text> </Text>
-                <Button key={`forget-no-${m.id}`} label="Keep" plain onPress={() => void setConfirm($, null)} />
+                {action($, e, { key: `forget-no-${m.id}`, label: 'Keep', onPress: () => void setConfirm($, null) })}
               </Box>
             ) : (
-              <Button key={`forget-${m.id}`} label="Delete" plain onPress={() => void setConfirm($, ({ kind: 'delete-memory', goalId: g.id, memoryId: m.id }))} />
+              action($, e, { key: `forget-${m.id}`, label: 'Delete', onPress: () => void setConfirm($, ({ kind: 'delete-memory', goalId: g.id, memoryId: m.id })) })
             )}
           </Box>
         )
@@ -481,12 +492,7 @@ function doneSection($: $, e: E, view: View, done: GoalCard[]) {
             <Box>
               <Text>  ✓ {g.name}</Text>
               <Text dimColor> · {run ? ago(run.endedAt ?? run.startedAt, view.now) : 'never run'} </Text>
-              <Button
-                key={`again-${g.id}`}
-                label={view.doing === `run:${g.id}` ? 'Starting…' : 'Run again'}
-                plain
-                onPress={() => void act($, `run:${g.id}`, 'run it again', () => runNow($, g.id))}
-              />
+              {action($, e, { key: `again-${g.id}`, label: view.doing === `run:${g.id}` ? 'Starting…' : 'Run again', onPress: () => void act($, `run:${g.id}`, 'run it again', () => runNow($, g.id)) })}
             </Box>
             {run?.summary && <Text dimColor>    {clip(run.summary, Math.max(view.columns - 4, 10))}</Text>}
           </Box>
@@ -547,7 +553,7 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
                             autoFocus
                             onSubmit={(text: string) => void editFromPane($, list, item, text)}
                           />
-                          <Button key={`todo-edit-cancel-${list.id}/${item.id}`} label="Cancel" plain onPress={() => void setEditingTodo($, null)} />
+                          {action($, e, { key: `todo-edit-cancel-${list.id}/${item.id}`, label: 'Cancel', onPress: () => void setEditingTodo($, null) })}
                         </Box>
                       ) : (
                         <Text>{indent}    {item.text}</Text>
@@ -563,18 +569,18 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
                             autoFocus
                             onSubmit={(text: string) => void askFromPane($, list, item, text)}
                           />
-                          <Button key={`todo-ask-cancel-${list.id}/${item.id}`} label="Cancel" plain onPress={() => void setAskingAbout($, null)} />
+                          {action($, e, { key: `todo-ask-cancel-${list.id}/${item.id}`, label: 'Cancel', onPress: () => void setAskingAbout($, null) })}
                         </Box>
                       ) : (
                       <Box>
                         <Text>{indent}    </Text>
-                        <Button key={`todo-ask-${list.id}/${item.id}`} plain label="Ask…" onPress={() => void setAskingAbout($, `${list.id}/${item.id}`)} />
+                        {action($, e, { key: `todo-ask-${list.id}/${item.id}`, label: 'Ask…', onPress: () => void setAskingAbout($, `${list.id}/${item.id}`) })}
                         <Text> </Text>
                         <Button key={`todo-plan-${list.id}/${item.id}`} label={view.doing === `todo-plan:${list.id}/${item.id}` ? 'Sending…' : 'Plan'} onPress={() => void workFromPane($, list, item, 'plan')} />
                         <Text> </Text>
-                        <Button key={`todo-start-${list.id}/${item.id}`} plain label={view.doing === `todo-start:${list.id}/${item.id}` ? 'Sending…' : 'Start'} onPress={() => void workFromPane($, list, item, 'start')} />
+                        {action($, e, { key: `todo-start-${list.id}/${item.id}`, label: view.doing === `todo-start:${list.id}/${item.id}` ? 'Sending…' : 'Start', onPress: () => void workFromPane($, list, item, 'start') })}
                         <Text> </Text>
-                        <Button key={`todo-edit-${list.id}/${item.id}`} plain label="Edit" onPress={() => void setEditingTodo($, `${list.id}/${item.id}`)} />
+                        {action($, e, { key: `todo-edit-${list.id}/${item.id}`, label: 'Edit', onPress: () => void setEditingTodo($, `${list.id}/${item.id}`) })}
                       </Box>
                       )}
                     </Box>
@@ -609,10 +615,10 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
                     })
                   }}
                 />
-                <Button key={`todo-add-cancel-${list.id}`} label="Cancel" plain onPress={() => void setAddingTo($, null)} />
+                {action($, e, { key: `todo-add-cancel-${list.id}`, label: 'Cancel', onPress: () => void setAddingTo($, null) })}
               </Box>
             ) : isOpen ? (
-              <Button key={`todo-addbtn-${list.id}`} plain label="  + Add" onPress={() => void setAddingTo($, list.id)} />
+              action($, e, { key: `todo-addbtn-${list.id}`, label: '  + Add', onPress: () => void setAddingTo($, list.id) })
             ) : null}
           </Box>
         )
@@ -621,8 +627,16 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
   )
 }
 
-/** Discuss: the goal, or one of its runs, brought into the conversation to talk over (and change). */
-function discuss($: $, g: GoalCard, run?: GoalCard['runs'][number]): Promise<boolean> {
-  const aside = run ? `about run ${run.id} of goal "${g.name}" (${g.id})` : `about goal "${g.name}" (${g.id})`
-  return act($, `discuss:${g.id}`, 'start the discussion', async () => void (await sendToChat($, discussPrompt(g, run), aside)))
+/**
+ * Discuss: the goal, or one of its runs, brought into the conversation to talk
+ * over (and change), with the person's question when they typed one in the
+ * box. Closes the box once sent.
+ */
+async function discuss($: $, g: GoalCard, run?: GoalCard['runs'][number], question?: string): Promise<boolean> {
+  const asked = question?.trim()
+  const about = run ? `about run ${run.id} of goal "${g.name}" (${g.id})` : `about goal "${g.name}" (${g.id})`
+  const aside = asked ? `${about}: ${asked}` : about
+  const ok = await act($, `discuss:${g.id}`, 'start the discussion', async () => void (await sendToChat($, discussPrompt(g, run, asked), aside)))
+  if (ok) await setDiscussing($, null)
+  return ok
 }
