@@ -74,7 +74,7 @@ Goal names match by exact name, then prefix, then any part of the name. If more 
 
 ### Your to-do list
 
-Long conversations produce ideas and decisions to come back to, and a context compaction forgets them. The to-do list keeps them outside the conversation, for you:
+Goals look after things in the background; the to-do list is the backlog for what you build with Claude yourself. Working on a project, ideas and decisions pile up to come back to, and a `/clear` or a context compaction loses them. The to-do list keeps them beside the chat, outside the conversation, and you pick one up later with **Plan** or **Start**. A list can hold anything, not only code work.
 
 - `/todo <text>` adds to this project's **To do** list (made the first time). Or ask Claude: "add that to the list". Claude only adds when asked, or offers when an idea is clearly being put off.
 - In the pane, open a list to see its open to-dos, each with its id (`☐ 1.3 Set autonomy…`). Press ☐ to tick one off; a toast says how to undo. **n done** shows the ticked ones, and pressing one puts it back.
