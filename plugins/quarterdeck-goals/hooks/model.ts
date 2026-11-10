@@ -439,7 +439,7 @@ export function holdUntilText(until: string, now: number): string {
   return new Date(now).toDateString() === d.toDateString() ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
 }
 
-/** "48k tokens · 2m": what a finished run used, and how long it took; '' when unknown. */
+/** "48k tokens · 2m": the new tokens a finished run used (no cache reads), and how long it took; '' when unknown. */
 export function runCost(run: { tokens?: number; startedAt: string; endedAt: string | null }): string {
   const parts: string[] = []
   const t = run.tokens ?? 0

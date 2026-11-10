@@ -133,7 +133,7 @@ export async function renderPane($: $, e: E) {
       {done.length > 0 && doneSection($, e, view, done)}
       {message && <Text color="red">{message}</Text>}
       <Box>
-        <Text dimColor>Updated {ago(new Date(s.fetchedAt).toISOString(), view.now)} </Text>
+        <Text dimColor>Last change {ago(new Date(s.fetchedAt).toISOString(), view.now)} </Text>
         {action($, e, { key: 'refresh', label: 'Refresh', hotkey: 'g', onPress: () => void refresh($) })}
       </Box>
     </Box>

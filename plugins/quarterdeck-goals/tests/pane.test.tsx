@@ -388,3 +388,19 @@ test('when a newer Quarterdeck has upgraded the database, the pane asks for /rel
   expect((await ui.find({ type: 'Text', text: /updated in another session/ }))?.text).toContain('/reload-plugins')
   await ui.unmount()
 })
+
+test('offline, the pane dates the goals it still shows, not the last failed read', async ($, on) => {
+  const { clock } = engine(on)
+  const opts = { fail: false }
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })], opts)
+  await $.session.start(START)
+
+  opts.fail = true
+  await clock.advance(10 * 60_000)
+  await clock.settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^Offline/ }))?.text).toContain('10m ago')
+  expect(await ui.find({ key: 'toggle-g1' })).toBeDefined()
+  await ui.unmount()
+})
