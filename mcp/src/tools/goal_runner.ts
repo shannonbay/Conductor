@@ -1,8 +1,8 @@
 /**
- * Tools the conductor-goals Claude Code plugin uses to drive goal runs: the
+ * Tools the quarterdeck-goals Claude Code plugin uses to drive goal runs: the
  * scheduler pass, the overview, human decisions from the Goals pane, and run
  * bookkeeping. The plugin refuses the human-only ones when a model calls them
- * (see plugins/conductor-goals/hooks/guard.ts); agents use the goal tools.
+ * (see plugins/quarterdeck-goals/hooks/guard.ts); agents use the goal tools.
  */
 import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
@@ -155,7 +155,7 @@ function applySchedule(goalId: string, schedule: Parameters<typeof setSchedule>[
   return { schedule: s, next_run_at }
 }
 
-/** Changes a goal's settings, once the person has confirmed them (the conductor-goals plugin asks). */
+/** Changes a goal's settings, once the person has confirmed them (the quarterdeck-goals plugin asks). */
 export async function update_goal(args: unknown) {
   const { goal_id, ...changes } = UpdateGoalSchema.parse(args)
   if (!getGoal(goal_id)) throw new Error(`Goal ${goal_id} not found.`)

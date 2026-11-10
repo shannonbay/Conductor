@@ -12,7 +12,7 @@ async function plan(tasks: Record<string, Spec>) {
 }
 
 describe('next_task', () => {
-  afterEach(() => { delete process.env.CONDUCTOR_REQUIRE_DECOMPOSE })
+  afterEach(() => { delete process.env.QUARTERDECK_REQUIRE_DECOMPOSE })
 
   it('throws when no plan is open', async () => {
     await expect(next_task({})).rejects.toThrow('No plan is open')
@@ -82,8 +82,8 @@ describe('next_task', () => {
     expect(r.message).toMatch(/archive_plan/)
   })
 
-  it('hints to decompose when CONDUCTOR_REQUIRE_DECOMPOSE=1 and the leaf is not atomic', async () => {
-    process.env.CONDUCTOR_REQUIRE_DECOMPOSE = '1'
+  it('hints to decompose when QUARTERDECK_REQUIRE_DECOMPOSE=1 and the leaf is not atomic', async () => {
+    process.env.QUARTERDECK_REQUIRE_DECOMPOSE = '1'
     await plan({ '1': { goal: 'root' } })
     const r = await next_task({})
     expect(r.action).toBe('start')

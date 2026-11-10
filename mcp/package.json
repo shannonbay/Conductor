@@ -1,5 +1,5 @@
 {
-  "name": "@conductor/mcp",
+  "name": "@quarterdeck/mcp",
   "version": "1.0.0",
   "license": "Apache-2.0",
   "description": "Task Tree MCP Server — persistent hierarchical task management for LLM agents",
@@ -20,7 +20,7 @@
     "doctor": "node dist/cli.js doctor"
   },
   "dependencies": {
-    "@conductor/core": "*",
+    "@quarterdeck/core": "*",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "better-sqlite3": "^13.0.3",
     "nanoid": "^5.0.7",
@@ -35,6 +35,6 @@
     "vitest": "^2.0.0"
   },
   "bin": {
-    "conductor": "dist/cli.js"
+    "quarterdeck": "dist/cli.js"
   }
 }

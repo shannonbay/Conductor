@@ -7,7 +7,7 @@ describe('tool listing', () => {
     for (const name of ['update_task', 'set_status', 'get_goal_brief', 'add_item', 'end_run', 'todo_add']) expect(isListed(name, {})).toBe(true)
   })
 
-  it('lists everything with CONDUCTOR_TOOLS=all', () => {
-    for (const name of PLAN_TOOLS) expect(isListed(name, { CONDUCTOR_TOOLS: 'all' })).toBe(true)
+  it('lists everything with QUARTERDECK_TOOLS=all', () => {
+    for (const name of PLAN_TOOLS) expect(isListed(name, { QUARTERDECK_TOOLS: 'all' })).toBe(true)
   })
 })

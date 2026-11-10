@@ -8,9 +8,9 @@ A persistent goal is an objective that never finishes — "keep my inbox under c
 
 ## Why
 
-Conductor's plans assume work that ends: decompose, execute, verify, archive. For a capable model with a large context window, that shape adds little inside a single session — the model can hold the plan itself. Conductor earns its keep when work **outlives the agent doing it**: across sessions, across agents, and under human oversight.
+Quarterdeck's plans assume work that ends: decompose, execute, verify, archive. For a capable model with a large context window, that shape adds little inside a single session — the model can hold the plan itself. Quarterdeck earns its keep when work **outlives the agent doing it**: across sessions, across agents, and under human oversight.
 
-Persistent goals are the extreme case of that. No single agent session ever sees the whole job. Each run is short-lived and starts with an empty context, so everything that makes the goal work over weeks — what's still open, what the human approved or rejected, the rules learned along the way — has to live outside the agent. That is exactly what Conductor stores.
+Persistent goals are the extreme case of that. No single agent session ever sees the whole job. Each run is short-lived and starts with an empty context, so everything that makes the goal work over weeks — what's still open, what the human approved or rejected, the rules learned along the way — has to live outside the agent. That is exactly what Quarterdeck stores.
 
 ### What changes compared with plans
 
@@ -120,7 +120,7 @@ Durable knowledge that isn't a task: facts, preferences and rules.
 Rules:
 - Agents can add memories and deactivate their own; they can't edit or deactivate `human` memories.
 - Humans can edit, pin, deactivate or delete any memory in the UI.
-- When a human **rejects** an item with feedback, Conductor creates a `feedback` memory from it automatically (editable afterwards). This is how the goal learns without anyone writing rules by hand.
+- When a human **rejects** an item with feedback, Quarterdeck creates a `feedback` memory from it automatically (editable afterwards). This is how the goal learns without anyone writing rules by hand.
 - Size is bounded: the brief includes every pinned memory plus the most recently used others, up to `MEMORY_BRIEF_CHARS` (default 4 000). The UI warns when active memories exceed that, so the human can prune or pin.
 
 ### Autonomy and action categories
@@ -158,7 +158,7 @@ Everything starts at `propose`; irreversible categories start at `off`. The huma
 
 The approval UI shows `summary` and `params`; approving sets `approved_at`, and the next run executes approved actions before anything else. Rejecting with feedback returns the item to the agent *and* becomes memory.
 
-**Enforcement, honestly:** in v1 Conductor cannot stop an agent from calling, say, a Gmail send tool directly — it only controls its own tools. v1 therefore relies on (1) the brief stating each category's mode, (2) the user's Claude Code permission settings denying irreversible tools during goal runs, and (3) the audit trail making violations visible. Phase 2 adds a harness hook that blocks calls in `off`/`propose` categories unless a matching approved item exists.
+**Enforcement, honestly:** in v1 Quarterdeck cannot stop an agent from calling, say, a Gmail send tool directly — it only controls its own tools. v1 therefore relies on (1) the brief stating each category's mode, (2) the user's Claude Code permission settings denying irreversible tools during goal runs, and (3) the audit trail making violations visible. Phase 2 adds a harness hook that blocks calls in `off`/`propose` categories unless a matching approved item exists.
 
 ### Health checks (Phase 2)
 
@@ -225,7 +225,7 @@ New tools. Existing task tools (`create_task`, `update_task`, `set_status`, `ver
 | `remember` | Add a memory (`kind`, `text`, optional `source_ref`). |
 | `forget` | Deactivate a memory the agent created. |
 | `end_run` | Finish the run with a `summary`. Required; a run that ends without it is marked failed with an empty summary. |
-| `run_goal` | Ask Conductor to start a run now (for chaining from an interactive session). |
+| `run_goal` | Ask Quarterdeck to start a run now (for chaining from an interactive session). |
 
 Changes to existing tools:
 - `next_task` on a goal ignores archived items and puts approved proposals first.
@@ -297,7 +297,7 @@ CREATE TABLE IF NOT EXISTS goal_memory (
 
 Revision triggers are added for `goal_runs` and `goal_memory` so the web page updates live. Archiving an item is an `UPDATE` on `tasks` and is already covered.
 
-**Privacy:** items store a title, an `external_ref` and the agent's notes — not message bodies. The database is local (`~/.conductor/tasks.db`), but instructions to agents say to keep personal content out of item goals and memory beyond what's needed.
+**Privacy:** items store a title, an `external_ref` and the agent's notes — not message bodies. The database is local (`~/.quarterdeck/tasks.db`), but instructions to agents say to keep personal content out of item goals and memory beyond what's needed.
 
 ---
 
@@ -335,7 +335,7 @@ Consequences the user should know: goals only run while the web app **and** a ch
 
 **Run 1 (08:00):** brief has no memory and no items. Agent reads unread mail; archives 14 newsletters (auto, each recorded on an item, resolved); labels a bank statement; creates item 15 *"Reply to Alice: Thursday meeting"* with a draft and a `email.send` proposal. `end_run`: *"Archived 14, labelled 1, drafted 1 reply for review."*
 
-**Human (09:10):** rejects item 15: *"Too formal — Alice is my manager, keep it casual."* Conductor stores a `feedback` memory.
+**Human (09:10):** rejects item 15: *"Too formal — Alice is my manager, keep it casual."* Quarterdeck stores a `feedback` memory.
 
 **Run 2 (09:30):** brief shows the rejection and the new memory. Agent rewrites the draft casually and re-proposes; sees 3 new emails, one of them the same thread as item 15 → `add_item` with the same `external_ref` returns the existing item instead of creating a duplicate.
 
@@ -369,20 +369,20 @@ After a few weeks, the approval stats show 40/40 `email.draft_reply` proposals a
 - **Why:** v1 needed three processes (web app, channel server, a Claude Code session started with `--dangerously-load-development-channels`), and runs shared the person's conversation: a run arrived mid-conversation, used up its time limit there, and its report landed in the chat.
 - **Scheduler pass in core** (`core/src/goal-tick.ts`): `schedulerPass` takes a lease (`scheduler_lease`, 90 s) so only one Claude Code session starts runs. It expires runs nobody finished, runs due health checks, then claims due runs atomically (`queued` → `running` with `goal_runs.holder`), at most `maxConcurrent` at once. It returns each claimed run with the prompt its agent starts from. `decideItem` (approve/reject) and the overview (`goal-overview.ts`) moved to core too.
 - **MCP tools for the runner:** `goals_tick`, `goals_overview`, `decide_item`, `cancel_run`, `set_goal_status`, `attach_agent`, `fail_run`, `guard_check`, `create_goal`, `delete_memory`. Every tool accepts `run_scope`: with it, the call acts on that run's goal in a scope of its own (`AsyncLocalStorage`), so a run never switches the process-wide open plan the person's conversation uses.
-- **conductor-goals plugin:** ticks every 30 s and after any pane action. It starts each claimed run in a background subagent (`conductor-goals:goal-runner`, described `Goal: <name> (<run id>)`), stops runs past `max_run_minutes`, and marks a run whose agent ended without `end_run` as failed. It starts nothing unless the guard plugin is loaded.
-- **conductor-goals-guard plugin:** what a run may do. It exists separately because the engine hides from a plugin the calls its own timers and buttons cause (the recursion skip), so the runner's hooks never see a timer-started run. It identifies runs by `spawnedBy` (engine-set) plus the description. It handles run tagging, the goal's guard (via `guard_check`), keeping person-only tools from agents and the model, and keeping the run's report out of the chat.
+- **quarterdeck-goals plugin:** ticks every 30 s and after any pane action. It starts each claimed run in a background subagent (`quarterdeck-goals:goal-runner`, described `Goal: <name> (<run id>)`), stops runs past `max_run_minutes`, and marks a run whose agent ended without `end_run` as failed. It starts nothing unless the guard plugin is loaded.
+- **quarterdeck-guard plugin:** what a run may do. It exists separately because the engine hides from a plugin the calls its own timers and buttons cause (the recursion skip), so the runner's hooks never see a timer-started run. It identifies runs by `spawnedBy` (engine-set) plus the description. It handles run tagging, the goal's guard (via `guard_check`), keeping person-only tools from agents and the model, and keeping the run's report out of the chat.
 - **Web app:** optional. A dashboard plus webhook and health endpoints that only queue runs.
-- **Later (roadmap 1.6):** the channel server, the web app's own scheduler (`CONDUCTOR_WEB_RUNS`), its plan UI and the PreToolUse goal-guard hook were removed; the plan tools are hidden from Claude unless `CONDUCTOR_TOOLS=all`.
+- **Later (roadmap 1.6):** the channel server, the web app's own scheduler (`QUARTERDECK_WEB_RUNS`), its plan UI and the PreToolUse goal-guard hook were removed; the plan tools are hidden from Claude unless `QUARTERDECK_TOOLS=all`.
 - **Answers open question 4:** runs no longer share the conversation; each has its own subagent and context.
 
 **Phase 3 — Off-machine**
 - **Status: waiting on the platform.** Self-hosting (a VPS, a tunnel, Docker plus auth) would push infrastructure onto users, so phase 3 waits for Anthropic-hosted pieces:
   - Cloud agents on a schedule or trigger (routines exist today).
   - Access to the user's services: **scoped connectors** (OAuth, e.g. Gmail with read and draft but no send) preferred, or a **cloud browser** for services without one. A logged-in cloud browser is riskier: it holds full sessions for many services, it's a high-value target, and an always-on agent reading email is exposed to prompt injection. Scoped tokens keep the blast radius small and can be revoked per service.
-  - **Hosted MCP servers with persistent storage**, so Conductor's MCP server and its SQLite file run next to the agent.
+  - **Hosted MCP servers with persistent storage**, so Quarterdeck's MCP server and its SQLite file run next to the agent.
   - Hooks in cloud sessions, so the goal-guard can enforce autonomy there. This matters more off-machine: approval gates enforced outside the model are what a prompt-injected agent can't talk its way past.
   - A way to reach the user for approvals (the goal page, or a push notification).
-- **What changes in Conductor when those exist:** a runner backend beside the channel (`web/lib/goal-runner.ts` already isolates "start a run / stream events / cancel"). The MCP server gains an HTTP transport. The web UI talks to the hosted database instead of a local file. Concurrency comes free, because runs no longer share one interactive session.
+- **What changes in Quarterdeck when those exist:** a runner backend beside the channel (`web/lib/goal-runner.ts` already isolates "start a run / stream events / cancel"). The MCP server gains an HTTP transport. The web UI talks to the hosted database instead of a local file. Concurrency comes free, because runs no longer share one interactive session.
 - **Possible bridge, not planned:** a local headless runner (`claude -p --mcp-config … --settings …`) for concurrent runs on the user's machine.
 
 ---

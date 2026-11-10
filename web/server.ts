@@ -14,13 +14,13 @@ const allowed = allowedHosts(hostname, port)
 const app = next({ dev, hostname, port })
 const handle = app.getRequestHandler()
 
-console.log(`> Starting Conductor web (${dev ? 'dev' : 'production'}) on http://${hostname}:${port}`)
+console.log(`> Starting Quarterdeck web (${dev ? 'dev' : 'production'}) on http://${hostname}:${port}`)
 
 app.prepare().then(() => {
   const server = createServer(async (req, res) => {
     if (!isAllowedRequest(req, allowed)) {
       res.statusCode = 403
-      res.end('Forbidden: request must come from this Conductor app on localhost')
+      res.end('Forbidden: request must come from this Quarterdeck app on localhost')
       return
     }
     try {
@@ -53,7 +53,7 @@ app.prepare().then(() => {
 
   server.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`)
-    // Goal runs are started by the conductor-goals Claude Code plugin, not here
+    // Goal runs are started by the quarterdeck-goals Claude Code plugin, not here
     startPoller()
   })
 }).catch((err) => {

@@ -24,7 +24,7 @@ const GateFields = {
     'Checkable statements that must be true when the task is done, e.g. "GET /users returns 401 without a token". ' +
     'When completing, you must give evidence for each one.'),
   verify_command: z.string().min(1).nullable().optional().describe(
-    'Shell command Conductor runs in the plan\'s working_dir when you complete the task, e.g. "npm test -- auth". ' +
+    'Shell command Quarterdeck runs in the plan\'s working_dir when you complete the task, e.g. "npm test -- auth". ' +
     'It must exit 0 or completion is refused. Pass null to remove (pending tasks only).'),
   verify_timeout_s: z.number().int().min(1).max(3600).optional().describe('Timeout for verify_command in seconds (default 300)'),
   requires_approval: z.boolean().optional().describe(
@@ -106,7 +106,7 @@ export const RunGoalSchema = z.object({
   goal_id: z.string().describe('ID of the goal to run'),
 })
 
-// ── Goal runner (called by the conductor-goals plugin, not by agents) ─────────
+// ── Goal runner (called by the quarterdeck-goals plugin, not by agents) ─────────
 
 export const GoalsTickSchema = z.object({
   holder: z.string().min(1).describe('The Claude Code session asking (its session id)'),

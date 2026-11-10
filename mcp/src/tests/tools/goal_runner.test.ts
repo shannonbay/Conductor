@@ -8,7 +8,7 @@ import { create_plan } from '../../tools/create_plan.js'
 import { createGoal, queueRun, getRun, getGoal, getEvents, updateGoal, insertMemory, getMemory } from '../../db.js'
 import { tmpdir } from 'os'
 import { getOpenPlan, getOpenRun, withScope } from '../../session.js'
-import type { PassResult } from '@conductor/core'
+import type { PassResult } from '@quarterdeck/core'
 
 /** A scheduler pass (goals_tick without release). */
 const tick = (holder: string) => goals_tick({ holder }) as Promise<PassResult>

@@ -1,12 +1,12 @@
 /**
  * Web database layer. Schema, migrations and the task/plan queries shared with
- * the MCP server live in @conductor/core; this file binds them to a lazily
+ * the MCP server live in @quarterdeck/core; this file binds them to a lazily
  * opened connection and adds the web-only queries (goal views, events).
  */
-import * as core from '@conductor/core'
-import { type Event, type NewEvent, type NewPlan, type NewTask, type PlanRow, type Task } from '@conductor/core'
+import * as core from '@quarterdeck/core'
+import { type Event, type NewEvent, type NewPlan, type NewTask, type PlanRow, type Task } from '@quarterdeck/core'
 
-export type { Event, NewEvent, NewPlan, NewTask, PlanRow, Task, TreeStats } from '@conductor/core'
+export type { Event, NewEvent, NewPlan, NewTask, PlanRow, Task, TreeStats } from '@quarterdeck/core'
 
 // ─── DB singleton ─────────────────────────────────────────────────────────────
 
@@ -22,7 +22,7 @@ export function resetDb(): void {
   _db = null
 }
 
-// ─── Plans and tasks (shared with MCP via @conductor/core) ────────────────────
+// ─── Plans and tasks (shared with MCP via @quarterdeck/core) ────────────────────
 
 export const listPlans = (status: 'active' | 'archived' | 'all' = 'active') => core.listPlans(getDb(), status)
 export const getPlan = (id: string) => core.getPlan(getDb(), id)
@@ -41,10 +41,10 @@ export const insertTask = (task: NewTask) => core.insertTask(getDb(), task)
 export const updateTask = (planId: string, taskId: string, fields: Partial<Task>) => core.updateTask(getDb(), planId, taskId, fields)
 export const deleteTaskTree = (planId: string, taskId: string) => core.deleteTaskTree(getDb(), planId, taskId)
 
-// ─── Persistent goals (shared with MCP via @conductor/core) ───────────────────
+// ─── Persistent goals (shared with MCP via @quarterdeck/core) ───────────────────
 
-export { GoalError, isProposal, DEFAULT_GOAL_LIMITS } from '@conductor/core'
-export type { Goal, GoalRun, GoalMemory, GoalTrigger, IntervalConfig, AutonomyMode, TickDecision } from '@conductor/core'
+export { GoalError, isProposal, DEFAULT_GOAL_LIMITS } from '@quarterdeck/core'
+export type { Goal, GoalRun, GoalMemory, GoalTrigger, IntervalConfig, AutonomyMode, TickDecision } from '@quarterdeck/core'
 export const createGoal = (plan: NewPlan, goal: Omit<core.NewGoal, 'plan_id'>, interval?: core.IntervalConfig) => core.createGoal(getDb(), plan, goal, interval)
 export const getGoal = (planId: string) => core.getGoal(getDb(), planId)
 export const listGoals = (status?: core.Goal['status']) => core.listGoals(getDb(), status)
@@ -64,7 +64,7 @@ export const nextIntervalRun = (planId: string, from?: Date) => core.nextInterva
 export const recordSkip = (planId: string, trigger: core.TriggerKind, reason: string, now?: Date) => core.recordSkip(getDb(), planId, trigger, reason, now)
 export const archiveResolved = (planId: string, now?: Date) => core.archiveResolved(getDb(), planId, now)
 export const listMemory = (planId: string, opts?: { activeOnly?: boolean }) => core.listMemory(getDb(), planId, opts)
-export type { Schedule, HealthResult, ToolCallRecord } from '@conductor/core'
+export type { Schedule, HealthResult, ToolCallRecord } from '@quarterdeck/core'
 export const getSchedule = (planId: string) => core.getSchedule(getDb(), planId)
 export const setSchedule = (planId: string, schedule: core.Schedule | null) => core.setSchedule(getDb(), planId, schedule)
 export const nextScheduledRun = (planId: string, from?: Date) => core.nextScheduledRun(getDb(), planId, from)
@@ -110,10 +110,10 @@ export function getApprovalStats(planId: string): Record<string, { approved: num
   return stats
 }
 
-// ─── Verification gates (shared with MCP via @conductor/core) ─────────────────
+// ─── Verification gates (shared with MCP via @quarterdeck/core) ─────────────────
 
-export { GateError } from '@conductor/core'
-export type { Blocker, CommandResult, GateStatus, Verification } from '@conductor/core'
+export { GateError } from '@quarterdeck/core'
+export type { Blocker, CommandResult, GateStatus, Verification } from '@quarterdeck/core'
 export const approveTask = (planId: string, taskId: string) => core.approveTask(getDb(), planId, taskId)
 export const rejectTask = (planId: string, taskId: string, feedback: string) => core.rejectTask(getDb(), planId, taskId, feedback)
 

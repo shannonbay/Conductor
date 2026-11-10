@@ -1,5 +1,5 @@
 {
-  "name": "@conductor/web",
+  "name": "@quarterdeck/web",
   "version": "0.1.0",
   "license": "Apache-2.0",
   "private": true,
@@ -17,7 +17,7 @@
     "test:ui": "vitest --ui"
   },
   "dependencies": {
-    "@conductor/core": "*",
+    "@quarterdeck/core": "*",
     "better-sqlite3": "^13.0.3",
     "class-variance-authority": "^0.7.0",
     "nanoid": "^5.0.7",

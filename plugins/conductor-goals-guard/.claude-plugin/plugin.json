@@ -1,6 +1,0 @@
-{
-  "name": "conductor-goals-guard",
-  "version": "0.2.0",
-  "license": "Apache-2.0",
-  "description": "Guards the Conductor goal runs that conductor-goals starts: each run acts on its own goal, stays within the goal's autonomy, and keeps its report out of your chat"
-}

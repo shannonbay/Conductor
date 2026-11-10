@@ -8,7 +8,7 @@ type Params = { params: Promise<{ id: string; itemId: string }> }
 /**
  * POST — approve a goal item waiting for review. An approved proposal stays
  * active and is carried out by a run: decideItem queues one if the goal is
- * active, and the conductor-goals plugin starts it within 30 s.
+ * active, and the quarterdeck-goals plugin starts it within 30 s.
  */
 export async function POST(_req: NextRequest, { params }: Params) {
   try {

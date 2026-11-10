@@ -9,10 +9,10 @@ if (command === 'doctor') {
   process.exit(results.some((r) => r.level === 'fail') ? 1 : 0)
 } else {
   console.log([
-    'Usage: conductor <command>',
+    'Usage: quarterdeck <command>',
     '',
     'Commands:',
-    '  doctor    Check that Conductor is installed and configured correctly',
+    '  doctor    Check that Quarterdeck is installed and configured correctly',
     '',
     'The MCP server itself is started by Claude Code from .mcp.json (mcp/dist/index.js).',
   ].join('\n'))

@@ -1,5 +1,5 @@
 import { getAllTasks, compareTaskIds, getLatestVerification, type Task } from '../db.js'
-import { hasGates, isProposal } from '@conductor/core'
+import { envVar, hasGates, isProposal } from '@quarterdeck/core'
 import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { NextTaskSchema } from '../schema.js'
@@ -123,7 +123,7 @@ export async function next_task(args: unknown): Promise<NextTaskResult> {
 function hintFor(action: Action, task: Task): string {
   const gateHint = !hasGates(task) ? '' : ' ' + [
     task.acceptance_criteria?.length && `Give evidence for each of its ${task.acceptance_criteria.length} acceptance criteria (evidence param).`,
-    task.verify_command && `Conductor will run \`${task.verify_command}\`, which must pass — use verify_task to check first.`,
+    task.verify_command && `Quarterdeck will run \`${task.verify_command}\`, which must pass — use verify_task to check first.`,
     task.requires_approval && 'A human must then approve it in the web UI.',
   ].filter(Boolean).join(' ')
 
@@ -137,7 +137,7 @@ function hintFor(action: Action, task: Task): string {
     case 'complete':
       return 'All children are resolved. Call synthesize on this task, then set_status completed with a result.' + gateHint
     case 'start': {
-      const needsDecompose = process.env.CONDUCTOR_REQUIRE_DECOMPOSE === '1' && task.state.atomic !== true
+      const needsDecompose = envVar('REQUIRE_DECOMPOSE') === '1' && task.state.atomic !== true
       return (needsDecompose
         ? 'Ready to start. Decompose it with provision_tasks first, or mark it atomic (update_task state_patch {"atomic": true}), then set_status active.'
         : 'Ready to start. Call set_status active, do the work, then set_status completed with a result.') + gateHint

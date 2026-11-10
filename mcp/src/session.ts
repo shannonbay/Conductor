@@ -5,7 +5,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
  *
  * One MCP server serves a whole Claude Code session: the main conversation and
  * every subagent in it. The main conversation uses the process-wide open plan.
- * A goal run started by the conductor-goals plugin runs in a subagent; the
+ * A goal run started by the quarterdeck-goals plugin runs in a subagent; the
  * plugin adds `run_scope` to each of its calls, and that call then gets a scope
  * of its own (the run's plan and run), so concurrent runs and the main
  * conversation never switch each other's open plan.

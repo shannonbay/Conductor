@@ -6,9 +6,9 @@ import { create_task } from '../../tools/create_task.js'
 import { getTask } from '../../db.js'
 import { getOpenPlan } from '../../session.js'
 
-describe('set_status with CONDUCTOR_REQUIRE_DECOMPOSE=1', () => {
-  beforeEach(() => { process.env.CONDUCTOR_REQUIRE_DECOMPOSE = '1' })
-  afterEach(() => { delete process.env.CONDUCTOR_REQUIRE_DECOMPOSE })
+describe('set_status with QUARTERDECK_REQUIRE_DECOMPOSE=1', () => {
+  beforeEach(() => { process.env.QUARTERDECK_REQUIRE_DECOMPOSE = '1' })
+  afterEach(() => { delete process.env.QUARTERDECK_REQUIRE_DECOMPOSE })
 
   it('blocks activating a leaf task that is not marked atomic', async () => {
     await create_plan({ name: 'Test' })
@@ -42,9 +42,9 @@ describe('set_status with CONDUCTOR_REQUIRE_DECOMPOSE=1', () => {
   })
 })
 
-describe('set_status with CONDUCTOR_STRICT_COMPLETE=1', () => {
-  beforeEach(() => { process.env.CONDUCTOR_STRICT_COMPLETE = '1' })
-  afterEach(() => { delete process.env.CONDUCTOR_STRICT_COMPLETE })
+describe('set_status with QUARTERDECK_STRICT_COMPLETE=1', () => {
+  beforeEach(() => { process.env.QUARTERDECK_STRICT_COMPLETE = '1' })
+  afterEach(() => { delete process.env.QUARTERDECK_STRICT_COMPLETE })
 
   it('blocks completing a parent with unresolved children', async () => {
     await create_plan({ name: 'Test' })

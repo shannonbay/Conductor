@@ -110,7 +110,7 @@ const TOOLS = [
   },
   {
     name: 'set_status',
-    description: 'Change the status of a task. Provide task_id explicitly. When an approach fails or hits a hard blocker, abandon it with a specific reason before creating an alternative sibling — the reason is visible to sibling tasks and prevents repeating the same mistake. When completing a task, make sure its children are all resolved first. Activating a task with unmet depends_on will return an error; complete the dependencies first. If the task has verification gates, completing it runs them: pass evidence (one entry per acceptance criterion, in order); Conductor runs verify_command and refuses completion if it fails (showing the output); if requires_approval is set, the task then waits for a human to approve it in the web UI.',
+    description: 'Change the status of a task. Provide task_id explicitly. When an approach fails or hits a hard blocker, abandon it with a specific reason before creating an alternative sibling — the reason is visible to sibling tasks and prevents repeating the same mistake. When completing a task, make sure its children are all resolved first. Activating a task with unmet depends_on will return an error; complete the dependencies first. If the task has verification gates, completing it runs them: pass evidence (one entry per acceptance criterion, in order); Quarterdeck runs verify_command and refuses completion if it fails (showing the output); if requires_approval is set, the task then waits for a human to approve it in the web UI.',
     inputSchema: zodToJsonSchema(SetStatusSchema),
     handler: set_status,
   },
@@ -188,7 +188,7 @@ const TOOLS = [
   },
   {
     name: 'run_goal',
-    description: 'Queue a run of a goal now (e.g. after changing its instructions). It starts within about 30 seconds while Claude Code is open with the conductor-goals plugin.',
+    description: 'Queue a run of a goal now (e.g. after changing its instructions). It starts within about 30 seconds while Claude Code is open with the quarterdeck-goals plugin.',
     inputSchema: zodToJsonSchema(RunGoalSchema),
     handler: run_goal,
   },
@@ -216,7 +216,7 @@ const TOOLS = [
     inputSchema: zodToJsonSchema(GoalsOverviewSchema),
     handler: goals_overview,
   },
-  // Used by the conductor-goals plugin to drive runs; agents must not call these.
+  // Used by the quarterdeck-goals plugin to drive runs; agents must not call these.
   ...([
     ['goals_tick', 'Runs one goal scheduler pass and claims the runs that are due.', GoalsTickSchema, goals_tick],
     ['decide_item', "Records the human's approval or rejection of a goal item.", DecideItemSchema, decide_item],
@@ -234,13 +234,13 @@ const TOOLS = [
     ['report_run_end', "Reports how a goal run's agent finished a turn: a usage limit skips the run and holds goal runs until the reset.", ReportRunEndSchema, report_run_end],
   ] as const).map(([name, description, schema, handler]) => ({
     name,
-    description: `${description} For the conductor-goals plugin only: agents and the model must not call this.`,
+    description: `${description} For the quarterdeck-goals plugin only: agents and the model must not call this.`,
     inputSchema: zodToJsonSchema(schema),
     handler: handler as (args: unknown) => Promise<unknown>,
   })),
 ]
 
-/** Set by the conductor-goals plugin on calls from a goal run's subagent: the call acts on that run's goal. */
+/** Set by the quarterdeck-goals plugin on calls from a goal run's subagent: the call acts on that run's goal. */
 const RUN_SCOPE = {
   type: 'string',
   description: 'Set automatically for goal runs; leave it out.',
@@ -252,7 +252,7 @@ function withRunScopeProperty(schema: object): object {
 }
 
 const server = new Server(
-  { name: 'conductor', version: '1.0.0' },
+  { name: 'quarterdeck', version: '1.0.0' },
   { capabilities: { tools: {}, resources: {} } },
 )
 

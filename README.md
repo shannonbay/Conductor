@@ -1,4 +1,4 @@
-# Conductor
+# Quarterdeck
 
 A personal assistant that lives in Claude Code: it keeps looking after the things you hand it, asks before it does anything you haven't allowed, and remembers what you decided.
 
@@ -19,8 +19,8 @@ Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, 
 
 ## How it differs
 
-- **From Claude Code's scheduled tasks (`/schedule`):** scheduled tasks run in Anthropic's cloud, so they keep going with your laptop closed. They suit clear-cut work, like reviewing every PR. A Conductor goal is for ongoing jobs where you want a say: it proposes and waits for you, keeps memory and items between runs, and asks when it's unsure. Its guard holds a run to what you've allowed, outside the model, rather than only asking in the prompt.
-- **From OpenClaw:** OpenClaw is a self-hosted, always-on assistant you message from WhatsApp, Telegram and other chat apps, with broad system access and a large community skills marketplace. Conductor is much smaller: no gateway or server to run, and no marketplace of its own. A goal's run is a Claude Code subagent, so it can use the skills, plugins, MCP servers and connectors you've chosen to install in Claude Code (a job-search goal can use your job-search skill, an inbox goal your Gmail connector), on your Claude plan. It works through goals you can see and change, item by item.
+- **From Claude Code's scheduled tasks (`/schedule`):** scheduled tasks run in Anthropic's cloud, so they keep going with your laptop closed. They suit clear-cut work, like reviewing every PR. A Quarterdeck goal is for ongoing jobs where you want a say: it proposes and waits for you, keeps memory and items between runs, and asks when it's unsure. Its guard holds a run to what you've allowed, outside the model, rather than only asking in the prompt.
+- **From OpenClaw:** OpenClaw is a self-hosted, always-on assistant you message from WhatsApp, Telegram and other chat apps, with broad system access and a large community skills marketplace. Quarterdeck is much smaller: no gateway or server to run, and no marketplace of its own. A goal's run is a Claude Code subagent, so it can use the skills, plugins, MCP servers and connectors you've chosen to install in Claude Code (a job-search goal can use your job-search skill, an inbox goal your Gmail connector), on your Claude plan. It works through goals you can see and change, item by item.
 
 ## Limits
 
@@ -28,7 +28,7 @@ Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, 
 - **Phone alerts need Remote Control** connected and mobile push on in `/config`; a short Claude turn sends each one.
 - **It's early.** It's built and used daily by one person, on Windows; expect rough edges.
 
-It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `conductor-goals` runs goals and shows the Goals pane, and `conductor-goals-guard` keeps each run within its goal. An optional **web app** adds goal pages in a browser and webhook triggers. Everything lives in one local SQLite database. Setup: [Quickstart](#quickstart).
+It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `quarterdeck-goals` runs goals and shows the Goals pane, and `quarterdeck-guard` keeps each run within its goal. An optional **web app** adds goal pages in a browser and webhook triggers. Everything lives in one local SQLite database. Setup: [Quickstart](#quickstart).
 
 ## Persistent goals
 
@@ -40,7 +40,7 @@ The pane also keeps **your to-do list** for the project (`/todo <text>`, or ask 
 - **Triggers.** Every N minutes (with optional active hours), a cron expression, **Run now**, a **webhook** with a per-goal secret, or a failing **health check**.
 - **Work items.** Each thing the agent handles is an item, deduplicated by an external ID (e.g. an email's ID) so it's never handled twice. Resolved items are hidden after 7 days.
 - **Autonomy per action category** (e.g. `email.archive`, `email.send`): *off*, *propose* (the agent asks first — the default), or *auto*. Proposals wait under **Needs you**; approve and the next run carries the action out; reject with feedback and the feedback becomes **memory** later runs follow. After 10 approvals in a row, the page suggests switching that category to *auto*.
-- **Enforcement.** With tool rules (`mcp__gmail__send*` → `email.send`), the **conductor-goals-guard** plugin blocks a run's tool call that the goal's autonomy doesn't allow, e.g. sending mail without an approved proposal. A run also can't approve its own proposals or change the goal's settings.
+- **Enforcement.** With tool rules (`mcp__gmail__send*` → `email.send`), the **quarterdeck-guard** plugin blocks a run's tool call that the goal's autonomy doesn't allow, e.g. sending mail without an approved proposal. A run also can't approve its own proposals or change the goal's settings.
 - **Health.** A command that exits 0 while the goal is being met; the last number it prints is charted (e.g. unread mail older than a day). A failure can start a run.
 - **Memory.** Rules, facts and preferences — written by you, learned by the agent, or taken from your feedback. Pin what must always be included.
 
@@ -48,9 +48,9 @@ Goals run while Claude Code is open with both plugins installed. With several se
 
 ## Under the hood: plans
 
-A goal's work items are tasks in a **plan**, the task tree Conductor started with, and your to-do lists are plans too. Each item has a status (`pending` → `active` → `completed` | `abandoned`), a result, structured `state` and notes, and can carry checks that must pass before it's completed: **acceptance criteria** (the agent gives evidence for each), a **verify command** that must exit 0, and **human approval**. Every check result is kept.
+A goal's work items are tasks in a **plan**, the task tree Quarterdeck started with, and your to-do lists are plans too. Each item has a status (`pending` → `active` → `completed` | `abandoned`), a result, structured `state` and notes, and can carry checks that must pass before it's completed: **acceptance criteria** (the agent gives evidence for each), a **verify command** that must exit 0, and **human approval**. Every check result is kept.
 
-The tools for building plans by hand (`create_plan`, `provision_tasks`, `next_task`, ...) are hidden from Claude by default, so they cost nothing in your sessions. Set `CONDUCTOR_TOOLS=all` on the MCP server to list them, e.g. to track a long multi-session project as a task tree.
+The tools for building plans by hand (`create_plan`, `provision_tasks`, `next_task`, ...) are hidden from Claude by default, so they cost nothing in your sessions. Set `QUARTERDECK_TOOLS=all` on the MCP server to list them, e.g. to track a long multi-session project as a task tree.
 
 ## MCP tools
 
@@ -74,7 +74,7 @@ The plugins also use `goals_overview`, `goals_tick` (one scheduler pass), `decid
 | `update_task` | Record progress on an item: result, structured state patch, notes |
 | `set_status` | `active`, `completed` (runs its checks) or `abandoned` (with a reason) |
 
-The plan tools are listed only with `CONDUCTOR_TOOLS=all`: `list_plans`, `create_plan`, `open_plan`, `archive_plan`, `create_task`, `provision_tasks`, `get_context`, `next_task`, `synthesize`, `verify_task` and `get_history`. Hidden tools still answer calls.
+The plan tools are listed only with `QUARTERDECK_TOOLS=all`: `list_plans`, `create_plan`, `open_plan`, `archive_plan`, `create_task`, `provision_tasks`, `get_context`, `next_task`, `synthesize`, `verify_task` and `get_history`. Hidden tools still answer calls.
 
 ## Web app (optional)
 
@@ -85,18 +85,18 @@ The Next.js app shares the database and shows each goal as a page: items waiting
 ### MCP server (Claude Code)
 
 ```bash
-git clone https://github.com/shannonbay/Conductor
-cd Conductor
+git clone https://github.com/shannonbay/Quarterdeck
+cd Quarterdeck
 npm install
 cd mcp && npm run build
 ```
 
-With npm 11 or newer, `npm install` may say it held back some install scripts. Conductor's database library, `better-sqlite3`, usually ships a ready-built binary, but if `npm run doctor` (or the MCP server) says it can't load, run `npm install-scripts approve better-sqlite3` and then `npm rebuild better-sqlite3` from the repo root.
+With npm 11 or newer, `npm install` may say it held back some install scripts. Quarterdeck's database library, `better-sqlite3`, usually ships a ready-built binary, but if `npm run doctor` (or the MCP server) says it can't load, run `npm install-scripts approve better-sqlite3` and then `npm rebuild better-sqlite3` from the repo root.
 
 Add the server for your user, so goals work in every Claude Code session, whatever folder it starts in:
 
 ```bash
-claude mcp add --scope user conductor -- node /path/to/Conductor/mcp/dist/index.js
+claude mcp add --scope user quarterdeck -- node /path/to/Quarterdeck/mcp/dist/index.js
 ```
 
 Or add it to one project's `.mcp.json`. Goals then work only in sessions started in that project:
@@ -104,9 +104,9 @@ Or add it to one project's `.mcp.json`. Goals then work only in sessions started
 ```json
 {
   "mcpServers": {
-    "conductor": {
+    "quarterdeck": {
       "command": "node",
-      "args": ["/path/to/Conductor/mcp/dist/index.js"]
+      "args": ["/path/to/Quarterdeck/mcp/dist/index.js"]
     }
   }
 }
@@ -117,9 +117,9 @@ Or run without compiling using `tsx` (macOS/Linux):
 ```json
 {
   "mcpServers": {
-    "conductor": {
+    "quarterdeck": {
       "command": "npx",
-      "args": ["tsx", "/path/to/Conductor/mcp/src/index.ts"]
+      "args": ["tsx", "/path/to/Quarterdeck/mcp/src/index.ts"]
     }
   }
 }
@@ -130,9 +130,9 @@ On Windows, use `cmd /c`:
 ```json
 {
   "mcpServers": {
-    "conductor": {
+    "quarterdeck": {
       "command": "cmd",
-      "args": ["/c", "npx", "tsx", "C:/path/to/Conductor/mcp/src/index.ts"]
+      "args": ["/c", "npx", "tsx", "C:/path/to/Quarterdeck/mcp/src/index.ts"]
     }
   }
 }
@@ -143,14 +143,14 @@ On Windows, use `cmd /c`:
 The repository is a Claude Code plugin marketplace. From a terminal:
 
 ```bash
-claude plugin marketplace add /path/to/Conductor
-claude plugin install conductor-goals@conductor --scope user
-claude plugin install conductor-goals-guard@conductor --scope user
+claude plugin marketplace add /path/to/Quarterdeck
+claude plugin install quarterdeck-goals@quarterdeck --scope user
+claude plugin install quarterdeck-guard@quarterdeck --scope user
 ```
 
-Start (or `/reload-plugins` in) Claude Code with the `conductor` MCP server configured as above, then type `/goals` to open the Goals pane. That's all goals need; the web app is optional. Due runs start on their own while Claude Code is open. conductor-goals starts no run without the guard plugin, and the pane says so.
+Start (or `/reload-plugins` in) Claude Code with the `quarterdeck` MCP server configured as above, then type `/goals` to open the Goals pane. That's all goals need; the web app is optional. Due runs start on their own while Claude Code is open. quarterdeck-goals starts no run without the guard plugin, and the pane says so.
 
-See [`plugins/conductor-goals`](plugins/conductor-goals/README.md) for the pane, commands, settings and how runs work, and [`plugins/conductor-goals-guard`](plugins/conductor-goals-guard/README.md) for what a run may do.
+See [`plugins/quarterdeck-goals`](plugins/quarterdeck-goals/README.md) for the pane, commands, settings and how runs work, and [`plugins/quarterdeck-guard`](plugins/quarterdeck-guard/README.md) for what a run may do.
 
 ### Web app (optional)
 
@@ -158,7 +158,7 @@ See [`plugins/conductor-goals`](plugins/conductor-goals/README.md) for the pane,
 cd web && npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) for goal pages and webhooks. It uses the same database (`~/.conductor/tasks.db`) and doesn't start goal runs: queued runs (Run now, a webhook, a failing health check) are started by the conductor-goals plugin within 30 seconds.
+Open [http://localhost:3000](http://localhost:3000) for goal pages and webhooks. It uses the same database (`~/.quarterdeck/tasks.db`) and doesn't start goal runs: queued runs (Run now, a webhook, a failing health check) are started by the quarterdeck-goals plugin within 30 seconds.
 
 ### Your first goal
 
@@ -174,23 +174,23 @@ Open [http://localhost:3000](http://localhost:3000) for goal pages and webhooks.
 npm run doctor
 ```
 
-Rebuilds `core/` and `mcp/`, then checks Node.js, the SQLite native module, the database and schema, `.mcp.json` and whether `conductor` is added for your user, leftover hooks from older versions, both goal plugins, the optional web app, and whether your active goals can run. Anything wrong comes with the command to fix it.
+Rebuilds `core/` and `mcp/`, then checks Node.js, the SQLite native module, the database and schema, `.mcp.json` and whether `quarterdeck` is added for your user, leftover hooks from older versions, both goal plugins, the optional web app, and whether your active goals can run. Anything wrong comes with the command to fix it.
 
 ## Database
 
-Both the MCP server and web app write to `~/.conductor/tasks.db` (SQLite, WAL mode). Override the path with the `CONDUCTOR_DB` environment variable — set it to `:memory:` in tests for an isolated in-memory database. The schema lives in one place, `core/src/migrate.ts`, and every change made by Claude or by you is recorded in the `events` table.
+Both the MCP server and web app write to `~/.quarterdeck/tasks.db` (SQLite, WAL mode). Override the path with the `QUARTERDECK_DB` environment variable — set it to `:memory:` in tests for an isolated in-memory database. The schema lives in one place, `core/src/migrate.ts`, and every change made by Claude or by you is recorded in the `events` table.
 
 ## Project structure
 
 ```
-Conductor/
-  core/              Shared schema, migrations and queries (@conductor/core)
+Quarterdeck/
+  core/              Shared schema, migrations and queries (@quarterdeck/core)
   mcp/               MCP server (stdio transport, no HTTP)
     src/
       index.ts       Entry point — registers tools and dispatches calls
-      cli.ts         `conductor doctor` setup checker
+      cli.ts         `quarterdeck doctor` setup checker
       schema.ts      Zod schemas for all tool inputs
-      db.ts          Binds @conductor/core queries to one connection
+      db.ts          Binds @quarterdeck/core queries to one connection
       history.ts     Records MCP changes in the events log
       session.ts     In-memory open-plan tracking
       context.ts     Builds the context view returned by every tool
@@ -202,9 +202,9 @@ Conductor/
     __tests__/       Vitest test suites
     server.ts        Custom HTTP + WebSocket server
   plugins/
-    conductor-goals/        Claude Code plugin: goal runner (subagents), Goals pane, /goal* commands
-    conductor-goals-guard/  Claude Code plugin: what a goal run may do
-  .claude-plugin/    marketplace.json: makes the repo a plugin marketplace ("conductor")
+    quarterdeck-goals/        Claude Code plugin: goal runner (subagents), Goals pane, /goal* commands
+    quarterdeck-guard/  Claude Code plugin: what a goal run may do
+  .claude-plugin/    marketplace.json: makes the repo a plugin marketplace ("quarterdeck")
   specs/             Original design specs
 ```
 
@@ -217,21 +217,23 @@ cd core && npm test  # schema and migrations
 cd mcp && npm test   # MCP tools and doctor
 cd web && npm test   # goal API, poller, request guard
 
-claude plugin test plugins/conductor-goals        # the plugins (Claude Code's test kit)
-claude plugin test plugins/conductor-goals-guard
+claude plugin test plugins/quarterdeck-goals        # the plugins (Claude Code's test kit)
+claude plugin test plugins/quarterdeck-guard
 ```
 
-The packages use Vitest with `CONDUCTOR_DB=:memory:` so tests are isolated and leave no files behind.
+The packages use Vitest with `QUARTERDECK_DB=:memory:` so tests are isolated and leave no files behind.
 
 ## Configuration
 
 | Env var | Default | Description |
 |---|---|---|
-| `CONDUCTOR_DB` | `~/.conductor/tasks.db` | Path to SQLite database; use `:memory:` for tests |
-| `CONDUCTOR_TOOLS` | goals | MCP server: `all` also lists the plan tools (hidden by default) |
-| `CONDUCTOR_REQUIRE_DECOMPOSE` | off | MCP server, plan tools: `1` blocks activating a task with no sub-tasks unless `state.atomic` is true |
-| `CONDUCTOR_STRICT_COMPLETE` | off | MCP server, plan tools: `1` blocks completing a task while any child is unresolved (otherwise a warning) |
-| `CONDUCTOR_ALLOWED_HOSTS` | — | Web server: extra `host:port` values to accept besides localhost (comma-separated) |
+| `QUARTERDECK_DB` | `~/.quarterdeck/tasks.db` | Path to SQLite database; use `:memory:` for tests |
+| `QUARTERDECK_TOOLS` | goals | MCP server: `all` also lists the plan tools (hidden by default) |
+| `QUARTERDECK_REQUIRE_DECOMPOSE` | off | MCP server, plan tools: `1` blocks activating a task with no sub-tasks unless `state.atomic` is true |
+| `QUARTERDECK_STRICT_COMPLETE` | off | MCP server, plan tools: `1` blocks completing a task while any child is unresolved (otherwise a warning) |
+| `QUARTERDECK_ALLOWED_HOSTS` | — | Web server: extra `host:port` values to accept besides localhost (comma-separated) |
+
+**Renamed from Conductor.** Quarterdeck used to be called Conductor. The old `CONDUCTOR_*` env vars and the `x-conductor-secret` webhook header still work, and a database left in `~/.conductor` is used until you move it. `npm run doctor` lists anything still set up under the old name (the data folder, a `conductor` MCP server entry, the old `conductor-goals` plugins) and how to switch it over.
 
 ## License
 

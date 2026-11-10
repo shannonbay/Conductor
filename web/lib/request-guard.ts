@@ -9,14 +9,14 @@ import type { IncomingMessage } from 'http'
  *   /api/goals/:id/run) and cross-site WebSocket connections.
  *
  * Requests without an Origin header (curl, same-origin GETs) only need a valid Host.
- * Set CONDUCTOR_ALLOWED_HOSTS (comma-separated host:port list) to allow more,
+ * Set QUARTERDECK_ALLOWED_HOSTS (or the older CONDUCTOR_ALLOWED_HOSTS; comma-separated host:port list) to allow more,
  * e.g. when binding to a LAN address.
  */
 export function allowedHosts(hostname: string, port: number): Set<string> {
   const hosts = new Set(
     ['localhost', '127.0.0.1', '[::1]', hostname].map((h) => `${h}:${port}`.toLowerCase()),
   )
-  for (const h of (process.env.CONDUCTOR_ALLOWED_HOSTS ?? '').split(',')) {
+  for (const h of (process.env.QUARTERDECK_ALLOWED_HOSTS ?? process.env.CONDUCTOR_ALLOWED_HOSTS ?? '').split(',')) {
     if (h.trim()) hosts.add(h.trim().toLowerCase())
   }
   return hosts

@@ -15,7 +15,7 @@ export default function DashboardPage() {
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b px-6 py-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-900">Conductor</h1>
+        <h1 className="text-xl font-semibold text-gray-900">Quarterdeck</h1>
         <div className="flex items-center gap-2">
           <NewGoalButton />
         </div>

@@ -185,7 +185,7 @@ export interface GoalRun {
   session_id: string | null
   /** The Claude Code session doing the run (bound by the goal-guard hook). */
   cc_session_id: string | null
-  /** The Claude Code session whose conductor-goals plugin claimed the run. */
+  /** The Claude Code session whose quarterdeck-goals plugin claimed the run. */
   holder: string | null
   /** The plugin's subagent doing the run. */
   agent_id: string | null

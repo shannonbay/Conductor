@@ -9,7 +9,7 @@ import { PATCH as PATCHGoal } from '@/app/api/goals/[id]/route.js'
 import { POST as POSTMemory } from '@/app/api/goals/[id]/memory/route.js'
 import { GET as GETOverview } from '@/app/api/goals/overview/route.js'
 import { getDb, approveTask } from '@/lib/db'
-import * as core from '@conductor/core'
+import * as core from '@quarterdeck/core'
 
 function req(method: string, body?: unknown, headers: Record<string, string> = {}) {
   return new NextRequest('http://localhost/api/x', {

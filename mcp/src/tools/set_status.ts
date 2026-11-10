@@ -3,7 +3,7 @@ import { getOpenPlan } from '../session.js'
 import { buildContext } from '../context.js'
 import { SetStatusSchema } from '../schema.js'
 import { record } from '../history.js'
-import { hasGates } from '@conductor/core'
+import { envVar, hasGates } from '@quarterdeck/core'
 
 export async function set_status(args: unknown) {
   const input = SetStatusSchema.parse(args)
@@ -32,7 +32,7 @@ export async function set_status(args: unknown) {
     }
 
     // Opt-in: force agents to break a task into sub-tasks before starting it.
-    if (process.env.CONDUCTOR_REQUIRE_DECOMPOSE === '1'
+    if (envVar('REQUIRE_DECOMPOSE') === '1'
         && task.state.atomic !== true
         && getChildren(planId, input.task_id).length === 0) {
       throw new Error(
@@ -51,7 +51,7 @@ export async function set_status(args: unknown) {
     if (unfinished.length > 0) {
       const ids = unfinished.map(c => c.id).join(', ')
       // Opt-in: refuse to complete a parent until every child is resolved.
-      if (process.env.CONDUCTOR_STRICT_COMPLETE === '1') {
+      if (envVar('STRICT_COMPLETE') === '1') {
         throw new Error(
           `Cannot complete task ${input.task_id}: ${unfinished.length} child task(s) are not yet completed or abandoned: ${ids}. ` +
           'Finish or abandon them (with a reason), call synthesize on this task, then retry.'

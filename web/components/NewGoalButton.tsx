@@ -10,7 +10,7 @@ export function NewGoalButton() {
   const [objective, setObjective] = useState('')
   const [instructions, setInstructions] = useState('')
   const [workingDir, setWorkingDir] = useState(() =>
-    typeof window === 'undefined' ? '' : (localStorage.getItem('conductor:lastBrowseDir') ?? ''))
+    typeof window === 'undefined' ? '' : (localStorage.getItem('quarterdeck:lastBrowseDir') ?? ''))
   const [interval, setIntervalMinutes] = useState('')
   const [activeHours, setActiveHours] = useState('')
   const [loading, setLoading] = useState(false)

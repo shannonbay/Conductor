@@ -1,12 +1,12 @@
 /**
- * MCP database layer: binds the shared @conductor/core queries to one
+ * MCP database layer: binds the shared @quarterdeck/core queries to one
  * connection. Schema, migrations and query logic all live in core/ so the
  * MCP server and web app can't drift apart.
  */
-import * as core from '@conductor/core'
-import type { NewPlan, NewTask, PlanRow, Task } from '@conductor/core'
+import * as core from '@quarterdeck/core'
+import type { NewPlan, NewTask, PlanRow, Task } from '@quarterdeck/core'
 
-export type { NewPlan, NewTask, PlanRow, Task, TreeStats } from '@conductor/core'
+export type { NewPlan, NewTask, PlanRow, Task, TreeStats } from '@quarterdeck/core'
 
 const db = core.openDatabase()
 
@@ -58,7 +58,7 @@ export const countItems = (planId: string) => db.prepare(
   "SELECT SUM(CASE WHEN status IN ('pending','active') THEN 1 ELSE 0 END) AS open, SUM(CASE WHEN review_requested_at IS NOT NULL THEN 1 ELSE 0 END) AS awaiting_review FROM tasks WHERE plan_id = ? AND archived_at IS NULL",
 ).get(planId) as { open: number | null; awaiting_review: number | null }
 
-// Goal runner (the conductor-goals plugin drives runs through these)
+// Goal runner (the quarterdeck-goals plugin drives runs through these)
 export const schedulerPass = (opts: core.PassOptions) => core.schedulerPass(db, opts)
 export const releaseLease = (holder: string) => core.releaseLease(db, holder)
 export const overviewWithEtag = (detail: core.OverviewDetail = 'all') => core.overviewWithEtag(db, detail)

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 /**
- * Keeps Conductor's Claude Code hooks in ~/.claude/settings.json current.
+ * Keeps Quarterdeck's Claude Code hooks in ~/.claude/settings.json current.
  * Runs automatically as a postinstall script, or manually via:
  *   node scripts/install-hooks.mjs
  *
- * Set CONDUCTOR_SKIP_HOOKS=1 to skip it (e.g. in CI).
+ * Set QUARTERDECK_SKIP_HOOKS=1 (or the older CONDUCTOR_SKIP_HOOKS=1) to skip it (e.g. in CI).
  *
- * Goals are Conductor's product now, so it no longer installs the old plan
+ * Goals are Quarterdeck's product now, so it no longer installs the old plan
  * reminder hooks (a UserPromptSubmit "use mcp__conductor__* to track work"
  * note and a Stop "did Claude update task progress?" message); it removes
  * them, along with the obsolete decompose hook and the old goal-guard hook
- * (the conductor-goals-guard plugin guards goal runs now). Conductor needs no
+ * (the quarterdeck-guard plugin guards goal runs now). Quarterdeck needs no
  * hooks; this script only cleans up after earlier versions.
  */
 
@@ -18,13 +18,14 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
 
-if (process.env.CONDUCTOR_SKIP_HOOKS === '1') {
-  console.log('Conductor: skipping hook installation (CONDUCTOR_SKIP_HOOKS=1)')
+if ((process.env.QUARTERDECK_SKIP_HOOKS ?? process.env.CONDUCTOR_SKIP_HOOKS) === '1') {
+  console.log('Quarterdeck: skipping hook installation (QUARTERDECK_SKIP_HOOKS=1)')
   process.exit(0)
 }
 
 // Hooks from earlier versions of this script that should be removed.
-//   detect — substring identifying the Conductor hook for this event
+//   detect — substring identifying the hook for this event (they date from
+//   when Quarterdeck was called Conductor, so they use the old name)
 const OBSOLETE = [
   { event: 'PreToolUse', detect: 'conductor-decompose' },
   // The plan reminders (retired: goals don't need them, and they cost tokens every turn)
@@ -42,7 +43,7 @@ if (existsSync(targetFile)) {
   try {
     settings = JSON.parse(readFileSync(targetFile, 'utf8'))
   } catch {
-    console.warn('Conductor: ~/.claude/settings.json exists but is not valid JSON — skipping hook installation.')
+    console.warn('Quarterdeck: ~/.claude/settings.json exists but is not valid JSON — skipping hook installation.')
     console.warn('Fix the file manually and re-run: node scripts/install-hooks.mjs')
     process.exit(0)
   }
@@ -63,11 +64,11 @@ for (const { event, detect } of OBSOLETE) {
 }
 
 if (changes.length === 0) {
-  console.log('Conductor: no old Conductor hooks in ~/.claude/settings.json — nothing to do.')
+  console.log('Quarterdeck: no old Quarterdeck hooks in ~/.claude/settings.json — nothing to do.')
   process.exit(0)
 }
 
 mkdirSync(targetDir, { recursive: true })
 writeFileSync(targetFile, JSON.stringify(settings, null, 2) + '\n', 'utf8')
-console.log(`Conductor: ${changes.join(', ')} in ~/.claude/settings.json`)
+console.log(`Quarterdeck: ${changes.join(', ')} in ~/.claude/settings.json`)
 console.log('  Start a new Claude Code session (or open /hooks) for it to take effect.')

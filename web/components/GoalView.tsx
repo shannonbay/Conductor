@@ -104,7 +104,7 @@ export function GoalView({ goalId }: { goalId: string }) {
       <header className="bg-white border-b px-6 py-4">
         <div className="max-w-5xl mx-auto flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <Link href="/" className="text-xs text-gray-400 hover:text-gray-700">← Conductor</Link>
+            <Link href="/" className="text-xs text-gray-400 hover:text-gray-700">← Quarterdeck</Link>
             <div className="flex items-center gap-2 mt-1">
               <h1 className="text-xl font-semibold text-gray-900">{plan.name}</h1>
               <span className={`text-xs px-1.5 py-0.5 rounded ${goal.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{goal.status}</span>

@@ -2,7 +2,7 @@
  * Goal guard: decides whether a tool call made during a goal run is allowed,
  * by mapping the tool to an action category (goal.tool_map) and applying the
  * goal's autonomy. Called through the MCP tool guard_check by the
- * conductor-goals-guard plugin, which knows which subagent does which run.
+ * quarterdeck-guard plugin, which knows which subagent does which run.
  *
  *   off     → denied
  *   auto    → allowed
@@ -60,7 +60,7 @@ function guardRun(db: Database, run: GoalRun, toolName: string): GuardDecision {
     return { decision: 'allow', category, run_id: run.id }
   }
   if (mode === 'off') {
-    const reason = `Conductor goal guard: "${category}" is off for this goal, so ${toolName} is not allowed. Don't take or propose this action.`
+    const reason = `Quarterdeck goal guard: "${category}" is off for this goal, so ${toolName} is not allowed. Don't take or propose this action.`
     record(db, run, toolName, category, 'deny', reason)
     return { decision: 'deny', category, run_id: run.id, reason }
   }
@@ -76,7 +76,7 @@ function guardRun(db: Database, run: GoalRun, toolName: string): GuardDecision {
     record(db, run, toolName, category, 'allow', null)
     return { decision: 'allow', category, run_id: run.id }
   }
-  const reason = `Conductor goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`
+  const reason = `Quarterdeck goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`
   record(db, run, toolName, category, 'deny', reason)
   return { decision: 'deny', category, run_id: run.id, reason }
 }

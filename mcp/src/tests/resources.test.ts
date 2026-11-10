@@ -21,8 +21,8 @@ describe('handleListResources', () => {
     const plan = await create_plan({ name: 'Alpha' })
     const result = await handleListResources()
     expect(result.resources).toHaveLength(2)
-    expect(result.resources[0].uri).toBe(`conductor://plans/${plan.id}`)
-    expect(result.resources[1].uri).toBe(`conductor://plans/${plan.id}/tree`)
+    expect(result.resources[0].uri).toBe(`quarterdeck://plans/${plan.id}`)
+    expect(result.resources[1].uri).toBe(`quarterdeck://plans/${plan.id}/tree`)
   })
 
   it('includes plan name and mimeType', async () => {
@@ -48,7 +48,7 @@ describe('handleListResources', () => {
 describe('handleReadResource — plan metadata', () => {
   it('returns plan fields and tree_stats', async () => {
     const plan = await create_plan({ name: 'Meta Test' })
-    const result = await handleReadResource({ params: { uri: `conductor://plans/${plan.id}` } })
+    const result = await handleReadResource({ params: { uri: `quarterdeck://plans/${plan.id}` } })
     expect(result.contents).toHaveLength(1)
     const data = JSON.parse(result.contents[0].text)
     expect(data.id).toBe(plan.id)
@@ -59,7 +59,7 @@ describe('handleReadResource — plan metadata', () => {
 
   it('throws for unknown plan', async () => {
     await expect(
-      handleReadResource({ params: { uri: 'conductor://plans/plan_doesnotexist' } })
+      handleReadResource({ params: { uri: 'quarterdeck://plans/plan_doesnotexist' } })
     ).rejects.toThrow('Plan not found')
   })
 })
@@ -67,7 +67,7 @@ describe('handleReadResource — plan metadata', () => {
 describe('handleReadResource — tree', () => {
   it('returns nested tree with plan and stats', async () => {
     const plan = await seedPlan('Tree Test')
-    const result = await handleReadResource({ params: { uri: `conductor://plans/${plan.id}/tree` } })
+    const result = await handleReadResource({ params: { uri: `quarterdeck://plans/${plan.id}/tree` } })
     const data = JSON.parse(result.contents[0].text)
     expect(data.plan.id).toBe(plan.id)
     expect(data.tree).toHaveLength(1)
@@ -78,14 +78,14 @@ describe('handleReadResource — tree', () => {
 
   it('returns empty tree array for plan with no tasks', async () => {
     const plan = await create_plan({ name: 'Empty' })
-    const result = await handleReadResource({ params: { uri: `conductor://plans/${plan.id}/tree` } })
+    const result = await handleReadResource({ params: { uri: `quarterdeck://plans/${plan.id}/tree` } })
     const data = JSON.parse(result.contents[0].text)
     expect(data.tree).toEqual([])
   })
 
   it('throws for unknown plan', async () => {
     await expect(
-      handleReadResource({ params: { uri: 'conductor://plans/plan_nope/tree' } })
+      handleReadResource({ params: { uri: 'quarterdeck://plans/plan_nope/tree' } })
     ).rejects.toThrow('Plan not found')
   })
 })
@@ -93,7 +93,7 @@ describe('handleReadResource — tree', () => {
 describe('handleReadResource — single task', () => {
   it('returns context view for a task', async () => {
     const plan = await seedPlan('Task Test')
-    const result = await handleReadResource({ params: { uri: `conductor://plans/${plan.id}/tasks/1` } })
+    const result = await handleReadResource({ params: { uri: `quarterdeck://plans/${plan.id}/tasks/1` } })
     const data = JSON.parse(result.contents[0].text)
     expect(data.focus.id).toBe('1')
     expect(data.focus.goal).toBe('Root task')
@@ -103,13 +103,13 @@ describe('handleReadResource — single task', () => {
   it('throws for unknown task', async () => {
     const plan = await create_plan({ name: 'Task Error' })
     await expect(
-      handleReadResource({ params: { uri: `conductor://plans/${plan.id}/tasks/99` } })
+      handleReadResource({ params: { uri: `quarterdeck://plans/${plan.id}/tasks/99` } })
     ).rejects.toThrow('Task not found')
   })
 
   it('throws for unknown plan', async () => {
     await expect(
-      handleReadResource({ params: { uri: 'conductor://plans/plan_nope/tasks/1' } })
+      handleReadResource({ params: { uri: 'quarterdeck://plans/plan_nope/tasks/1' } })
     ).rejects.toThrow('Plan not found')
   })
 })
@@ -117,7 +117,7 @@ describe('handleReadResource — single task', () => {
 describe('handleReadResource — unknown URI', () => {
   it('throws for unrecognised URI pattern', async () => {
     await expect(
-      handleReadResource({ params: { uri: 'conductor://something/else' } })
+      handleReadResource({ params: { uri: 'quarterdeck://something/else' } })
     ).rejects.toThrow('Unknown resource URI')
   })
 })

@@ -1,9 +1,9 @@
 {
   "mcpServers": {
-    "conductor": {
+    "quarterdeck": {
       "command": "node",
       "args": [
-        "C:/Users/layen/GitHub/Conductor/mcp/dist/index.js"
+        "C:/Users/layen/GitHub/Quarterdeck/mcp/dist/index.js"
       ]
     }
   }

@@ -9,7 +9,7 @@ function req(headers: Record<string, string>): IncomingMessage {
 describe('request-guard', () => {
   const allowed = allowedHosts('localhost', 3000)
 
-  afterEach(() => { delete process.env.CONDUCTOR_ALLOWED_HOSTS })
+  afterEach(() => { delete process.env.QUARTERDECK_ALLOWED_HOSTS })
 
   it('allows same-origin requests to localhost', () => {
     expect(isAllowedRequest(req({ host: 'localhost:3000', origin: 'http://localhost:3000' }), allowed)).toBe(true)
@@ -34,8 +34,8 @@ describe('request-guard', () => {
     expect(isAllowedRequest(req({}), allowed)).toBe(false)
   })
 
-  it('honours CONDUCTOR_ALLOWED_HOSTS', () => {
-    process.env.CONDUCTOR_ALLOWED_HOSTS = '192.168.1.5:3000'
+  it('honours QUARTERDECK_ALLOWED_HOSTS', () => {
+    process.env.QUARTERDECK_ALLOWED_HOSTS = '192.168.1.5:3000'
     const extra = allowedHosts('localhost', 3000)
     expect(isAllowedRequest(req({ host: '192.168.1.5:3000', origin: 'http://192.168.1.5:3000' }), extra)).toBe(true)
   })

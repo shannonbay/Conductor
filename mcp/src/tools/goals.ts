@@ -134,7 +134,7 @@ export async function run_goal(args: unknown) {
   return {
     run: { id: run.id, status: run.status },
     message: run.status === 'queued'
-      ? 'Queued. The conductor-goals plugin starts it within about 30 seconds while Claude Code is open (or the web app does, if it runs with CONDUCTOR_WEB_RUNS=1).'
+      ? 'Queued. The quarterdeck-goals plugin starts it within about 30 seconds while Claude Code is open (or the web app does, if it runs with QUARTERDECK_WEB_RUNS=1).'
       : 'This goal already has a run in progress.',
   }
 }

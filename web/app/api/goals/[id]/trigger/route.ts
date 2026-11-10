@@ -7,9 +7,9 @@ type Params = { params: Promise<{ id: string }> }
 
 /**
  * POST — webhook: queue a run (trigger "event"). Authenticate with
- * "Authorization: Bearer <secret>" or an "x-conductor-secret" header.
+ * "Authorization: Bearer <secret>" or an "x-quarterdeck-secret" header (the older "x-conductor-secret" works too).
  * The local request guard still applies: remote callers need their host in
- * CONDUCTOR_ALLOWED_HOSTS (e.g. behind a tunnel). Repeated calls while a run
+ * QUARTERDECK_ALLOWED_HOSTS (e.g. behind a tunnel). Repeated calls while a run
  * is queued or running are coalesced into that run.
  */
 export async function POST(req: NextRequest, { params }: Params) {
@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: Params) {
     const goal = getGoal(id)
     if (!goal) return notFound('Goal')
     const auth = req.headers.get('authorization')
-    const secret = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : req.headers.get('x-conductor-secret') ?? ''
+    const secret = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : req.headers.get('x-quarterdeck-secret') ?? req.headers.get('x-conductor-secret') ?? ''
     if (!verifyEventSecret(id, secret)) return err('Invalid or missing webhook secret.', 401)
     if (goal.status !== 'active') return err(`Goal is ${goal.status}.`, 409)
 

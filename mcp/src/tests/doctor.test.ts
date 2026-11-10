@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkDatabase, checkUserScope, nativeLoadProblem, formatResults,
+  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkDatabase, checkUserScope, checkRenameLeftovers, nativeLoadProblem, formatResults,
   type DoctorOptions,
 } from '../doctor.js'
 
@@ -16,8 +16,8 @@ function write(path: string, content: string) {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'conductor-doctor-'))
-  o = { repoRoot: dir, cwd: dir, home: dir, env: { CONDUCTOR_DB: ':memory:' }, nodeVersion: '24.1.0', fetchTimeoutMs: 300 }
+  dir = mkdtempSync(join(tmpdir(), 'quarterdeck-doctor-'))
+  o = { repoRoot: dir, cwd: dir, home: dir, env: { QUARTERDECK_DB: ':memory:' }, nodeVersion: '24.1.0', fetchTimeoutMs: 300 }
 })
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
@@ -68,32 +68,32 @@ describe('doctor', () => {
       expect(checkMcpConfig(o)[0].level).toBe('fail')
     })
 
-    it('fails when the conductor server script does not exist', () => {
-      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: ['missing/index.js'] } } }))
+    it('fails when the quarterdeck server script does not exist', () => {
+      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: ['missing/index.js'] } } }))
       expect(checkMcpConfig(o)[0]).toMatchObject({ level: 'fail', detail: expect.stringContaining('missing/index.js') })
     })
 
     it('passes and lists enabled flags', () => {
       write(join(dir, 'mcp/dist/index.js'), '')
       write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: {
-        conductor: { command: 'node', args: [join(dir, 'mcp/dist/index.js')], env: { CONDUCTOR_STRICT_COMPLETE: '1' } },
+        quarterdeck: { command: 'node', args: [join(dir, 'mcp/dist/index.js')], env: { QUARTERDECK_STRICT_COMPLETE: '1' } },
       } }))
       const [r] = checkMcpConfig(o)
-      expect(r).toMatchObject({ level: 'ok', detail: expect.stringContaining('CONDUCTOR_STRICT_COMPLETE') })
+      expect(r).toMatchObject({ level: 'ok', detail: expect.stringContaining('QUARTERDECK_STRICT_COMPLETE') })
     })
 
     it('warns about a leftover conductor-channel entry', () => {
-      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: [] } } }))
+      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: [] } } }))
       expect(checkMcpConfig(o).some((r) => r.name.includes('conductor-channel'))).toBe(false)
-      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: [] }, 'conductor-channel': { command: 'node', args: [] } } }))
+      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: [] }, 'conductor-channel': { command: 'node', args: [] } } }))
       expect(checkMcpConfig(o).some((r) => r.name.includes('conductor-channel') && r.level === 'warn')).toBe(true)
     })
   })
 
   describe('checkUserScope', () => {
-    it('warns until conductor is added for the user, with the command', () => {
-      expect(checkUserScope(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude mcp add --scope user conductor -- node ') })
-      write(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node', args: ['x.js'] } } }))
+    it('warns until quarterdeck is added for the user, with the command', () => {
+      expect(checkUserScope(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude mcp add --scope user quarterdeck -- node ') })
+      write(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: ['x.js'] } } }))
       expect(checkUserScope(o)).toMatchObject({ level: 'ok' })
     })
   })
@@ -115,17 +115,41 @@ describe('doctor', () => {
     })
   })
 
+  describe('checkRenameLeftovers', () => {
+    it('is quiet when nothing is left from Conductor', () => {
+      expect(checkRenameLeftovers({ ...o, env: {} })).toBeNull()
+    })
+
+    it('names the old data folder, server entries and plugins, with fixes', () => {
+      write(join(dir, '.conductor/tasks.db'), '')
+      write(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node' } } }))
+      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { conductor: { command: 'node' } } }))
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': true } }))
+      const r = checkRenameLeftovers({ ...o, env: {} })
+      expect(r?.level).toBe('warn')
+      expect(r?.detail).toMatch(/~\/\.conductor.*user.*\.mcp\.json.*conductor-goals@conductor/)
+      expect(r?.fix).toMatch(/~\/\.quarterdeck.*claude mcp remove --scope user conductor.*claude plugin uninstall conductor-goals@conductor/)
+    })
+
+    it('ignores the old data folder once the new one exists or a path is set', () => {
+      write(join(dir, '.conductor/tasks.db'), '')
+      expect(checkRenameLeftovers(o)).toBeNull()
+      write(join(dir, '.quarterdeck/tasks.db'), '')
+      expect(checkRenameLeftovers({ ...o, env: {} })).toBeNull()
+    })
+  })
+
   describe('checkPlugin', () => {
     it('warns with install steps when the plugin is not installed', () => {
-      expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude plugin install conductor-goals@conductor') })
+      expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude plugin install quarterdeck-goals@quarterdeck') })
     })
 
     it('warns when it is disabled, and until the guard plugin is enabled too', () => {
-      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': false } }))
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'quarterdeck-goals@quarterdeck': false } }))
       expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude plugin enable') })
-      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': true } }))
-      expect(checkPlugin(o)).toMatchObject({ level: 'warn', detail: expect.stringContaining('goal runs are paused'), fix: expect.stringContaining('conductor-goals-guard@conductor') })
-      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'conductor-goals@conductor': true, 'conductor-goals-guard@conductor': true } }))
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'quarterdeck-goals@quarterdeck': true } }))
+      expect(checkPlugin(o)).toMatchObject({ level: 'warn', detail: expect.stringContaining('goal runs are paused'), fix: expect.stringContaining('quarterdeck-guard@quarterdeck') })
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'quarterdeck-goals@quarterdeck': true, 'quarterdeck-guard@quarterdeck': true } }))
       expect(checkPlugin(o).level).toBe('ok')
   })
   })
@@ -148,17 +172,17 @@ describe('checkGoals', () => {
     const okR = { name: 'x', level: 'ok' as const, detail: '' }
     const warnR = { name: 'x', level: 'warn' as const, detail: '' }
     const dbFile = join(dir, 'goals.db')
-    const opts = { ...o, env: { CONDUCTOR_DB: dbFile } }
+    const opts = { ...o, env: { QUARTERDECK_DB: dbFile } }
     expect(await checkGoals(opts, okR)).toBeNull()
 
-    const core = await import('@conductor/core')
+    const core = await import('@quarterdeck/core')
     const db = core.openDatabase(dbFile)
     const now = new Date().toISOString()
     core.createGoal(db, { id: 'g', name: 'Inbox', description: null, status: 'active', working_dir: dir, created_at: now, updated_at: now }, { objective: 'x' })
     db.close()
 
     expect(await checkGoals(opts, okR)).toMatchObject({ level: 'ok', detail: expect.stringContaining('Inbox') })
-    expect(await checkGoals(opts, { ...warnR, detail: 'conductor-goals-guard@conductor not installed' })).toMatchObject({ level: 'warn', detail: expect.stringContaining('conductor-goals-guard') })
+    expect(await checkGoals(opts, { ...warnR, detail: 'quarterdeck-guard@quarterdeck not installed' })).toMatchObject({ level: 'warn', detail: expect.stringContaining('quarterdeck-guard') })
   })
 })
 
@@ -166,6 +190,6 @@ describe('nativeLoadProblem', () => {
   it('tells a version mismatch from a native part that was never built', () => {
     expect(nativeLoadProblem('was compiled against a different Node.js version using NODE_MODULE_VERSION 127')?.fix).toContain('npm rebuild better-sqlite3')
     expect(nativeLoadProblem('Could not locate the bindings file. Tried: .../better_sqlite3.node')?.fix).toContain('npm install-scripts approve better-sqlite3')
-    expect(nativeLoadProblem("Cannot find module '@conductor/core'")).toBeNull()
+    expect(nativeLoadProblem("Cannot find module '@quarterdeck/core'")).toBeNull()
   })
 })

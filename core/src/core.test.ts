@@ -4,8 +4,11 @@ import {
   openDatabase, runMigrations, insertPlan, insertTask, updateTask, updatePlan, touchPlan,
   deleteTaskTree, getPlanRevision, getTask, getChildren, getSiblings, nextChildId,
   insertVerification, getVerifications, getLatestVerification, REVISION_TRIGGERS,
-  type NewTask,
+  createGoal, getGoal, envVar, defaultDbPath, type NewTask,
 } from './index.js'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs'
+import { tmpdir } from 'os'
+import { join } from 'path'
 
 const now = '2026-01-01T00:00:00.000Z'
 
@@ -48,6 +51,39 @@ describe('runMigrations', () => {
     expect(cols).toContain('locked_by')
     expect(getPlanRevision(legacy, 'p1')).toBe(0)
     expect((legacy.prepare('SELECT working_dir FROM plans').get() as { working_dir: string }).working_dir).toBe('(unknown)')
+  })
+
+  it('moves goal tool maps from the old conductor server name to quarterdeck', () => {
+    createGoal(db, { ...plan('g1'), kind: 'goal' }, { objective: 'Inbox' })
+    db.prepare('UPDATE goals SET tool_map = ? WHERE plan_id = ?')
+      .run(JSON.stringify({ mcp__conductor__unsubscribe_one_click: 'email.unsubscribe', 'mcp__claude_ai_Gmail__*': 'email.delete' }), 'g1')
+    runMigrations(db)
+    runMigrations(db)
+    expect(getGoal(db, 'g1')!.tool_map).toEqual({ mcp__quarterdeck__unsubscribe_one_click: 'email.unsubscribe', 'mcp__claude_ai_Gmail__*': 'email.delete' })
+  })
+})
+
+describe('settings from before the rename', () => {
+  it('envVar prefers QUARTERDECK_ and falls back to CONDUCTOR_', () => {
+    expect(envVar('DB', { CONDUCTOR_DB: 'old' })).toBe('old')
+    expect(envVar('DB', { CONDUCTOR_DB: 'old', QUARTERDECK_DB: 'new' })).toBe('new')
+    expect(envVar('DB', {})).toBeUndefined()
+  })
+
+  it('defaultDbPath uses ~/.conductor only while ~/.quarterdeck has no database', () => {
+    const home = mkdtempSync(join(tmpdir(), 'quarterdeck-home-'))
+    try {
+      expect(defaultDbPath({}, home)).toBe(join(home, '.quarterdeck', 'tasks.db'))
+      mkdirSync(join(home, '.conductor'))
+      writeFileSync(join(home, '.conductor', 'tasks.db'), '')
+      expect(defaultDbPath({}, home)).toBe(join(home, '.conductor', 'tasks.db'))
+      mkdirSync(join(home, '.quarterdeck'))
+      writeFileSync(join(home, '.quarterdeck', 'tasks.db'), '')
+      expect(defaultDbPath({}, home)).toBe(join(home, '.quarterdeck', 'tasks.db'))
+      expect(defaultDbPath({ QUARTERDECK_DB: ':memory:' }, home)).toBe(':memory:')
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 })
 

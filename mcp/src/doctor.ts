@@ -1,5 +1,5 @@
 /**
- * `conductor doctor` — checks that a Conductor install is healthy and says how
+ * `quarterdeck doctor` — checks that a Quarterdeck install is healthy and says how
  * to fix anything that isn't. Each check is independent, so one failure
  * (e.g. a broken native module) doesn't hide the others.
  */
@@ -70,20 +70,20 @@ export function nativeLoadProblem(msg: string): { detail: string; fix: string } 
 }
 
 export async function checkDatabase(o: DoctorOptions): Promise<CheckResult[]> {
-  let core: typeof import('@conductor/core')
+  let core: typeof import('@quarterdeck/core')
   try {
-    core = await import('@conductor/core')
+    core = await import('@quarterdeck/core')
   } catch (e) {
     const msg = (e as Error).message
     const native = nativeLoadProblem(msg)
     return [fail(
       'SQLite native module',
-      native ? native.detail : `could not load @conductor/core: ${firstLine(msg)}`,
+      native ? native.detail : `could not load @quarterdeck/core: ${firstLine(msg)}`,
       native ? native.fix : 'Run `npm install` and `npm run build --prefix core` from the repo root.',
     )]
   }
 
-  const path = o.env.CONDUCTOR_DB ?? join(o.home, '.conductor', 'tasks.db')
+  const path = core.defaultDbPath(o.env, o.home)
   try {
     const db = core.openDatabase(path)
     try {
@@ -109,7 +109,7 @@ export async function checkDatabase(o: DoctorOptions): Promise<CheckResult[]> {
   } catch (e) {
     return [
       ok('SQLite native module', 'better-sqlite3 loads'),
-      fail('Database', `cannot open ${path}: ${firstLine((e as Error).message)}`, 'Check the path is writable, or set CONDUCTOR_DB to a writable file.'),
+      fail('Database', `cannot open ${path}: ${firstLine((e as Error).message)}`, 'Check the path is writable, or set QUARTERDECK_DB to a writable file.'),
     ]
   }
 }
@@ -119,7 +119,7 @@ export function checkBuild(o: DoctorOptions, pkg: 'core' | 'mcp'): CheckResult {
   const name = `${pkg}/ build`
   const srcDir = join(o.repoRoot, pkg, 'src')
   const entry = join(o.repoRoot, pkg, 'dist', 'index.js')
-  if (!existsSync(srcDir)) return warn(name, 'not running from a Conductor checkout — skipped')
+  if (!existsSync(srcDir)) return warn(name, 'not running from a Quarterdeck checkout — skipped')
   if (!existsSync(entry)) return fail(name, `${pkg}/dist/index.js is missing`, `Run \`npm run build --prefix ${pkg}\`.`)
   const newestSrc = newestMtime(srcDir)
   const built = statSync(entry).mtimeMs
@@ -129,29 +129,29 @@ export function checkBuild(o: DoctorOptions, pkg: 'core' | 'mcp'): CheckResult {
 }
 
 /**
- * Goals work in every session only when `conductor` is added for the user
+ * Goals work in every session only when `quarterdeck` is added for the user
  * (~/.claude.json). A repo .mcp.json loads only in sessions started in the repo,
- * so elsewhere the plugins find no conductor tools.
+ * so elsewhere the plugins find no quarterdeck tools.
  */
 export function checkUserScope(o: DoctorOptions): CheckResult {
-  const name = 'conductor in every project'
+  const name = 'quarterdeck in every project'
   let servers: Record<string, unknown> = {}
   try {
     servers = JSON.parse(readFileSync(join(o.home, '.claude.json'), 'utf8')).mcpServers ?? {}
   } catch {
     // no user config yet: treated as not added
   }
-  if (servers.conductor) return ok(name, 'added for your user')
+  if (servers.quarterdeck) return ok(name, 'added for your user')
   const script = join(o.repoRoot, 'mcp', 'dist', 'index.js').replace(/\\/g, '/')
   return warn(name, "only in this repo's .mcp.json, so goals, the Goals pane and /goal-new work only in sessions started here",
-    `Run \`claude mcp add --scope user conductor -- node ${script}\`, then restart Claude Code.`)
+    `Run \`claude mcp add --scope user quarterdeck -- node ${script}\`, then restart Claude Code.`)
 }
 
 export function checkMcpConfig(o: DoctorOptions): CheckResult[] {
   const file = [join(o.cwd, '.mcp.json'), join(o.repoRoot, '.mcp.json')].find((f) => existsSync(f))
   if (!file) {
     return [warn('.mcp.json', 'not found in this directory or the repo root',
-      'Add a `conductor` server entry pointing at mcp/dist/index.js (see README).')]
+      'Add a `quarterdeck` server entry pointing at mcp/dist/index.js (see README).')]
   }
   let servers: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>
   try {
@@ -161,16 +161,16 @@ export function checkMcpConfig(o: DoctorOptions): CheckResult[] {
   }
 
   const results: CheckResult[] = []
-  const conductor = servers.conductor
-  if (!conductor) {
-    results.push(fail('.mcp.json conductor', `no "conductor" server in ${file}`, 'Add one with command "node" and args ["<repo>/mcp/dist/index.js"].'))
+  const quarterdeck = servers.quarterdeck
+  if (!quarterdeck) {
+    results.push(fail('.mcp.json quarterdeck', `no "quarterdeck" server in ${file}`, 'Add one with command "node" and args ["<repo>/mcp/dist/index.js"].'))
   } else {
-    const script = (conductor.args ?? []).find((a) => /\.(m?js|ts)$/.test(a))
+    const script = (quarterdeck.args ?? []).find((a) => /\.(m?js|ts)$/.test(a))
     if (script && !existsSync(resolve(dirname(file), script))) {
-      results.push(fail('.mcp.json conductor', `server script not found: ${script}`, 'Fix the path, or build it with `npm run build --prefix mcp`.'))
+      results.push(fail('.mcp.json quarterdeck', `server script not found: ${script}`, 'Fix the path, or build it with `npm run build --prefix mcp`.'))
     } else {
-      const flags = ['CONDUCTOR_REQUIRE_DECOMPOSE', 'CONDUCTOR_STRICT_COMPLETE'].filter((k) => conductor.env?.[k] === '1')
-      results.push(ok('.mcp.json conductor', `configured${flags.length ? ` (${flags.join(', ')})` : ''}`))
+      const flags = ['REQUIRE_DECOMPOSE', 'STRICT_COMPLETE'].filter((k) => (quarterdeck.env?.[`QUARTERDECK_${k}`] ?? quarterdeck.env?.[`CONDUCTOR_${k}`]) === '1').map((k) => `QUARTERDECK_${k}`)
+      results.push(ok('.mcp.json quarterdeck', `configured${flags.length ? ` (${flags.join(', ')})` : ''}`))
     }
   }
   if (servers['conductor-channel']) {
@@ -204,12 +204,12 @@ export function checkHooks(o: DoctorOptions): CheckResult {
   return ok('Claude Code hooks', 'up to date (none needed)')
 }
 
-const PLUGIN = 'conductor-goals@conductor'
-const GUARD_PLUGIN = 'conductor-goals-guard@conductor'
+const PLUGIN = 'quarterdeck-goals@quarterdeck'
+const GUARD_PLUGIN = 'quarterdeck-guard@quarterdeck'
 
 /**
- * The Claude Code plugins that run goals: conductor-goals (Goals pane, the
- * runner that starts goal runs in subagents) and conductor-goals-guard (keeps
+ * The Claude Code plugins that run goals: quarterdeck-goals (Goals pane, the
+ * runner that starts goal runs in subagents) and quarterdeck-guard (keeps
  * each run within its goal; without it no run starts).
  */
 export function checkPlugin(o: DoctorOptions): CheckResult {
@@ -229,6 +229,41 @@ export function checkPlugin(o: DoctorOptions): CheckResult {
   return ok(name, `${PLUGIN} and ${GUARD_PLUGIN} enabled`)
 }
 
+/**
+ * Leftovers from before Quarterdeck was renamed from Conductor: the old data
+ * folder, a `conductor` MCP server entry and the old plugins. Null when none.
+ */
+export function checkRenameLeftovers(o: DoctorOptions): CheckResult | null {
+  const read = (file: string): Record<string, unknown> => {
+    try { return JSON.parse(readFileSync(file, 'utf8')) } catch { return {} }
+  }
+  const user = read(join(o.home, '.claude.json')) as { mcpServers?: Record<string, unknown> }
+  const repo = read(join(o.repoRoot, '.mcp.json')) as { mcpServers?: Record<string, unknown> }
+  const enabled = (read(join(o.home, '.claude', 'settings.json')) as { enabledPlugins?: Record<string, unknown> }).enabledPlugins ?? {}
+  const found: string[] = []
+  const fixes: string[] = []
+  if (!o.env.QUARTERDECK_DB && !o.env.CONDUCTOR_DB && existsSync(join(o.home, '.conductor', 'tasks.db')) && !existsSync(join(o.home, '.quarterdeck', 'tasks.db'))) {
+    found.push('your goals are still in ~/.conductor')
+    fixes.push('with Claude Code and the web app closed, rename ~/.conductor to ~/.quarterdeck')
+  }
+  if (user.mcpServers?.conductor) {
+    found.push('a "conductor" MCP server is still added for your user')
+    fixes.push('run `claude mcp remove --scope user conductor`')
+  }
+  if (repo.mcpServers?.conductor) {
+    found.push('.mcp.json still has a "conductor" server')
+    fixes.push('remove it from .mcp.json')
+  }
+  const oldPlugins = ['conductor-goals@conductor', 'conductor-goals-guard@conductor'].filter((p) => p in enabled)
+  if (oldPlugins.length) {
+    found.push(`the old plugins are still installed (${oldPlugins.join(', ')})`)
+    fixes.push(`run ${oldPlugins.map((p) => `\`claude plugin uninstall ${p}\``).join(' and ')}, then \`claude plugin marketplace remove conductor\``)
+  }
+  if (!found.length) return null
+  const fix = fixes.join('; ')
+  return warn('Renamed from Conductor', found.join('; '), fix.charAt(0).toUpperCase() + fix.slice(1) + '.')
+}
+
 export async function checkWeb(o: DoctorOptions): Promise<CheckResult> {
   const url = `http://localhost:${o.env.PORT ?? '3000'}/api/health`
   return await getJson(url, o.fetchTimeoutMs)
@@ -238,13 +273,13 @@ export async function checkWeb(o: DoctorOptions): Promise<CheckResult> {
 
 /**
  * Active goals run while Claude Code is open with both goal plugins (the
- * conductor-goals runner, guarded by conductor-goals-guard).
+ * quarterdeck-goals runner, guarded by quarterdeck-guard).
  */
 export async function checkGoals(o: DoctorOptions, plugins: CheckResult): Promise<CheckResult | null> {
   let goals: { plan: { name: string } }[]
   try {
-    const core = await import('@conductor/core')
-    const db = core.openDatabase(o.env.CONDUCTOR_DB ?? join(o.home, '.conductor', 'tasks.db'))
+    const core = await import('@quarterdeck/core')
+    const db = core.openDatabase(core.defaultDbPath(o.env, o.home))
     try { goals = core.listGoals(db, 'active') } finally { db.close() }
   } catch {
     return null // database problems are reported by checkDatabase
@@ -254,7 +289,7 @@ export async function checkGoals(o: DoctorOptions, plugins: CheckResult): Promis
   return plugins.level === 'ok'
     ? ok('Persistent goals', `${goals.length} active (${names}); they run while Claude Code is open`)
     : warn('Persistent goals', `${goals.length} active (${names}) but they won't run: ${plugins.detail}`,
-        plugins.fix ?? 'Install the conductor-goals and conductor-goals-guard plugins (see the Claude Code plugins check above).')
+        plugins.fix ?? 'Install the quarterdeck-goals and quarterdeck-guard plugins (see the Claude Code plugins check above).')
 }
 
 // ── Runner ────────────────────────────────────────────────────────────────────
@@ -272,6 +307,7 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
     checkUserScope(o),
     checkHooks(o),
     plugins,
+    ...[checkRenameLeftovers(o)].filter((r): r is CheckResult => r !== null),
     web,
     ...[await checkGoals(o, plugins)].filter((r): r is CheckResult => r !== null),
   ]
@@ -279,7 +315,7 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
 
 export function formatResults(results: CheckResult[]): string {
   const tag: Record<Level, string> = { ok: '[ ok ]', warn: '[warn]', fail: '[FAIL]' }
-  const lines = ['Conductor doctor', '']
+  const lines = ['Quarterdeck doctor', '']
   for (const r of results) {
     lines.push(`${tag[r.level]} ${r.name}: ${r.detail}`)
     if (r.fix) lines.push(`       fix: ${r.fix}`)

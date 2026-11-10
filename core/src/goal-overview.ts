@@ -1,6 +1,6 @@
 /**
  * The goals overview: every goal that isn't retired, with what a compact view
- * (the conductor-goals pane) needs, in one call. Served by the web app's
+ * (the quarterdeck-goals pane) needs, in one call. Served by the web app's
  * GET /api/goals/overview and the MCP tool goals_overview.
  */
 import { createHash } from 'crypto'

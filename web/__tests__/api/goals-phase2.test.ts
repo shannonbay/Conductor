@@ -8,7 +8,7 @@ import { POST as POSTWebhook, DELETE as DELETEWebhook } from '@/app/api/goals/[i
 import { POST as POSTTrigger } from '@/app/api/goals/[id]/trigger/route.js'
 import { POST as POSTHealth } from '@/app/api/goals/[id]/health/route.js'
 import { getDb, getGoal, getOpenRun, getSchedule, listHealth } from '@/lib/db'
-import * as core from '@conductor/core'
+import * as core from '@quarterdeck/core'
 
 function req(method: string, body?: unknown, headers: Record<string, string> = {}) {
   return new NextRequest('http://localhost/api/x', {
@@ -60,8 +60,10 @@ describe('webhook', () => {
     const first = await POSTTrigger(req('POST', { reason: 'new mail' }, { authorization: `Bearer ${secret}` }), p(id))
     expect(first.status).toBe(202)
     expect(getOpenRun(id)).toMatchObject({ status: 'queued', trigger: 'event' })
-    const again = await (await POSTTrigger(req('POST', undefined, { 'x-conductor-secret': secret }), p(id))).json()
+    const again = await (await POSTTrigger(req('POST', undefined, { 'x-quarterdeck-secret': secret }), p(id))).json()
     expect(again.coalesced).toBe(true)
+    const old = await (await POSTTrigger(req('POST', undefined, { 'x-conductor-secret': secret }), p(id))).json()
+    expect(old.coalesced).toBe(true)
 
     await DELETEWebhook(req('DELETE'), p(id))
     expect((await POSTTrigger(req('POST', {}, { authorization: `Bearer ${secret}` }), p(id))).status).toBe(401)

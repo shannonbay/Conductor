@@ -1,6 +1,6 @@
 import type { Database } from 'better-sqlite3'
 
-/** Triggers that keep plans.revision current; `conductor doctor` checks they all exist. */
+/** Triggers that keep plans.revision current; `quarterdeck doctor` checks they all exist. */
 export const REVISION_TRIGGERS = [
   'trg_tasks_insert_revision',
   'trg_tasks_update_revision',
@@ -18,7 +18,7 @@ export const REVISION_TRIGGERS = [
 ] as const
 
 /**
- * The single source of truth for the Conductor schema. Both the MCP server
+ * The single source of truth for the Quarterdeck schema. Both the MCP server
  * and the web app call this on startup, so whichever opens the database first
  * produces the same schema.
  *
@@ -368,5 +368,11 @@ export function runMigrations(db: Database): void {
       created_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript_messages(session_id, turn_index);
+  `)
+
+  // ── Renamed from Conductor: the MCP server's tools moved from mcp__conductor__* ──
+  db.exec(`
+    UPDATE goals SET tool_map = replace(tool_map, '"mcp__conductor__', '"mcp__quarterdeck__')
+    WHERE instr(tool_map, '"mcp__conductor__') > 0
   `)
 }

@@ -1,7 +1,7 @@
 /**
- * The goal scheduler's pass, run by whoever drives goals (the conductor-goals
+ * The goal scheduler's pass, run by whoever drives goals (the quarterdeck-goals
  * Claude Code plugin through the `goals_tick` MCP tool, or the web app with
- * CONDUCTOR_WEB_RUNS=1). It decides which runs are due, claims them, and
+ * QUARTERDECK_WEB_RUNS=1). It decides which runs are due, claims them, and
  * returns them; the caller starts an agent for each.
  *
  * Several Claude Code sessions may run the plugin at once, so a pass first
@@ -61,7 +61,7 @@ export function goalRunPrompt(p: { goalId: string; runId: string; name: string; 
   return [
     `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
     `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries.`,
-    'Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal\'s state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category\'s autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Conductor goal guard means: propose it with add_item instead.',
+    'Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal\'s state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category\'s autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.',
     'When you need something only the person can give or do (a choice, details you can\'t find, connecting a service, allowing a site), add_item with ask_person: true and one clear question, and carry on with what you can; don\'t guess. Their answer arrives as memory and the item is completed.',
     'Save anything future runs should know with remember.',
     'Your summary, items and memory are read by the person who owns this goal: write to them as "you", and never guess their gender or pronouns.',

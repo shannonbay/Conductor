@@ -11,7 +11,7 @@ import { PATCH as PATCHMemory, DELETE as DELETEMemory } from '@/app/api/goals/[i
 import { POST as POSTApprove } from '@/app/api/goals/[id]/items/[itemId]/approve/route.js'
 import { POST as POSTReject } from '@/app/api/goals/[id]/items/[itemId]/reject/route.js'
 import { getDb, getOpenRun, getTask, getGoal, getIntervalTrigger, insertPlan } from '@/lib/db'
-import * as core from '@conductor/core'
+import * as core from '@quarterdeck/core'
 
 function req(method: string, body?: unknown) {
   return new NextRequest('http://localhost/api/x', { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined })

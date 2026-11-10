@@ -1,18 +1,18 @@
 {
-  "name": "conductor",
+  "name": "quarterdeck",
   "owner": {
     "name": "Shannon Bay"
   },
   "plugins": [
     {
-      "name": "conductor-goals",
-      "source": "./plugins/conductor-goals",
-      "description": "Runs Conductor goals in background subagents, with the Goals pane beside the chat: proposals to approve or reject, run status and health"
+      "name": "quarterdeck-goals",
+      "source": "./plugins/quarterdeck-goals",
+      "description": "Runs Quarterdeck goals in background subagents, with the Goals pane beside the chat: proposals to approve or reject, run status and health"
     },
     {
-      "name": "conductor-goals-guard",
-      "source": "./plugins/conductor-goals-guard",
-      "description": "Keeps each Conductor goal run within its goal: run tagging, the autonomy guard, and reports kept out of your chat. Needed by conductor-goals."
+      "name": "quarterdeck-guard",
+      "source": "./plugins/quarterdeck-guard",
+      "description": "Keeps each Quarterdeck goal run within its goal: run tagging, the autonomy guard, and reports kept out of your chat. Needed by quarterdeck-goals."
     }
   ]
 }
