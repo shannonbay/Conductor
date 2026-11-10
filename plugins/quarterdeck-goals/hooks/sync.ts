@@ -7,7 +7,7 @@ import type { EngineInterface } from 'claude-code'
 import type { Snapshot } from '../types'
 import { announce, showStatus, savePoll } from './alerts'
 import { fetchOverview, fetchTodos, settings } from './api'
-import { toCard } from './model'
+import { planModeBlocked, toCard } from './model'
 import { kick } from './runner'
 import { getSnapshot, setBusy, setNotice, setSnapshot, setTodos, getExpanded } from './state'
 
@@ -97,7 +97,10 @@ export async function act($: $, key: string, label: string, run: () => Promise<v
     ok = true
     await kick($) // an approval or "Run now" queued a run: start it now
   } catch (err) {
-    await setNotice($, `Couldn't ${label}: ${err instanceof Error ? err.message : String(err)}`)
+    const message = err instanceof Error ? err.message : String(err)
+    await setNotice($, planModeBlocked(message)
+      ? `Couldn't ${label}: plan mode is on, and Claude Code doesn't let Quarterdeck change anything until it ends (Shift+Tab to leave it).`
+      : `Couldn't ${label}: ${message}`)
   }
   await setBusy($, null)
   await refresh($)

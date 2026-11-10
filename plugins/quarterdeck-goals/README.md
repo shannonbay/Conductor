@@ -26,7 +26,7 @@ For development, add your checkout as the marketplace instead (`claude plugin ma
 
 ## The Goals pane
 
-Open it with `/goals`. It opens on its own at start-up when something is waiting for you.
+Open it with `/goals`. It opens on its own at start-up when something is waiting for you. With no goals or to-dos yet, it says what a goal is and how to start one (`/goal-new`) or add a to-do (`/todo`).
 
 ```
 ▸ Inbox active · run running
@@ -74,11 +74,11 @@ Goal names match by exact name, then prefix, then any part of the name. If more 
 
 ### Your to-do list
 
-Long conversations produce ideas and decisions to come back to, and a context compaction forgets them. The to-do list keeps them outside the conversation, for you:
+Goals look after things in the background; the to-do list is the backlog for what you build with Claude yourself. Working on a project, ideas and decisions pile up to come back to, and a `/clear` or a context compaction loses them. The to-do list keeps them beside the chat, outside the conversation, and you pick one up later with **Plan** or **Start**. A list can hold anything, not only code work.
 
 - `/todo <text>` adds to this project's **To do** list (made the first time). Or ask Claude: "add that to the list". Claude only adds when asked, or offers when an idea is clearly being put off.
 - In the pane, open a list to see its open to-dos, each with its id (`☐ 1.3 Set autonomy…`). Press ☐ to tick one off; a toast says how to undo. **n done** shows the ticked ones, and pressing one puts it back.
-- Press a to-do's text to expand it: the full text, any notes, and **Ask…**, **Plan** and **Start**. All three bring it into this conversation, where Claude can ask you things. **Ask…** opens a box for your question about the to-do; Claude answers with nothing changed. Press Enter on an empty box to get Claude's opinion and trade-offs instead. **Plan** asks Claude to plan it in plan mode for you to review. **Start** asks it to begin. The to-do shows ◐ until it's ticked off (Claude ticks it with `complete_todo` when it's done). To-dos don't run in the background; goals do.
+- Press a to-do's text to expand it: the full text, any notes, and **Ask…**, **Plan**, **Start** and **Edit**. All three bring it into this conversation, where Claude can ask you things. **Ask…** opens a box for your question about the to-do; Claude answers with nothing changed. Press Enter on an empty box to get Claude's opinion and trade-offs instead. **Plan** turns plan mode on with Claude Code's `/plan` (or, without it, asks Claude to enter plan mode) and asks Claude to plan it for you to review; if the session already has a plan, `/plan` shows it first. In plan mode Claude Code doesn't let Quarterdeck change anything, so ticking, editing, approving and the like wait until it ends (Shift+Tab). **Start** asks it to begin. The to-do shows ◐ until it's ticked off (Claude ticks it with `complete_todo` when it's done). **Edit** opens a box holding the to-do's text: change it and press Enter, and a toast shows the old wording. To-dos don't run in the background; goals do.
 - **+ Add** under an open list opens a box (already focused): type the to-do and press Enter. Or use `/todo <text>`.
 - After a compaction, say "check my list": Claude reads it with the `todos` tool. Nothing is added to the conversation otherwise: no hooks, no reminders.
 
@@ -98,7 +98,7 @@ A **one-off** goal runs once, straight away. When its run ends with nothing left
 | `goal_detail` | One goal's open items, recent runs and memory. Read-only. |
 | `approve_item`, `reject_item` | Approve or reject a proposal. **Asks you first.** |
 | `run_goal` | Queue a run. **Asks you first.** |
-| `todos`, `add_todo`, `complete_todo` | Read your to-do lists, add to one (when you ask, or after offering), tick one off (when you say it's done). |
+| `todos`, `add_todo`, `complete_todo`, `edit_todo` | Read your to-do lists, add to one (when you ask, or after offering), tick one off (when you say it's done), reword one (when you ask; a toast shows the old wording). |
 | `update_goal` | Change a goal's name, objective, standing instructions, autonomy per category, tool rules, memory, or pause it. **Shows you each change and asks you first.** Runs can't use it. |
 | `set_schedule` | Set or clear a goal's schedule (same forms as `/goal-schedule`). **Asks you first.** |
 

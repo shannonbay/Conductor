@@ -1,6 +1,6 @@
 {
   "name": "quarterdeck-goals",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "license": "Apache-2.0",
   "description": "Runs Quarterdeck goals in background subagents and puts them beside the chat: approve or reject proposals, run, pause and inspect goals, and let Claude check on them",
   "types": "./types/index.d.ts",

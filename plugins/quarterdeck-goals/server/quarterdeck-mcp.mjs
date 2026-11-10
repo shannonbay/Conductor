@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.12.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.13.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -19356,9 +19356,11 @@ var TodoAddSchema = external_exports.object({
 var TodoSetSchema = external_exports.object({
   list_id: external_exports.string(),
   item_id: external_exports.string(),
-  status: external_exports.enum(["pending", "active", "completed"]).describe("completed ticks it off; pending puts it back"),
-  notes: external_exports.string().optional()
-});
+  status: external_exports.enum(["pending", "active", "completed"]).optional().describe("completed ticks it off; pending puts it back"),
+  notes: external_exports.string().optional(),
+  text: external_exports.string().trim().min(1).optional().describe("New wording for the to-do, only when the person asks for it"),
+  changed_by: external_exports.enum(["human", "agent"]).default("human")
+}).refine((v) => v.status !== void 0 || v.notes !== void 0 || v.text !== void 0, { message: "Give a status, notes or text to change." });
 var Mode = external_exports.enum(["off", "propose", "auto"]);
 var UpdateGoalSchema = external_exports.object({
   goal_id: external_exports.string(),
@@ -21418,10 +21420,17 @@ function addTodo(db2, input) {
   touchPlan(db2, plan.id);
   return { listId: plan.id, itemId, created };
 }
-function setTodo(db2, listId, itemId, status, notes) {
+function setTodo(db2, listId, itemId, change) {
   const task = getTask(db2, listId, itemId);
   if (!task) throw new Error(`To-do ${itemId} not found in list ${listId}.`);
-  updateTask(db2, listId, itemId, { status, updated_at: (/* @__PURE__ */ new Date()).toISOString(), ...notes !== void 0 && { notes } });
+  const text = change.text?.trim();
+  if (change.text !== void 0 && !text) throw new Error("A to-do needs some text.");
+  updateTask(db2, listId, itemId, {
+    updated_at: (/* @__PURE__ */ new Date()).toISOString(),
+    ...change.status !== void 0 && { status: change.status },
+    ...change.notes !== void 0 && { notes: change.notes },
+    ...text !== void 0 && { goal: text }
+  });
   touchPlan(db2, listId);
   const t = getTask(db2, listId, itemId);
   return { id: t.id, text: t.goal, status: t.status, depth: 0, notes: t.notes };
@@ -21504,7 +21513,7 @@ var applyGoalChanges2 = (planId, changes) => applyGoalChanges(db, planId, change
 var reportRunEnd2 = (runId, input) => reportRunEnd(db, runId, input);
 var todoLists2 = (workingDir) => todoLists(db, workingDir);
 var addTodo2 = (input) => addTodo(db, input);
-var setTodo2 = (listId, itemId, status, notes) => setTodo(db, listId, itemId, status, notes);
+var setTodo2 = (listId, itemId, change) => setTodo(db, listId, itemId, change);
 function runTransaction(fn) {
   return db.transaction(fn)();
 }
@@ -22418,9 +22427,14 @@ async function todo_add(args) {
 }
 async function todo_set(args) {
   const input = TodoSetSchema.parse(args);
-  const item = setTodo2(input.list_id, input.item_id, input.status, input.notes);
-  record3(input.list_id, input.item_id, "status_changed", { to: input.status, todo: true }, { actor: "human", via: "todo" });
-  return { item };
+  const before = getTask2(input.list_id, input.item_id);
+  const item = setTodo2(input.list_id, input.item_id, { status: input.status, notes: input.notes, text: input.text });
+  const opts = { actor: input.changed_by, via: "todo" };
+  if (input.status !== void 0) record3(input.list_id, input.item_id, "status_changed", { to: input.status, todo: true }, opts);
+  if (input.text !== void 0 && before && before.goal !== item.text) {
+    record3(input.list_id, input.item_id, "task_updated", { fields: ["goal"], before: { goal: before.goal }, after: { goal: item.text }, todo: true }, opts);
+  }
+  return { item, ...input.text !== void 0 && before && { previous_text: before.goal } };
 }
 
 // src/tools/unsubscribe.ts
@@ -22668,7 +22682,7 @@ var TOOLS = [
   },
   {
     name: "todo_set",
-    description: "Ticks a to-do off (completed), puts it back (pending), or marks it under way (active) with a note. Only when the person says it's done or asks you to.",
+    description: "Changes a to-do: ticks it off (completed), puts it back (pending), marks it under way (active), sets its notes, or rewords it (text). Only when the person says it's done or asks you to.",
     inputSchema: zodToJsonSchema(TodoSetSchema),
     handler: todo_set
   },

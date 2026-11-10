@@ -14,8 +14,8 @@ import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, runCost, scheduleLabel, spark } from './model'
 import { sendToChat } from './chat'
-import { getAddingTo, getAskingAbout, getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setRejecting, toggleExpanded } from './state'
-import { addFromPane, askFromPane, toggleTodo, workFromPane } from './todos'
+import { getAddingTo, getAskingAbout, getBusy, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setEditingTodo, setRejecting, toggleExpanded } from './state'
+import { addFromPane, askFromPane, editFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
 
@@ -50,6 +50,7 @@ export async function renderPane($: $, e: E) {
   const todos = await getTodos($)
   const addingTo = await getAddingTo($)
   const askingAbout = await getAskingAbout($)
+  const editing = await getEditingTodo($)
 
   if (!s.reachable && s.goals.length === 0) {
     return (
@@ -90,20 +91,36 @@ export async function renderPane($: $, e: E) {
       {s.outdated && <Text color="yellow">Quarterdeck was updated in another session: run /reload-plugins here to use the new version (this session won't start goal runs until then).</Text>}
       {s.hold && <Text color="yellow">Goal runs are on hold until {holdUntilText(s.hold.until, view.now)}: the usage limit is reached. Due runs start after that.</Text>}
       {!s.reachable && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
-      {current.length === 0 && (
-        <Box flexDirection="column">
+      {current.length === 0 && done.length === 0 && !todos?.lists.length && welcome($, e)}
+      {current.length === 0 && (done.length > 0 || !!todos?.lists.length) && (
+        <Box flexDirection="column" marginBottom={1}>
           <Text dimColor>No goals yet.</Text>
-          <Text dimColor>Create one with /goal-new &lt;objective&gt;, or in the web app.</Text>
+          <Text dimColor>Create one with /goal-new &lt;objective&gt;; /goal-new alone offers ready-made ones.</Text>
         </Box>
       )}
       {current.map((g, i) => goalCard($, e, view, g, i))}
-      {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo, askingAbout)}
+      {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo, askingAbout, editing)}
       {done.length > 0 && doneSection($, e, view, done)}
       {message && <Text color="red">{message}</Text>}
       <Box>
         <Text dimColor>Updated {ago(new Date(s.fetchedAt).toISOString(), view.now)} </Text>
         <Button key="refresh" label="Refresh" plain hotkey="g" onPress={() => void refresh($)} />
       </Box>
+    </Box>
+  )
+}
+
+/** A blank pane (no goals, no to-dos): what Quarterdeck is and how to start. */
+function welcome($: $, e: E) {
+  const { Box, Text } = $.ui.resolve(e)
+  return (
+    <Box key="welcome" flexDirection="column" marginBottom={1}>
+      <Text>Welcome to Quarterdeck.</Text>
+      <Text dimColor>A goal is a standing job Claude keeps doing in the background, like "keep my inbox under 20 unread". Each run reports here, and anything it wants to do waits for your OK.</Text>
+      <Text> </Text>
+      <Text dimColor>/goal-new                pick a ready-made goal</Text>
+      <Text dimColor>/goal-new &lt;objective&gt;    start your own (it suggests a schedule)</Text>
+      <Text dimColor>/todo &lt;text&gt;             add to this project's to-do list, shown here</Text>
     </Box>
   )
 }
@@ -476,7 +493,7 @@ function doneSection($: $, e: E, view: View, done: GoalCard[]) {
  * which goes back on the list when pressed. Ask… opens a box for the person's
  * question; Enter on an empty box asks for Claude's opinion.
  */
-function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | null, askingAbout: string | null) {
+function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | null, askingAbout: string | null, editing: string | null) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   return (
     <Box key="todos" flexDirection="column" marginBottom={1}>
@@ -510,9 +527,23 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
                   </Box>
                   {expanded && (
                     <Box flexDirection="column">
-                      <Text>{indent}    {item.text}</Text>
+                      {editing === `${list.id}/${item.id}` ? (
+                        <Box flexDirection="column">
+                          <Input
+                            key={`todo-edit-input-${list.id}/${item.id}`}
+                            label="To-do"
+                            value={item.text}
+                            submitLabel={view.doing === `todo-edit:${list.id}/${item.id}` ? 'Saving…' : 'Save'}
+                            autoFocus
+                            onSubmit={(text: string) => void editFromPane($, list, item, text)}
+                          />
+                          <Button key={`todo-edit-cancel-${list.id}/${item.id}`} label="Cancel" plain onPress={() => void setEditingTodo($, null)} />
+                        </Box>
+                      ) : (
+                        <Text>{indent}    {item.text}</Text>
+                      )}
                       {item.notes && <Text dimColor>{indent}    {item.notes}</Text>}
-                      {askingAbout === `${list.id}/${item.id}` ? (
+                      {editing === `${list.id}/${item.id}` ? null : askingAbout === `${list.id}/${item.id}` ? (
                         <Box flexDirection="column">
                           <Input
                             key={`todo-ask-input-${list.id}/${item.id}`}
@@ -532,6 +563,8 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
                         <Button key={`todo-plan-${list.id}/${item.id}`} label={view.doing === `todo-plan:${list.id}/${item.id}` ? 'Sending…' : 'Plan'} onPress={() => void workFromPane($, list, item, 'plan')} />
                         <Text> </Text>
                         <Button key={`todo-start-${list.id}/${item.id}`} plain label={view.doing === `todo-start:${list.id}/${item.id}` ? 'Sending…' : 'Start'} onPress={() => void workFromPane($, list, item, 'start')} />
+                        <Text> </Text>
+                        <Button key={`todo-edit-${list.id}/${item.id}`} plain label="Edit" onPress={() => void setEditingTodo($, `${list.id}/${item.id}`)} />
                       </Box>
                       )}
                     </Box>

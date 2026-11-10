@@ -159,6 +159,7 @@ export const register: Register = (on, options) => {
   on('tool.call', { tool: 'mcp__quarterdeck-goals__todos' }, ($, e) => answerTool($, 'todos', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__quarterdeck-goals__add_todo' }, ($, e) => answerTool($, 'add_todo', e)).catch(failedTool)
   on('tool.call', { tool: 'mcp__quarterdeck-goals__complete_todo' }, ($, e) => answerTool($, 'complete_todo', e)).catch(failedTool)
+  on('tool.call', { tool: 'mcp__quarterdeck-goals__edit_todo' }, ($, e) => answerTool($, 'edit_todo', e)).catch(failedTool)
 
   // A goal run in this conversation itself (the old channel path): get_goal_brief
   // with a run_id starts it, end_run ends it. Runs in subagents are the runner's.

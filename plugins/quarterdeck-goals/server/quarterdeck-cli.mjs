@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Quarterdeck MCP server 0.12.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.13.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -2158,10 +2158,17 @@ function addTodo(db, input) {
   touchPlan(db, plan.id);
   return { listId: plan.id, itemId, created };
 }
-function setTodo(db, listId, itemId, status, notes) {
+function setTodo(db, listId, itemId, change) {
   const task = getTask(db, listId, itemId);
   if (!task) throw new Error(`To-do ${itemId} not found in list ${listId}.`);
-  updateTask(db, listId, itemId, { status, updated_at: (/* @__PURE__ */ new Date()).toISOString(), ...notes !== void 0 && { notes } });
+  const text = change.text?.trim();
+  if (change.text !== void 0 && !text) throw new Error("A to-do needs some text.");
+  updateTask(db, listId, itemId, {
+    updated_at: (/* @__PURE__ */ new Date()).toISOString(),
+    ...change.status !== void 0 && { status: change.status },
+    ...change.notes !== void 0 && { notes: change.notes },
+    ...text !== void 0 && { goal: text }
+  });
   touchPlan(db, listId);
   const t = getTask(db, listId, itemId);
   return { id: t.id, text: t.goal, status: t.status, depth: 0, notes: t.notes };
