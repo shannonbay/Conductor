@@ -6,8 +6,9 @@
  * Remote Control is connected (it skips the push while the person is at the
  * terminal or has mobile push off). A push the plugin sends itself is
  * reported as sent but never arrives (Claude Code 2.1.319), so by default the
- * alert is relayed: when the person hasn't typed for IDLE_MS, the plugin
- * submits a short prompt and Claude sends the push. From the phone, the person
+ * alert is relayed: when the person hasn't typed for IDLE_MS, and the plugin's
+ * own push doesn't answer that they're at the terminal (`user_present`), the
+ * plugin submits a short prompt and Claude sends the push. From the phone, the person
  * answers in the session ("approve it"); Claude approves with approve_item,
  * which asks them to confirm.
  */
@@ -16,6 +17,7 @@ import type { EngineInterface } from 'claude-code'
 import type { GoalCard, Snapshot } from '../types'
 import { settings } from './api'
 import { diffAlerts, statusText, type Seen } from './model'
+import { getPhone, setPhone } from './state'
 
 type $ = EngineInterface
 
@@ -212,8 +214,55 @@ export function relayPrompt(message: string): string {
   return `[Quarterdeck alert, sent automatically while you're away] Send me this phone notification with the PushNotification tool (status "proactive"), word for word, then end your turn without doing anything else:\n${message}`
 }
 
-/** Passes the alert to Claude, which sends the push; only while the person seems away. */
+type PushAnswer = { deny?: string; pushSent?: boolean; disabledReason?: string; raw: unknown }
+
+/** Claude Code's own phone push, called by the plugin. */
+async function callPush($: $, message: string): Promise<PushAnswer> {
+  const r = await $.tool.call({ tool: 'PushNotification', message, status: 'proactive' } as never) as unknown as { result?: unknown; deny?: string }
+  const res = (r.result ?? {}) as { pushSent?: boolean; disabledReason?: string }
+  return { deny: r.deny, pushSent: res.pushSent, disabledReason: res.disabledReason, raw: r.result ?? r }
+}
+
+/** The slash command that connects Remote Control, for messages and the pane's button. */
+export const REMOTE_COMMAND = 'remote-control'
+
+/**
+ * Why a relay would be a wasted turn, or null to relay. The plugin's own push
+ * is tried first: Claude Code answers it `user_present` at the terminal (seen
+ * Nov 2026, 2.1.322), `no_transport` without Remote Control and `config_off`
+ * with mobile push off, and Claude's push would be dropped for the same reason.
+ * Away and connected, the plugin's push is reported sent but doesn't arrive,
+ * so the relay still has to follow. Once it does arrive, this and the relay
+ * push twice: use `phone_push` instead then.
+ *
+ * What it learns goes to the `phone` state, which the pane shows.
+ */
+async function whyNotRelay($: $, message: string): Promise<string | null> {
+  let answer: PushAnswer
+  try {
+    answer = await callPush($, message)
+  } catch {
+    return null // can't tell: relay as before
+  }
+  if (answer.disabledReason === 'no_transport') {
+    await setPhone($, 'no_transport').catch(() => {})
+    return `not relayed (Remote Control isn't connected: run /${REMOTE_COMMAND})`
+  }
+  if (answer.disabledReason === 'config_off') {
+    await setPhone($, 'config_off').catch(() => {})
+    return 'not relayed (mobile push is off in /config)'
+  }
+  if (answer.disabledReason === 'user_present') return "not relayed (you're at the terminal)"
+  if (answer.pushSent === true) await setPhone($, 'connected').catch(() => {})
+  return null
+}
+
+/** Passes the alert to Claude, which sends the push; only while the person seems away and it can arrive. */
 async function relayToPhone($: $, message: string, now: number): Promise<string> {
+  // Asked even while the person is typing: it costs no turn, and tells the pane
+  // when alerts can't reach the phone at all
+  const blocked = await whyNotRelay($, message)
+  if (blocked) return blocked
   if (!(await isIdle($, now))) return "not relayed (you typed in the last 5 minutes)"
   try {
     await $.prompt.submit({ text: relayPrompt(message) })
@@ -229,16 +278,47 @@ async function relayToPhone($: $, message: string, now: number): Promise<string>
  */
 async function pushToPhone($: $, message: string): Promise<string> {
   try {
-    const r = await $.tool.call({ tool: 'PushNotification', message, status: 'proactive' } as never) as unknown as { result?: unknown; deny?: string }
+    const r = await callPush($, message)
     if (r.deny !== undefined) return `refused: ${r.deny}`
-    const res = (r.result ?? {}) as { pushSent?: boolean; disabledReason?: string }
-    if (res.pushSent === true) return 'sent to the phone'
-    if (res.disabledReason) return `not sent (${res.disabledReason})`
-    return `answered: ${JSON.stringify(r.result ?? r).slice(0, 200)}`
+    if (r.pushSent === true) return 'sent to the phone'
+    if (r.disabledReason) return `not sent (${r.disabledReason})`
+    return `answered: ${JSON.stringify(r.raw).slice(0, 200)}`
   } catch (err) {
     // No push in this session: the toast and notification already showed it.
     return `failed: ${err instanceof Error ? err.message : String(err)}`
   }
+}
+
+/** A message came from the phone or the web: Remote Control is connected. */
+export async function markRemote($: $): Promise<void> {
+  // Mobile push being off is a separate fault a message from the phone doesn't clear
+  if ((await getPhone($).catch(() => 'unknown')) !== 'config_off') await setPhone($, 'connected').catch(() => {})
+}
+
+/**
+ * The pane's Connect: runs /remote-control as if the person typed it. Answers
+ * an error to show, or null. Whether it connected isn't known until the next
+ * alert or a message from the phone, so the pane's line just goes.
+ */
+export async function connectRemote($: $): Promise<string | null> {
+  try {
+    const commands = await $.command.list()
+    if (!commands.some((c) => c.name === REMOTE_COMMAND)) return `This session has no /${REMOTE_COMMAND} command: phone alerts need Remote Control.`
+    await $.command.run({ command: REMOTE_COMMAND })
+    await setPhone($, 'unknown')
+    return null
+  } catch (err) {
+    return `Couldn't start Remote Control (${err instanceof Error ? err.message : String(err)}): type /${REMOTE_COMMAND}.`
+  }
+}
+
+/** One sentence for a new goal's message, while the phone isn't known to be reachable. */
+export async function phoneHint($: $): Promise<string> {
+  if (settings.alerts === 'off' || (!settings.phoneRelay && !settings.phonePush)) return ''
+  const state = await getPhone($).catch(() => 'unknown' as const)
+  if (state === 'connected') return ''
+  if (state === 'config_off') return ' To hear on your phone when it needs you, turn mobile push on in /config.'
+  return ` To hear on your phone when it needs you, connect Remote Control in this session (/${REMOTE_COMMAND}).`
 }
 
 export function showStatus($: $, s: Snapshot): void {

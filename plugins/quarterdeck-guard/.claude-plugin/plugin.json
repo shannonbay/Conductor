@@ -1,6 +1,6 @@
 {
   "name": "quarterdeck-guard",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "license": "Apache-2.0",
   "description": "Guards the Quarterdeck goal runs that quarterdeck-goals starts: each run acts on its own goal, stays within the goal's autonomy, and keeps its report out of your chat"
 }

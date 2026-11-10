@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.13.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.14.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -21321,7 +21321,8 @@ function buildOverview(db2, detail = "all") {
         started_at: r.started_at,
         ended_at: r.ended_at,
         agent_id: r.agent_id,
-        tokens: r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens,
+        // New tokens only: every model call re-reads the cached prompt, so cache reads would swamp the total
+        tokens: r.input_tokens + r.output_tokens + r.cache_write_tokens,
         model: r.model
       })),
       needs_you: open.filter((t) => t.review_requested_at).map(overviewItem),

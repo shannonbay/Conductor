@@ -12,7 +12,7 @@ import { kick } from './runner'
 import { askSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
 import { act, refresh, refreshTodos } from './sync'
-import { readLastAlert, readLastPoll, readTrace } from './alerts'
+import { phoneHint, readLastAlert, readLastPoll, readTrace } from './alerts'
 import { CV_FIND, CV_QUESTION, CV_SKIP, cvInstructions, FIRST_CHOICES, MORE, TEMPLATES } from './templates'
 
 type $ = EngineInterface
@@ -335,7 +335,7 @@ async function newFromTemplate($: $): Promise<string> {
   }
   await kick($)
   await refresh($)
-  return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute. It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.`
+  return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute. It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`
 }
 
 /**
@@ -358,9 +358,9 @@ export async function newGoal($: $, args: string): Promise<string> {
   await kick($) // a new interval or a one-off has a run due now
   await refresh($)
   const where = `in ${cwd}`
-  if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.`
-  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.`
-  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.`
+  if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${await phoneHint($)}`
+  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${await phoneHint($)}`
+  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${await phoneHint($)}`
 }
 
 /** Sets the schedule through the pane's action wrapper and says what happens next. */

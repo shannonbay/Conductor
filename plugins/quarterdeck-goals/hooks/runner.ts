@@ -22,7 +22,10 @@ const ENDED = new Set(['completed', 'failed', 'killed'])
 
 /** The tool the quarterdeck-guard plugin registers; without it no run is started. */
 export const GUARD_TOOL = 'mcp__quarterdeck-guard__status'
-export const GUARD_MISSING = 'Goal runs are paused: install the quarterdeck-guard plugin (it keeps runs within their goal), then /reload-plugins.'
+export const GUARD_MISSING = "Goal runs are paused: the quarterdeck-guard plugin (it keeps runs within their goal) isn't loaded. Run /reload-plugins; if this stays, install it with: claude plugin install quarterdeck-guard@quarterdeck"
+/** At start-up and after /reload-plugins the guard's tool can register a moment after ours: say nothing until it has been missing this long. */
+export const GUARD_GRACE_MS = 10_000
+const GUARD_RECHECK_MS = 2_000
 
 /** Quarterdeck tools a run's agent must never call: the human's and the plugin's own (under both server prefixes). */
 export const HUMAN_ONLY_TOOLS = serverToolNames(
@@ -63,9 +66,15 @@ export async function registerRunnerAgent($: $): Promise<void> {
 
 let timer: { cancel: () => void } | null = null
 let ticking: Promise<void> | null = null
+/** When the guard was first found missing, and the early look that follows (the next tick is up to 30 s away). */
+let guardMissingSince: number | null = null
+let recheck: { cancel: () => void } | null = null
 
 export function startRunner($: $): void {
   timer?.cancel()
+  recheck?.cancel()
+  recheck = null
+  guardMissingSince = null
   timer = $.clock.every(TICK_MS, () => void runPass($))
   void runPass($)
 }
@@ -74,6 +83,8 @@ export function startRunner($: $): void {
 export async function stopRunner($: $): Promise<void> {
   timer?.cancel()
   timer = null
+  recheck?.cancel()
+  recheck = null
   await releaseLease($, await $.session.id()).catch(() => { /* the server may already be gone */ })
 }
 
@@ -95,7 +106,16 @@ async function pass($: $): Promise<void> {
   // Unguarded runs could act outside their goal: start none without the guard plugin.
   // Checked every pass, so the pane's warning goes as soon as the guard loads.
   const guarded = (await $.tool.list()).some((t) => t.name === GUARD_TOOL)
-  await setGuardMissing($, !guarded)
+  recheck?.cancel()
+  recheck = null
+  if (guarded) guardMissingSince = null
+  else {
+    // Still loading, most likely: look again shortly, and warn only once the grace has passed
+    const now = await $.clock.now()
+    guardMissingSince ??= now
+    if (now - guardMissingSince < GUARD_GRACE_MS) recheck = $.clock.after(GUARD_RECHECK_MS, () => void runPass($))
+  }
+  await setGuardMissing($, guardMissingSince !== null && (await $.clock.now()) - guardMissingSince >= GUARD_GRACE_MS)
   // 0.3.0 kept this warning in the action notice, where nothing cleared it
   if (guarded && (await getNotice($)) === GUARD_MISSING) await setNotice($, null)
   if (!guarded) return

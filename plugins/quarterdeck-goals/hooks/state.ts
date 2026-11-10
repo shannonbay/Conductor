@@ -6,7 +6,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { ActiveRun, Confirm, RunEntry, Snapshot, Todos } from '../types'
+import type { ActiveRun, Confirm, PhoneState, RunEntry, Snapshot, Todos } from '../types'
 import { EMPTY } from './model'
 
 type $ = EngineInterface
@@ -17,6 +17,7 @@ const snapshot = atom({ plugin: 'quarterdeck-goals', key: 'snapshot' } as const,
 const rejecting = atom({ plugin: 'quarterdeck-goals', key: 'rejecting' } as const, null)
 const addingTo = atom({ plugin: 'quarterdeck-goals', key: 'addingTo' } as const, null)
 const askingAbout = atom({ plugin: 'quarterdeck-goals', key: 'askingAbout' } as const, null)
+const discussing = atom({ plugin: 'quarterdeck-goals', key: 'discussing' } as const, null)
 const editingTodo = atom({ plugin: 'quarterdeck-goals', key: 'editingTodo' } as const, null)
 const busy = atom({ plugin: 'quarterdeck-goals', key: 'busy' } as const, null)
 const notice = atom({ plugin: 'quarterdeck-goals', key: 'notice' } as const, null)
@@ -26,6 +27,15 @@ const activeRun = atom({ plugin: 'quarterdeck-goals', key: 'activeRun' } as cons
 const runs = atom({ plugin: 'quarterdeck-goals', key: 'runs' } as const, {})
 const guardMissing = atom({ plugin: 'quarterdeck-goals', key: 'guardMissing' } as const, false)
 const todos = atom({ plugin: 'quarterdeck-goals', key: 'todos' } as const, null)
+const phone = atom({ plugin: 'quarterdeck-goals', key: 'phone' } as const, 'unknown')
+
+export async function getPhone($: $): Promise<PhoneState> {
+  return read($, phone)
+}
+/** Writes only on a change, so the pane redraws only when it does. */
+export async function setPhone($: $, value: PhoneState): Promise<void> {
+  if ((await read($, phone)) !== value) await update($, phone, () => value)
+}
 
 export async function getSnapshot($: $): Promise<Snapshot> {
   return read($, snapshot)
@@ -116,6 +126,13 @@ export async function getAskingAbout($: $): Promise<string | null> {
 }
 export async function setAskingAbout($: $, value: string | null): Promise<void> {
   await update($, askingAbout, () => value)
+}
+
+export async function getDiscussing($: $): Promise<string | null> {
+  return read($, discussing)
+}
+export async function setDiscussing($: $, value: string | null): Promise<void> {
+  await update($, discussing, () => value)
 }
 
 export async function getEditingTodo($: $): Promise<string | null> {

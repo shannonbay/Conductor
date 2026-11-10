@@ -6,7 +6,7 @@
  */
 import type { EngineInterface, Register } from 'claude-code'
 
-import { resetAlerts, markActive } from './alerts'
+import { resetAlerts, markActive, markRemote } from './alerts'
 import { configure } from './api'
 import { ago } from './model'
 import { renderPane } from './pane'
@@ -92,6 +92,7 @@ export const register: Register = (on, options) => {
     // The person typed (or sent from the phone): no phone relay for a while. Task
     // notifications and other automatic prompts don't count.
     if (byPerson(e.origin)) void $.clock.now().then((t) => markActive($, t))
+    if (e.origin?.kind === 'bridge') void markRemote($)
     return next(e)
   }).catch(passOn)
 
@@ -100,6 +101,7 @@ export const register: Register = (on, options) => {
   on('session.receive', async ($, e, next) => {
     await safeStart($, false)
     if (!e.agentId && byPerson(e.origin)) void $.clock.now().then((t) => markActive($, t))
+    if (!e.agentId && e.origin?.kind === 'bridge') void markRemote($)
     return next(e)
   }).catch(passOn)
 
@@ -107,7 +109,12 @@ export const register: Register = (on, options) => {
     stopPolling()
     await stopRunner($)
     started = false
-    return next(e)
+    const result = await next(e)
+    // /clear and a resume end the session but not the process: it goes on under a new
+    // session id with fresh state and no session.start, so start again here. Without
+    // this the pane said "isn't connected" and no goal run started until the next prompt.
+    if (e.reason === 'clear' || e.reason === 'resume') void safeStart($, false)
+    return result
   }).catch(passOn)
 
   // Goal runs: the runner's agent type is the plugin's alone. What a run may do

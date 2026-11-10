@@ -41,13 +41,13 @@ failing 18 ▁▃▅█
 [Approve] [Reject…]
 Cancel run  Pause
 
-Updated just now  Refresh
+Last change just now  Refresh
 ```
 
 - Under each goal's name is one line saying what its agent is doing. While a run is going, that's the agent's latest step: a progress update, an item it added or finished, or a note it saved. Otherwise it says the run is queued, the goal is paused, what the next run will carry out, or the last run's summary. Claude's `goals_status` tool reports the same line.
-- Below that: the last run, what it used (`· 48k tokens · 2m`: all tokens the run's agent used, cached ones included, and how long it took) and when the next automatic one is due (`· next in 12m`), `· one-off`, or `· no schedule` with a **Set schedule** button (it suggests one, as `/goal-new` does).
+- Below that: the last run, what it used (`· 48k tokens · 2m`: the new tokens the run's agent used, not counting re-reads of the cached prompt, and how long it took) and when the next automatic one is due (`· next in 12m`), `· one-off`, or `· no schedule` with a **Set schedule** button (it suggests one, as `/goal-new` does).
 - **Your to-do lists** for this project, each collapsed to its name and count (see below).
-- **Discuss**: next to a goal whose last run failed, and in every expanded goal (the goal as a whole, or each run). It brings that goal or run into this conversation: its summary, and the run's agent id so Claude can read what the run actually did. Then talk it over, and Claude makes any changes you agree with `update_goal` (below), asking you to confirm each one.
+- **Discuss**: next to a goal whose last run failed, and in every expanded goal (the goal as a whole, or each run). It brings that goal or run into this conversation: its summary, and the run's agent id so Claude can read what the run actually did. In an expanded goal, "Discuss this goal…" and "Discuss this run…" first open a box for your question; Enter on an empty box asks the usual one (what's working, or why the run failed). Then talk it over, and Claude makes any changes you agree with `update_goal` (below), asking you to confirm each one.
 - While your Claude usage limit is reached, a line says goal runs are on hold until it resets. A run that hit the limit is recorded as skipped, not failed, and due runs start after the reset.
 - **Done (n)** at the bottom, collapsed: one-off goals that have finished, each with its last run's summary and **Run again**.
 - **Approve** or **Reject…** each proposal. Rejecting asks what should change, and your answer is saved to the goal's memory.
@@ -110,7 +110,7 @@ Ask things like "what do my goals need?" or "approve the Alice reply".
 - A toast appears for each new proposal or failed run. If several arrive at once, they become one toast.
 - With system notifications on, you also get a notification through your Claude Code notification channel, at most once a minute per goal.
 - **Questions from a run:** when a run needs something only you can give or do (which job sites, connecting Gmail, allowing a site in Chrome), it asks under **Needs you** with **Answer…** and **Done**, and alerts you like a proposal. Your answer goes to the goal's memory and the run carries on. From the conversation, just reply; Claude answers it with `answer_item`.
-- **On your phone:** with Remote Control connected and mobile push on in `/config`, an alert reaches the Claude app when you haven't typed (at the terminal or from the phone) for 5 minutes. The plugin passes it to Claude, which sends the push; reply "approve" or "reject, because ..." in the session, and confirm. Each relayed alert is a short turn. (A push the plugin sends itself is reported as sent but doesn't arrive in Claude Code 2.1.319, so that path, the `phone_push` setting, is off until it's fixed.) `goals_status` shows what happened to the last alert and its push.
+- **On your phone:** with Remote Control connected and mobile push on in `/config`, an alert reaches the Claude app when you haven't typed (at the terminal or from the phone) for 5 minutes. The plugin passes it to Claude, which sends the push; reply "approve" or "reject, because ..." in the session, and confirm. Each relayed alert is a short turn, so the plugin first tries the push itself: if Claude Code answers that you're at the terminal, that Remote Control isn't connected or that mobile push is off, nothing is relayed (the toast already told you). In the last two cases the pane says alerts can't reach your phone, with **Connect** to run `/remote-control`; a new goal's message reminds you too, until a message from your phone shows it's connected. (A push the plugin sends itself is reported as sent but doesn't arrive in Claude Code 2.1.319, so that path, the `phone_push` setting, is off until it's fixed.) `goals_status` shows what happened to the last alert and its push.
 - While goal runs are going, a band above the prompt shows which (`● Goal run: Inbox · in the background`).
 
 ## Settings

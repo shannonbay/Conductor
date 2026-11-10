@@ -1,8 +1,10 @@
 # Quarterdeck
 
-A personal assistant that lives in Claude Code: it keeps looking after the things you hand it, asks before it does anything you haven't allowed, and remembers what you decided.
+Quarterdeck turns Claude Code into a captain's mate with standing orders: a personal assistant that keeps looking after the things you hand it, asks before it does anything you haven't allowed, and remembers what you decided.
 
 You give it **goals**, things you want kept true: "unsubscribe me from mailing lists I never read", "find me the three best new job ads each week", "keep my GitHub profile up to date", "clear old installers out of Downloads". Each goal runs on its own schedule in the background of your Claude Code session, on your Claude plan. When it wants to act, it proposes, and you approve or reject from the **Goals pane** beside your chat, or from your phone.
+
+The idea behind it: persistent intent may matter more than persistent memory.
 
 ![The Goals pane: five goals with their last and next runs and Reschedule, Run now and Pause, then the to-do lists, with an expanded to-do showing Ask, Plan and Start](docs/goals-pane.png)
 

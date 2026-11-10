@@ -112,6 +112,14 @@ export type RunEntry = {
   maxMinutes: number
 }
 
+/**
+ * Whether alerts can reach the person's phone from this session, as far as the
+ * plugin has seen: `connected` after a message from the phone or a push that
+ * went out, `no_transport` when Remote Control isn't connected, `config_off`
+ * when mobile push is off in /config.
+ */
+export type PhoneState = 'unknown' | 'connected' | 'no_transport' | 'config_off'
+
 declare module 'claude-code' {
   interface PluginState {
     'quarterdeck-goals': {
@@ -122,6 +130,8 @@ declare module 'claude-code' {
       addingTo: string | null
       /** "<listId>/<itemId>" while that to-do's question box is open. */
       askingAbout: string | null
+      /** "goal:<goalId>" or "run:<runId>" while that Discuss question box is open. */
+      discussing: string | null
       /** "<listId>/<itemId>" while that to-do's edit box is open. */
       editingTodo: string | null
       /** The action a button is doing, e.g. "approve:g1/11" or "run:g1". */
@@ -138,6 +148,8 @@ declare module 'claude-code' {
       guardMissing: boolean
       /** The person's to-do lists for this session's project. */
       todos: Todos | null
+      /** Whether phone alerts can get through, learned from the last push and from messages sent from the phone. */
+      phone: PhoneState
     }
   }
 }

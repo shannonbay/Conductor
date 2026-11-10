@@ -55,7 +55,8 @@ async function load($: $): Promise<Snapshot> {
     }
   } catch (err) {
     failures += 1
-    next = { ...previous, reachable: false, error: err instanceof Error ? err.message : String(err), fetchedAt: now, etag: null }
+    // fetchedAt stays: it dates the goals still shown, not this failed read
+    next = { ...previous, reachable: false, error: err instanceof Error ? err.message : String(err), etag: null }
   }
   await setSnapshot($, next)
   showStatus($, next)

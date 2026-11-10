@@ -384,16 +384,26 @@ export function splitGoalArgs(args: string): { name: string | null; objective: s
 
 // ── Discussing and changing goals ─────────────────────────────────────────────
 
-/** The prompt that brings a goal (or one of its runs) into the conversation to talk it over. */
-export function discussPrompt(g: GoalCard, run?: GoalCard['runs'][number]): string {
+/**
+ * The prompt that brings a goal (or one of its runs) into the conversation to
+ * talk it over. The person's own question, when they typed one, takes the
+ * place of the usual one.
+ */
+export function discussPrompt(g: GoalCard, run?: GoalCard['runs'][number], question?: string): string {
   const how = 'Read its settings, items, runs and memory with goal_detail. If we agree on changes, make them with update_goal or set_schedule: they ask me to confirm.'
+  const asked = question?.trim()
   if (!run) {
-    return `Let's talk about my goal "${g.name}" (id ${g.id}). ${how} What's working, what isn't, and what would you change?`
+    return asked
+      ? `Let's talk about my goal "${g.name}" (id ${g.id}). ${how}\n\nMy question: ${asked}`
+      : `Let's talk about my goal "${g.name}" (id ${g.id}). ${how} What's working, what isn't, and what would you change?`
   }
   const when = `${run.status} (${run.trigger}), ${run.endedAt ?? run.startedAt}`
   const transcript = run.agentId
     ? ` Its agent was ${run.agentId}: its transcript (agent-${run.agentId}.jsonl, under ~/.claude/projects) shows what it actually did.`
     : ''
+  if (asked) {
+    return `Let's talk about this run of my goal "${g.name}" (goal ${g.id}, run ${run.id}): ${when}.\n\nIts summary: ${run.summary ?? '(none)'}\n\n${`${transcript} ${how}`.trim()}\n\nMy question: ${asked}`
+  }
   return `Let's talk about this run of my goal "${g.name}" (goal ${g.id}, run ${run.id}): ${when}.\n\nIts summary: ${run.summary ?? '(none)'}\n\n${isFailed(run.status) ? 'Why did it fail, and what should change so it doesn\'t again?' : 'Is this what should have happened, and what should change?'}${transcript} ${how}`
 }
 
@@ -429,7 +439,7 @@ export function holdUntilText(until: string, now: number): string {
   return new Date(now).toDateString() === d.toDateString() ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
 }
 
-/** "48k tokens · 2m": what a finished run used, and how long it took; '' when unknown. */
+/** "48k tokens · 2m": the new tokens a finished run used (no cache reads), and how long it took; '' when unknown. */
 export function runCost(run: { tokens?: number; startedAt: string; endedAt: string | null }): string {
   const parts: string[] = []
   const t = run.tokens ?? 0
