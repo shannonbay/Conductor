@@ -118,6 +118,8 @@ declare module 'claude-code' {
       rejecting: string | null
       /** The to-do list whose add box is open. */
       addingTo: string | null
+      /** "<listId>/<itemId>" while that to-do's question box is open. */
+      askingAbout: string | null
       /** The action a button is doing, e.g. "approve:g1/11" or "run:g1". */
       busy: string | null
       /** The last action's error, shown at the bottom of the pane. */

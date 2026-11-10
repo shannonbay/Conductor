@@ -14,7 +14,7 @@ import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, runCost, scheduleLabel, spark } from './model'
 import { sendToChat } from './chat'
-import { getAddingTo, getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setConfirm, setRejecting, toggleExpanded } from './state'
+import { getAddingTo, getAskingAbout, getBusy, getConfirm, getExpanded, getGuardMissing, getNotice, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
@@ -49,6 +49,7 @@ export async function renderPane($: $, e: E) {
   const guardMissing = await getGuardMissing($)
   const todos = await getTodos($)
   const addingTo = await getAddingTo($)
+  const askingAbout = await getAskingAbout($)
 
   if (!s.reachable && s.goals.length === 0) {
     return (
@@ -95,7 +96,7 @@ export async function renderPane($: $, e: E) {
         </Box>
       )}
       {current.map((g, i) => goalCard($, e, view, g, i))}
-      {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo)}
+      {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo, askingAbout)}
       {done.length > 0 && doneSection($, e, view, done)}
       {message && <Text color="red">{message}</Text>}
       <Box>
@@ -470,10 +471,11 @@ function doneSection($: $, e: E, view: View, done: GoalCard[]) {
 /**
  * The person's to-do lists, each collapsed to its name and open count. Open,
  * a list shows its to-dos: ☐ ticks one off, pressing the text expands it (the
- * full text, Ask, Plan and Start), and "n done" shows the ticked ones, each of
- * which goes back on the list when pressed.
+ * full text, Ask…, Plan and Start), and "n done" shows the ticked ones, each of
+ * which goes back on the list when pressed. Ask… opens a box for the person's
+ * question; Enter on an empty box asks for Claude's opinion.
  */
-function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | null) {
+function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | null, askingAbout: string | null) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   return (
     <Box key="todos" flexDirection="column" marginBottom={1}>
@@ -509,14 +511,28 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
                     <Box flexDirection="column">
                       <Text>{indent}    {item.text}</Text>
                       {item.notes && <Text dimColor>{indent}    {item.notes}</Text>}
+                      {askingAbout === `${list.id}/${item.id}` ? (
+                        <Box flexDirection="column">
+                          <Input
+                            key={`todo-ask-input-${list.id}/${item.id}`}
+                            label="Your question"
+                            placeholder="type a question, or Enter for my opinion"
+                            submitLabel={view.doing === `todo-ask:${list.id}/${item.id}` ? 'Asking…' : 'Ask'}
+                            autoFocus
+                            onSubmit={(text: string) => void askFromPane($, list, item, text)}
+                          />
+                          <Button key={`todo-ask-cancel-${list.id}/${item.id}`} label="Cancel" plain onPress={() => void setAskingAbout($, null)} />
+                        </Box>
+                      ) : (
                       <Box>
                         <Text>{indent}    </Text>
-                        <Button key={`todo-ask-${list.id}/${item.id}`} plain label={view.doing === `todo-ask:${list.id}/${item.id}` ? 'Asking…' : 'Ask'} onPress={() => void askFromPane($, list, item)} />
+                        <Button key={`todo-ask-${list.id}/${item.id}`} plain label="Ask…" onPress={() => void setAskingAbout($, `${list.id}/${item.id}`)} />
                         <Text> </Text>
                         <Button key={`todo-plan-${list.id}/${item.id}`} label={view.doing === `todo-plan:${list.id}/${item.id}` ? 'Sending…' : 'Plan'} onPress={() => void workFromPane($, list, item, 'plan')} />
                         <Text> </Text>
                         <Button key={`todo-start-${list.id}/${item.id}`} plain label={view.doing === `todo-start:${list.id}/${item.id}` ? 'Sending…' : 'Start'} onPress={() => void workFromPane($, list, item, 'start')} />
                       </Box>
+                      )}
                     </Box>
                   )}
                 </Box>

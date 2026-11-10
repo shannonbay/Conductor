@@ -16,6 +16,7 @@ export const PANE = 'conductor-goals'
 const snapshot = atom({ plugin: 'conductor-goals', key: 'snapshot' } as const, EMPTY, { shape: 'snapshot-5' })
 const rejecting = atom({ plugin: 'conductor-goals', key: 'rejecting' } as const, null)
 const addingTo = atom({ plugin: 'conductor-goals', key: 'addingTo' } as const, null)
+const askingAbout = atom({ plugin: 'conductor-goals', key: 'askingAbout' } as const, null)
 const busy = atom({ plugin: 'conductor-goals', key: 'busy' } as const, null)
 const notice = atom({ plugin: 'conductor-goals', key: 'notice' } as const, null)
 const expanded = atom({ plugin: 'conductor-goals', key: 'expanded' } as const, [])
@@ -107,4 +108,11 @@ export async function getAddingTo($: $): Promise<string | null> {
 }
 export async function setAddingTo($: $, value: string | null): Promise<void> {
   await update($, addingTo, () => value)
+}
+
+export async function getAskingAbout($: $): Promise<string | null> {
+  return read($, askingAbout)
+}
+export async function setAskingAbout($: $, value: string | null): Promise<void> {
+  await update($, askingAbout, () => value)
 }

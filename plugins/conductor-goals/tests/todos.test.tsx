@@ -118,23 +118,35 @@ test("Claude's to-do tools: list, add (as the agent), tick off", async ($, on) =
   expect(String(nope.result)).toContain('No list "nowhere"')
 })
 
-test('Ask sends a question about the to-do, or adds it to a draft the person has started', async ($, on) => {
-  const { prompts, box, toasts } = engine(on)
+test('Ask opens a box for a question; empty asks for an opinion; Cancel sends nothing', async ($, on) => {
+  const { prompts } = engine(on)
   const fake = fakeConductor(on, [], { todos: [roadmap()] })
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'todo-toggle-p1' })
   await ui.press({ key: 'todo-open-p1/1.3' })
 
+  expect(await ui.find({ key: 'todo-ask-input-p1/1.3' })).toBeUndefined()
   await ui.press({ key: 'todo-ask-p1/1.3' })
-  expect(prompts).toEqual([expect.stringContaining('What do you think of to-do 1.3 on my list "Goals roadmap"?')])
+  expect(prompts).toEqual([]) // nothing sent until the question is
+  expect((await ui.find({ key: 'todo-ask-input-p1/1.3' }))?.props).toMatchObject({ autoFocus: true, label: 'Your question' })
+  await ui.input({ key: 'todo-ask-input-p1/1.3', text: 'Is this worth doing before 1.6' })
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('About to-do 1.3 on my list "Goals roadmap":')
+  expect(prompts[0]).toContain('Set autonomy from Claude Code')
+  expect(prompts[0]).toContain('My question: Is this worth doing before 1.6')
   expect(prompts[0]).toContain("Don't change anything or start work on it.")
   expect(fake.of('todo_set')).toEqual([]) // asking isn't starting
+  expect(await ui.find({ key: 'todo-ask-input-p1/1.3' })).toBeUndefined() // closes after sending
 
-  box.draft = 'Is this worth doing before 1.6'
   await ui.press({ key: 'todo-ask-p1/1.3' })
-  expect(prompts).toHaveLength(1)
-  expect(box.draft).toBe('Is this worth doing before 1.6 (about to-do 1.3 on "Goals roadmap": Set autonomy from Claude Code)')
-  expect(toasts.at(-1)).toBe('Added to your prompt: press Enter to send it.')
+  await ui.input({ key: 'todo-ask-input-p1/1.3', text: '' })
+  expect(prompts).toHaveLength(2)
+  expect(prompts[1]).toContain('What do you think of to-do 1.3 on my list "Goals roadmap"?')
+
+  await ui.press({ key: 'todo-ask-p1/1.3' })
+  await ui.press({ key: 'todo-ask-cancel-p1/1.3' })
+  expect(await ui.find({ key: 'todo-ask-input-p1/1.3' })).toBeUndefined()
+  expect(prompts).toHaveLength(2)
   await ui.unmount()
 })

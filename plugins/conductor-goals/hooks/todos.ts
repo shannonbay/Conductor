@@ -11,7 +11,7 @@ import type { TodoItem, TodoList } from '../types'
 import { addTodo, fetchTodos, setTodo } from './api'
 import { clip } from './model'
 import { act, refresh, refreshTodos } from './sync'
-import { sendToChat } from './chat'
+import { setAskingAbout } from './state'
 
 type $ = EngineInterface
 
@@ -64,7 +64,10 @@ export async function todoCommand($: $, args: string): Promise<string> {
  * on a to-do happens here, where Claude can ask questions, not in a
  * background run (background runs are for goals).
  */
-export function todoPrompt(list: TodoList, item: TodoItem, mode: 'plan' | 'start' | 'ask'): string {
+export function todoPrompt(list: TodoList, item: TodoItem, mode: 'plan' | 'start' | 'ask', question?: string): string {
+  if (mode === 'ask' && question?.trim()) {
+    return `About to-do ${item.id} on my list "${list.name}":\n\n${item.text}${item.notes ? `\n\n(Notes: ${item.notes})` : ''}\n\nMy question: ${question.trim()}\n\nAnswer it. Don't change anything or start work on it.`
+  }
   if (mode === 'ask') {
     return `What do you think of to-do ${item.id} on my list "${list.name}"?\n\n${item.text}${item.notes ? `\n\n(Notes: ${item.notes})` : ''}\n\nGive me your opinion and the trade-offs. Don't change anything or start work on it.`
   }
@@ -82,12 +85,11 @@ export async function workOnTodo($: $, list: TodoList, item: TodoItem, mode: 'pl
 }
 
 /**
- * Ask: Claude's opinion on a to-do, with nothing changed. Sent at once, unless
- * the person has started typing in the prompt box: then the to-do is added to
- * their draft, so they can ask their own question about it.
+ * Ask: the person's question about a to-do (typed in the pane's box), or
+ * Claude's opinion when they leave it empty. Nothing is changed or started.
  */
-export function askAboutTodo($: $, list: TodoList, item: TodoItem): Promise<'sent' | 'added'> {
-  return sendToChat($, todoPrompt(list, item, 'ask'), `about to-do ${item.id} on "${list.name}": ${item.text}`)
+export async function askAboutTodo($: $, list: TodoList, item: TodoItem, question?: string): Promise<void> {
+  await $.prompt.submit({ text: todoPrompt(list, item, 'ask', question) })
 }
 
 /** The pane's actions, through the shared busy/notice/re-read wrapper. */
@@ -100,8 +102,11 @@ export async function toggleTodo($: $, list: TodoList, item: TodoItem): Promise<
 export function addFromPane($: $, dir: string, list: TodoList, text: string): Promise<boolean> {
   return act($, `todo-add:${list.id}`, 'add the to-do', async () => void (await addTodo($, { dir, text, listId: list.id })))
 }
-export function askFromPane($: $, list: TodoList, item: TodoItem): Promise<boolean> {
-  return act($, `todo-ask:${list.id}/${item.id}`, 'ask about it', async () => void (await askAboutTodo($, list, item)))
+/** Sends the question and closes the box. */
+export async function askFromPane($: $, list: TodoList, item: TodoItem, question: string): Promise<boolean> {
+  const ok = await act($, `todo-ask:${list.id}/${item.id}`, 'ask about it', () => askAboutTodo($, list, item, question))
+  if (ok) await setAskingAbout($, null)
+  return ok
 }
 export function workFromPane($: $, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<boolean> {
   return act($, `todo-${mode}:${list.id}/${item.id}`, mode === 'plan' ? 'plan it' : 'start it', () => workOnTodo($, list, item, mode))
