@@ -52,6 +52,16 @@ export async function renderPane($: $, e: E) {
   const askingAbout = await getAskingAbout($)
   const editing = await getEditingTodo($)
 
+  // Not read yet (a new session, or just after /clear): that is not a failed connection
+  if (!s.reachable && s.fetchedAt === 0 && !s.error) {
+    return (
+      <Box flexDirection="column">
+        <Text dimColor>Reading your goals…</Text>
+        <Button key="retry" label="Refresh" hotkey="g" onPress={() => void refresh($)} />
+      </Box>
+    )
+  }
+
   if (!s.reachable && s.goals.length === 0) {
     return (
       <Box flexDirection="column">

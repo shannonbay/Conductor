@@ -152,6 +152,37 @@ test('without the quarterdeck MCP server the pane says how to connect it', async
   }
 })
 
+test('after /clear the plugin starts again: the pane still shows the goals and polling goes on', async ($, on) => {
+  on('session.end', () => ({ sessionId: 'test-session' }) as never)
+  const { clock } = engine(on)
+  const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })])
+  await $.session.start(START)
+  const before = fake.of('goals_overview').length
+
+  await $.session.end({ reason: 'clear' } as never) // no session.start follows a /clear
+  await clock.settle()
+  expect(fake.of('goals_overview').length).toBeGreaterThan(before)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /isn't connected/ })).toBeUndefined()
+  expect(await ui.find({ key: 'toggle-g1' })).toBeDefined()
+  await ui.unmount()
+
+  const read = fake.of('goals_overview').length
+  await clock.advance(15_000)
+  await clock.settle()
+  expect(fake.of('goals_overview').length).toBeGreaterThan(read)
+})
+
+test('a pane drawn before the first read says it is reading, not that Quarterdeck is disconnected', async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })])
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Reading your goals/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /isn't connected/ })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('a blank pane welcomes a new user and shows /goal-new and /todo', async ($, on) => {
   engine(on)
   fakeQuarterdeck(on, [])

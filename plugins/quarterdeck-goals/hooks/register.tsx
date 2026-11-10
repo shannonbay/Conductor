@@ -107,7 +107,12 @@ export const register: Register = (on, options) => {
     stopPolling()
     await stopRunner($)
     started = false
-    return next(e)
+    const result = await next(e)
+    // /clear and a resume end the session but not the process: it goes on under a new
+    // session id with fresh state and no session.start, so start again here. Without
+    // this the pane said "isn't connected" and no goal run started until the next prompt.
+    if (e.reason === 'clear' || e.reason === 'resume') void safeStart($, false)
+    return result
   }).catch(passOn)
 
   // Goal runs: the runner's agent type is the plugin's alone. What a run may do
