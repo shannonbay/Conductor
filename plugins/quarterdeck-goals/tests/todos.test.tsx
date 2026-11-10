@@ -118,6 +118,45 @@ test("Claude's to-do tools: list, add (as the agent), tick off", async ($, on) =
   expect(String(nope.result)).toContain('No list "nowhere"')
 })
 
+test("edit_todo rewords a to-do as the agent and shows the old wording", async ($, on) => {
+  const { toasts } = engine(on)
+  const fake = fakeQuarterdeck(on, [], { todos: [roadmap()] })
+  await $.session.start(START)
+  const r = await $.tool.call({ tool: 'mcp__quarterdeck-goals__edit_todo', item: '1.3', text: 'Set autonomy from the pane' } as never)
+  expect(String(r.result)).toBe('Reworded 1.3: Set autonomy from the pane (it said: Set autonomy from Claude Code)')
+  expect(fake.of('todo_set').at(-1)?.input).toMatchObject({ list_id: 'p1', item_id: '1.3', text: 'Set autonomy from the pane', changed_by: 'agent' })
+  expect(fake.of('todo_set').at(-1)?.input).not.toHaveProperty('status')
+  expect(toasts.at(-1)).toContain('It said: Set autonomy from Claude Code')
+  const empty = await $.tool.call({ tool: 'mcp__quarterdeck-goals__edit_todo', item: '1.3', text: '  ' } as never)
+  expect(String(empty.result)).toContain('needs some text')
+})
+
+test('Edit opens a box holding the to-do; Save rewords it, Cancel and unchanged text change nothing', async ($, on) => {
+  const { toasts } = engine(on)
+  const fake = fakeQuarterdeck(on, [], { todos: [roadmap()] })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo-toggle-p1' })
+  await ui.press({ key: 'todo-open-p1/1.3' })
+
+  await ui.press({ key: 'todo-edit-p1/1.3' })
+  expect((await ui.find({ key: 'todo-edit-input-p1/1.3' }))?.props).toMatchObject({ autoFocus: true, value: 'Set autonomy from Claude Code' })
+  await ui.press({ key: 'todo-edit-cancel-p1/1.3' })
+  expect(await ui.find({ key: 'todo-edit-input-p1/1.3' })).toBeUndefined()
+
+  await ui.press({ key: 'todo-edit-p1/1.3' })
+  await ui.input({ key: 'todo-edit-input-p1/1.3', text: 'Set autonomy from Claude Code' })
+  expect(fake.of('todo_set')).toHaveLength(0)
+
+  await ui.press({ key: 'todo-edit-p1/1.3' })
+  await ui.input({ key: 'todo-edit-input-p1/1.3', text: 'Set autonomy from the pane ' })
+  expect(fake.of('todo_set').at(-1)?.input).toMatchObject({ text: 'Set autonomy from the pane', changed_by: 'human' })
+  expect(toasts.at(-1)).toContain('It said: Set autonomy from Claude Code')
+  expect(await ui.find({ key: 'todo-edit-input-p1/1.3' })).toBeUndefined()
+  expect((await ui.find({ key: 'todo-open-p1/1.3' }))?.props.label).toBeDefined()
+  await ui.unmount()
+})
+
 test('Ask opens a box for a question; empty asks for an opinion; Cancel sends nothing', async ($, on) => {
   const { prompts } = engine(on)
   const fake = fakeQuarterdeck(on, [], { todos: [roadmap()] })

@@ -6,8 +6,8 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
-import { addTodo, answerItem, approve, createGoal, fetchOverview, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
-import { ago, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
+import { addTodo, answerItem, approve, createGoal, fetchOverview, editTodo, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
+import { ago, clip, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
 import { kick } from './runner'
 import { askSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
@@ -72,6 +72,20 @@ export const TOOLS = [
       type: 'object',
       properties: { item: { type: 'string', description: 'The to-do id from the todos tool, e.g. 3 or 1.4' }, list: { type: 'string', description: 'A list name or id, when more than one list has that id' } },
       required: ['item'],
+    },
+  },
+  {
+    name: 'edit_todo',
+    description: "Rewords a to-do on the person's list (and its notes, when given). Only when they ask you to; the old wording is shown to them so they can put it back.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        item: { type: 'string', description: 'The to-do id from the todos tool, e.g. 3 or 1.4' },
+        text: { type: 'string', description: 'The new wording, short and in their words' },
+        notes: { type: 'string', description: 'New notes; left out, the notes stay as they are' },
+        list: { type: 'string', description: 'A list name or id, when more than one list has that id' },
+      },
+      required: ['item', 'text'],
     },
   },
   {
@@ -149,7 +163,7 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
   const now = await $.clock.now()
   const fail = (text: string) => ({ text, isError: true })
 
-  if (name === 'todos' || name === 'add_todo' || name === 'complete_todo') return todoTool($, name, input)
+  if (name === 'todos' || name === 'add_todo' || name === 'complete_todo' || name === 'edit_todo') return todoTool($, name, input)
 
   if (name === 'goals_status') {
     // Read the alert record first: the refresh below can raise an alert itself
@@ -390,7 +404,7 @@ export async function scheduleCommand($: $, args: string): Promise<string> {
 }
 
 /** The to-do tools: no confirm, since the person asked and every change is undone with one press. */
-async function todoTool($: $, name: 'todos' | 'add_todo' | 'complete_todo', input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
+async function todoTool($: $, name: 'todos' | 'add_todo' | 'complete_todo' | 'edit_todo', input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
   const dir = await $.session.root()
   const lists = await fetchTodos($, dir)
   const listArg = typeof input.list === 'string' && input.list.trim() ? input.list.trim() : undefined
@@ -406,6 +420,15 @@ async function todoTool($: $, name: 'todos' | 'add_todo' | 'complete_todo', inpu
   }
   const found = findTodo(lists, String(input.item ?? ''), listArg)
   if ('error' in found) return { text: found.error, isError: true }
+  if (name === 'edit_todo') {
+    const text = String(input.text ?? '').trim()
+    if (!text) return { text: 'A to-do needs some text.', isError: true }
+    const notes = typeof input.notes === 'string' ? input.notes : undefined
+    await editTodo($, found.list.id, found.item.id, { text, notes, by: 'agent' })
+    await refreshTodos($)
+    $.ui.toast(`Reworded to-do ${found.item.id}. It said: ${clip(found.item.text, 80)}`)
+    return { text: `Reworded ${found.item.id}: ${text} (it said: ${found.item.text})`, isError: false }
+  }
   await setTodo($, found.list.id, found.item.id, 'completed')
   await refreshTodos($)
   return { text: `Ticked off ${found.item.id}: ${found.item.text}`, isError: false }

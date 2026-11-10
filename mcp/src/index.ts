@@ -206,7 +206,7 @@ const TOOLS = [
   },
   {
     name: 'todo_set',
-    description: "Ticks a to-do off (completed), puts it back (pending), or marks it under way (active) with a note. Only when the person says it's done or asks you to.",
+    description: "Changes a to-do: ticks it off (completed), puts it back (pending), marks it under way (active), sets its notes, or rewords it (text). Only when the person says it's done or asks you to.",
     inputSchema: zodToJsonSchema(TodoSetSchema),
     handler: todo_set,
   },

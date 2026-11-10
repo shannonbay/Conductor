@@ -214,8 +214,9 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
         }
         case 'todo_set': {
           const item = lists.find((l) => l.id === input.list_id)!.items.find((i) => i.id === input.item_id)!
-          item.status = String(input.status)
+          if (input.status !== undefined) item.status = String(input.status)
           if (typeof input.notes === 'string') item.notes = input.notes
+          if (typeof input.text === 'string') item.text = input.text
           return ok({ item }) as never
         }
         case 'guard_check':

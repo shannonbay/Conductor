@@ -77,7 +77,7 @@ export const applyGoalChanges = (planId: string, changes: core.GoalChanges) => c
 export const reportRunEnd = (runId: string, input: { answer: string; reason?: string; usage?: core.RunUsage }) => core.reportRunEnd(db, runId, input)
 export const todoLists = (workingDir: string) => core.todoLists(db, workingDir)
 export const addTodo = (input: Parameters<typeof core.addTodo>[1]) => core.addTodo(db, input)
-export const setTodo = (listId: string, itemId: string, status: 'pending' | 'active' | 'completed', notes?: string) => core.setTodo(db, listId, itemId, status, notes)
+export const setTodo = (listId: string, itemId: string, change: core.TodoChange) => core.setTodo(db, listId, itemId, change)
 
 export const clearAllData = () => core.clearAllData(db)
 

@@ -8,10 +8,10 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { TodoItem, TodoList } from '../types'
-import { addTodo, fetchTodos, setTodo } from './api'
+import { addTodo, editTodo, fetchTodos, setTodo } from './api'
 import { clip } from './model'
 import { act, refresh, refreshTodos } from './sync'
-import { setAskingAbout } from './state'
+import { setAskingAbout, setEditingTodo } from './state'
 
 type $ = EngineInterface
 
@@ -106,6 +106,20 @@ export function addFromPane($: $, dir: string, list: TodoList, text: string): Pr
 export async function askFromPane($: $, list: TodoList, item: TodoItem, question: string): Promise<boolean> {
   const ok = await act($, `todo-ask:${list.id}/${item.id}`, 'ask about it', () => askAboutTodo($, list, item, question))
   if (ok) await setAskingAbout($, null)
+  return ok
+}
+/** Saves the new wording from the pane's edit box and closes it; the toast keeps the old wording. */
+export async function editFromPane($: $, list: TodoList, item: TodoItem, text: string): Promise<boolean> {
+  const wording = text.trim()
+  if (!wording || wording === item.text) {
+    await setEditingTodo($, null)
+    return true
+  }
+  const ok = await act($, `todo-edit:${list.id}/${item.id}`, 'change the to-do', () => editTodo($, list.id, item.id, { text: wording, by: 'human' }))
+  if (ok) {
+    await setEditingTodo($, null)
+    $.ui.toast(`Changed ${item.id}. It said: ${clip(item.text, 80)}`)
+  }
   return ok
 }
 export function workFromPane($: $, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<boolean> {

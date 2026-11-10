@@ -47,11 +47,19 @@ describe('to-do lists', () => {
 
   it('ticks a to-do off and back on, and notes one under way', () => {
     const { listId } = addTodo(db, { workingDir: DIR, text: 'Write the docs' })
-    expect(setTodo(db, listId, '1', 'completed')).toMatchObject({ status: 'completed' })
+    expect(setTodo(db, listId, '1', { status: 'completed' })).toMatchObject({ status: 'completed' })
     expect(todoLists(db, DIR)[0]).toMatchObject({ open: 0, done: 1 })
-    setTodo(db, listId, '1', 'active', 'Running as the one-off goal "Write the docs"')
+    setTodo(db, listId, '1', { status: 'active', notes: 'Running as the one-off goal "Write the docs"' })
     expect(getTask(db, listId, '1')).toMatchObject({ status: 'active', notes: 'Running as the one-off goal "Write the docs"' })
-    expect(() => setTodo(db, listId, '9', 'completed')).toThrow(/not found/)
+    expect(() => setTodo(db, listId, '9', { status: 'completed' })).toThrow(/not found/)
     expect(() => addTodo(db, { workingDir: DIR, text: '  ' })).toThrow(/needs some text/)
+  })
+
+  it('rewords a to-do without touching its status or notes', () => {
+    const { listId } = addTodo(db, { workingDir: DIR, text: 'rename tool' })
+    setTodo(db, listId, '1', { status: 'active', notes: 'Planning it' })
+    expect(setTodo(db, listId, '1', { text: '  A tool to edit a to-do  ' })).toMatchObject({ text: 'A tool to edit a to-do', status: 'active', notes: 'Planning it' })
+    expect(() => setTodo(db, listId, '1', { text: '   ' })).toThrow(/needs some text/)
+    expect(getTask(db, listId, '1')?.goal).toBe('A tool to edit a to-do')
   })
 })

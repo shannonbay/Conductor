@@ -204,9 +204,11 @@ export const TodoAddSchema = z.object({
 export const TodoSetSchema = z.object({
   list_id: z.string(),
   item_id: z.string(),
-  status: z.enum(['pending', 'active', 'completed']).describe('completed ticks it off; pending puts it back'),
+  status: z.enum(['pending', 'active', 'completed']).optional().describe('completed ticks it off; pending puts it back'),
   notes: z.string().optional(),
-})
+  text: z.string().trim().min(1).optional().describe("New wording for the to-do, only when the person asks for it"),
+  changed_by: z.enum(['human', 'agent']).default('human'),
+}).refine((v) => v.status !== undefined || v.notes !== undefined || v.text !== undefined, { message: 'Give a status, notes or text to change.' })
 
 const Mode = z.enum(['off', 'propose', 'auto'])
 

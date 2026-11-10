@@ -91,11 +91,26 @@ export function addTodo(
   return { listId: plan.id, itemId, created }
 }
 
-/** Ticks a to-do off (completed), back on (pending), or marks it under way (active), with an optional note. */
-export function setTodo(db: Database, listId: string, itemId: string, status: 'pending' | 'active' | 'completed', notes?: string): TodoItem {
+export interface TodoChange {
+  /** completed ticks it off, pending puts it back, active marks it under way. */
+  status?: 'pending' | 'active' | 'completed'
+  notes?: string
+  /** New wording for the to-do. */
+  text?: string
+}
+
+/** Changes a to-do: its status, its notes, its text, or several at once. */
+export function setTodo(db: Database, listId: string, itemId: string, change: TodoChange): TodoItem {
   const task = getTask(db, listId, itemId)
   if (!task) throw new Error(`To-do ${itemId} not found in list ${listId}.`)
-  updateTask(db, listId, itemId, { status, updated_at: new Date().toISOString(), ...(notes !== undefined && { notes }) })
+  const text = change.text?.trim()
+  if (change.text !== undefined && !text) throw new Error('A to-do needs some text.')
+  updateTask(db, listId, itemId, {
+    updated_at: new Date().toISOString(),
+    ...(change.status !== undefined && { status: change.status }),
+    ...(change.notes !== undefined && { notes: change.notes }),
+    ...(text !== undefined && { goal: text }),
+  })
   touchPlan(db, listId)
   const t = getTask(db, listId, itemId)!
   return { id: t.id, text: t.goal, status: t.status, depth: 0, notes: t.notes }

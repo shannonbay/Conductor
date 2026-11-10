@@ -210,3 +210,8 @@ export async function addTodo($: $, input: { dir: string; text: string; listId?:
 export async function setTodo($: $, listId: string, itemId: string, status: 'pending' | 'active' | 'completed', notes?: string): Promise<void> {
   await call($, 'todo_set', { list_id: listId, item_id: itemId, status, ...(notes !== undefined && { notes }) })
 }
+
+/** Rewords a to-do (and its notes, when given). */
+export async function editTodo($: $, listId: string, itemId: string, input: { text: string; notes?: string; by: 'human' | 'agent' }): Promise<void> {
+  await call($, 'todo_set', { list_id: listId, item_id: itemId, text: input.text, changed_by: input.by, ...(input.notes !== undefined && { notes: input.notes }) })
+}

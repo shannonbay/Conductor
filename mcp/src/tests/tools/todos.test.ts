@@ -18,4 +18,16 @@ describe('to-do tools', () => {
     expect(getEvents(a.list_id).map((e) => [e.event_type, e.actor])).toEqual(expect.arrayContaining([['task_created', 'agent'], ['status_changed', 'human']]))
     await expect(todo_add({ working_dir: DIR, text: '   ' })).rejects.toThrow()
   })
+
+  it('rewords a to-do, keeps its status, and records the old and new text', async () => {
+    const a = await todo_add({ working_dir: DIR, text: 'rename tool' })
+    const r = await todo_set({ list_id: a.list_id, item_id: '1', text: 'A tool to edit a to-do', changed_by: 'agent' })
+    expect(r).toMatchObject({ item: { text: 'A tool to edit a to-do', status: 'pending' }, previous_text: 'rename tool' })
+    const edit = getEvents(a.list_id).find((e) => e.event_type === 'task_updated')
+    expect(edit).toMatchObject({ actor: 'agent' })
+    expect(JSON.stringify(edit?.payload)).toContain('rename tool')
+    expect(getEvents(a.list_id).some((e) => e.event_type === 'status_changed')).toBe(false)
+    await expect(todo_set({ list_id: a.list_id, item_id: '1' })).rejects.toThrow(/status, notes or text/)
+    await expect(todo_set({ list_id: a.list_id, item_id: '1', text: '  ' })).rejects.toThrow()
+  })
 })

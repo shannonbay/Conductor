@@ -17,6 +17,7 @@ const snapshot = atom({ plugin: 'quarterdeck-goals', key: 'snapshot' } as const,
 const rejecting = atom({ plugin: 'quarterdeck-goals', key: 'rejecting' } as const, null)
 const addingTo = atom({ plugin: 'quarterdeck-goals', key: 'addingTo' } as const, null)
 const askingAbout = atom({ plugin: 'quarterdeck-goals', key: 'askingAbout' } as const, null)
+const editingTodo = atom({ plugin: 'quarterdeck-goals', key: 'editingTodo' } as const, null)
 const busy = atom({ plugin: 'quarterdeck-goals', key: 'busy' } as const, null)
 const notice = atom({ plugin: 'quarterdeck-goals', key: 'notice' } as const, null)
 const expanded = atom({ plugin: 'quarterdeck-goals', key: 'expanded' } as const, [])
@@ -115,4 +116,11 @@ export async function getAskingAbout($: $): Promise<string | null> {
 }
 export async function setAskingAbout($: $, value: string | null): Promise<void> {
   await update($, askingAbout, () => value)
+}
+
+export async function getEditingTodo($: $): Promise<string | null> {
+  return read($, editingTodo)
+}
+export async function setEditingTodo($: $, value: string | null): Promise<void> {
+  await update($, editingTodo, () => value)
 }

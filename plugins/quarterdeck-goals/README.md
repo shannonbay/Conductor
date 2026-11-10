@@ -78,7 +78,7 @@ Goals look after things in the background; the to-do list is the backlog for wha
 
 - `/todo <text>` adds to this project's **To do** list (made the first time). Or ask Claude: "add that to the list". Claude only adds when asked, or offers when an idea is clearly being put off.
 - In the pane, open a list to see its open to-dos, each with its id (`☐ 1.3 Set autonomy…`). Press ☐ to tick one off; a toast says how to undo. **n done** shows the ticked ones, and pressing one puts it back.
-- Press a to-do's text to expand it: the full text, any notes, and **Ask…**, **Plan** and **Start**. All three bring it into this conversation, where Claude can ask you things. **Ask…** opens a box for your question about the to-do; Claude answers with nothing changed. Press Enter on an empty box to get Claude's opinion and trade-offs instead. **Plan** asks Claude to plan it in plan mode for you to review. **Start** asks it to begin. The to-do shows ◐ until it's ticked off (Claude ticks it with `complete_todo` when it's done). To-dos don't run in the background; goals do.
+- Press a to-do's text to expand it: the full text, any notes, and **Ask…**, **Plan**, **Start** and **Edit**. All three bring it into this conversation, where Claude can ask you things. **Ask…** opens a box for your question about the to-do; Claude answers with nothing changed. Press Enter on an empty box to get Claude's opinion and trade-offs instead. **Plan** asks Claude to plan it in plan mode for you to review. **Start** asks it to begin. The to-do shows ◐ until it's ticked off (Claude ticks it with `complete_todo` when it's done). **Edit** opens a box holding the to-do's text: change it and press Enter, and a toast shows the old wording. To-dos don't run in the background; goals do.
 - **+ Add** under an open list opens a box (already focused): type the to-do and press Enter. Or use `/todo <text>`.
 - After a compaction, say "check my list": Claude reads it with the `todos` tool. Nothing is added to the conversation otherwise: no hooks, no reminders.
 
@@ -98,7 +98,7 @@ A **one-off** goal runs once, straight away. When its run ends with nothing left
 | `goal_detail` | One goal's open items, recent runs and memory. Read-only. |
 | `approve_item`, `reject_item` | Approve or reject a proposal. **Asks you first.** |
 | `run_goal` | Queue a run. **Asks you first.** |
-| `todos`, `add_todo`, `complete_todo` | Read your to-do lists, add to one (when you ask, or after offering), tick one off (when you say it's done). |
+| `todos`, `add_todo`, `complete_todo`, `edit_todo` | Read your to-do lists, add to one (when you ask, or after offering), tick one off (when you say it's done), reword one (when you ask; a toast shows the old wording). |
 | `update_goal` | Change a goal's name, objective, standing instructions, autonomy per category, tool rules, memory, or pause it. **Shows you each change and asks you first.** Runs can't use it. |
 | `set_schedule` | Set or clear a goal's schedule (same forms as `/goal-schedule`). **Asks you first.** |
 

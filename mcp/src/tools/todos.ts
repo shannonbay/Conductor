@@ -3,7 +3,7 @@
  * conversation, kept outside it so it survives compaction. Shown in the
  * Goals pane; Claude adds to them when asked.
  */
-import { todoLists, addTodo, setTodo } from '../db.js'
+import { todoLists, addTodo, setTodo, getTask } from '../db.js'
 import { TodoListSchema, TodoAddSchema, TodoSetSchema } from '../schema.js'
 import { record } from '../history.js'
 
@@ -21,7 +21,12 @@ export async function todo_add(args: unknown) {
 
 export async function todo_set(args: unknown) {
   const input = TodoSetSchema.parse(args)
-  const item = setTodo(input.list_id, input.item_id, input.status, input.notes)
-  record(input.list_id, input.item_id, 'status_changed', { to: input.status, todo: true }, { actor: 'human', via: 'todo' })
-  return { item }
+  const before = getTask(input.list_id, input.item_id)
+  const item = setTodo(input.list_id, input.item_id, { status: input.status, notes: input.notes, text: input.text })
+  const opts = { actor: input.changed_by, via: 'todo' }
+  if (input.status !== undefined) record(input.list_id, input.item_id, 'status_changed', { to: input.status, todo: true }, opts)
+  if (input.text !== undefined && before && before.goal !== item.text) {
+    record(input.list_id, input.item_id, 'task_updated', { fields: ['goal'], before: { goal: before.goal }, after: { goal: item.text }, todo: true }, opts)
+  }
+  return { item, ...(input.text !== undefined && before && { previous_text: before.goal }) }
 }
