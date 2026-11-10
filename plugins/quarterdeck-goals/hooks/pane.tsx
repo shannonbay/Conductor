@@ -90,10 +90,11 @@ export async function renderPane($: $, e: E) {
       {s.outdated && <Text color="yellow">Quarterdeck was updated in another session: run /reload-plugins here to use the new version (this session won't start goal runs until then).</Text>}
       {s.hold && <Text color="yellow">Goal runs are on hold until {holdUntilText(s.hold.until, view.now)}: the usage limit is reached. Due runs start after that.</Text>}
       {!s.reachable && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
-      {current.length === 0 && (
-        <Box flexDirection="column">
+      {current.length === 0 && done.length === 0 && !todos?.lists.length && welcome($, e)}
+      {current.length === 0 && (done.length > 0 || !!todos?.lists.length) && (
+        <Box flexDirection="column" marginBottom={1}>
           <Text dimColor>No goals yet.</Text>
-          <Text dimColor>Create one with /goal-new &lt;objective&gt;, or in the web app.</Text>
+          <Text dimColor>Create one with /goal-new &lt;objective&gt;; /goal-new alone offers ready-made ones.</Text>
         </Box>
       )}
       {current.map((g, i) => goalCard($, e, view, g, i))}
@@ -104,6 +105,21 @@ export async function renderPane($: $, e: E) {
         <Text dimColor>Updated {ago(new Date(s.fetchedAt).toISOString(), view.now)} </Text>
         <Button key="refresh" label="Refresh" plain hotkey="g" onPress={() => void refresh($)} />
       </Box>
+    </Box>
+  )
+}
+
+/** A blank pane (no goals, no to-dos): what Quarterdeck is and how to start. */
+function welcome($: $, e: E) {
+  const { Box, Text } = $.ui.resolve(e)
+  return (
+    <Box key="welcome" flexDirection="column" marginBottom={1}>
+      <Text>Welcome to Quarterdeck.</Text>
+      <Text dimColor>A goal is a standing job Claude keeps doing in the background, like "keep my inbox under 20 unread". Each run reports here, and anything it wants to do waits for your OK.</Text>
+      <Text> </Text>
+      <Text dimColor>/goal-new                pick a ready-made goal</Text>
+      <Text dimColor>/goal-new &lt;objective&gt;    start your own (it suggests a schedule)</Text>
+      <Text dimColor>/todo &lt;text&gt;             add to this project's to-do list, shown here</Text>
     </Box>
   )
 }

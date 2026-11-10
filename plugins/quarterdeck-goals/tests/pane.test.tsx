@@ -152,12 +152,27 @@ test('without the quarterdeck MCP server the pane says how to connect it', async
   }
 })
 
-test('with no goals the pane says how to create one', async ($, on) => {
+test('a blank pane welcomes a new user and shows /goal-new and /todo', async ($, on) => {
   engine(on)
   fakeQuarterdeck(on, [])
   await $.session.start(START)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: /Welcome to Quarterdeck/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\/goal-new +pick a ready-made goal/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /\/todo/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('with to-dos but no goals the pane skips the welcome and says how to create a goal', async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [], { todos: [{ id: 'p1', name: 'To do', items: [{ id: '1.1', text: 'Something', status: 'pending', depth: 0, notes: null }] }] })
+  await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /\/goal-new/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Welcome to Quarterdeck/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /No goals yet/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /\/goal-new alone offers ready-made ones/ })).toBeDefined()
   await ui.unmount()
 })
 

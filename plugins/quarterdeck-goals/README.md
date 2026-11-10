@@ -26,7 +26,7 @@ For development, add your checkout as the marketplace instead (`claude plugin ma
 
 ## The Goals pane
 
-Open it with `/goals`. It opens on its own at start-up when something is waiting for you.
+Open it with `/goals`. It opens on its own at start-up when something is waiting for you. With no goals or to-dos yet, it says what a goal is and how to start one (`/goal-new`) or add a to-do (`/todo`).
 
 ```
 ▸ Inbox active · run running
