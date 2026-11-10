@@ -171,7 +171,7 @@ test('/goal-new without the quarterdeck server says how to add it', async ($, on
   fakeQuarterdeck(on, [], { fail: true })
   await $.session.start(START)
   const made = await $.command.run(typed('goal-new', 'Inbox: keep my inbox under 20 unread'))
-  expect(made.text).toContain('claude mcp add --scope user quarterdeck')
+  expect(made.text).toContain('plugin:quarterdeck-goals:quarterdeck')
 })
 
 test('/goal-new alone offers ready-made goals, each with its rules and schedule', async ($, on) => {

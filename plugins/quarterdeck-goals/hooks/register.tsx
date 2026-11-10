@@ -15,6 +15,7 @@ import { getActiveRun, getRuns, getSnapshot, PANE, setActiveRun } from './state'
 import { refresh, startPolling, stopPolling } from './sync'
 import { goalCommand, newGoal, registerCommands, registerTools, runTool, scheduleCommand, type ToolName } from './tools'
 import { todoCommand } from './todos'
+import { serverToolNames } from './names'
 
 type $ = EngineInterface
 
@@ -162,7 +163,7 @@ export const register: Register = (on, options) => {
   // A goal run in this conversation itself (the old channel path): get_goal_brief
   // with a run_id starts it, end_run ends it. Runs in subagents are the runner's.
 
-  on('tool.call', { tool: 'mcp__quarterdeck__get_goal_brief' }, async ($, e, next) => {
+  for (const tool of serverToolNames('get_goal_brief')) on('tool.call', { tool: tool as 'mcp__quarterdeck__get_goal_brief' }, async ($, e, next) => {
     const result = await next(e)
     const { goalId, runId } = runIds(e)
     if (!e.agentId && goalId && runId && result.deny === undefined && result.isError !== true) {
@@ -172,7 +173,7 @@ export const register: Register = (on, options) => {
     return result
   }).catch(passOn)
 
-  on('tool.call', { tool: 'mcp__quarterdeck__end_run' }, async ($, e, next) => {
+  for (const tool of serverToolNames('end_run')) on('tool.call', { tool: tool as 'mcp__quarterdeck__end_run' }, async ($, e, next) => {
     const result = await next(e)
     if (result.deny === undefined && result.isError !== true) {
       if (!e.agentId) await setActiveRun($, null)

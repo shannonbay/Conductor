@@ -59,7 +59,7 @@ export async function renderPane($: $, e: E) {
           ? <Text dimColor>{NOT_LOADED}</Text>
           : (
             <Box flexDirection="column">
-              <Text dimColor>Add the quarterdeck MCP server for your user (see Quarterdeck's README), then reconnect it with /mcp.</Text>
+              <Text dimColor>The quarterdeck MCP server comes with this plugin: check it in /mcp, or run /reload-plugins.</Text>
               {s.error && <Text dimColor>{s.error}</Text>}
             </Box>
           )}
@@ -87,6 +87,7 @@ export async function renderPane($: $, e: E) {
   return (
     <Box flexDirection="column">
       {guardMissing && <Text color="yellow">{GUARD_MISSING}</Text>}
+      {s.outdated && <Text color="yellow">Quarterdeck was updated in another session: run /reload-plugins here to use the new version (this session won't start goal runs until then).</Text>}
       {s.hold && <Text color="yellow">Goal runs are on hold until {holdUntilText(s.hold.until, view.now)}: the usage limit is reached. Due runs start after that.</Text>}
       {!s.reachable && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
       {current.length === 0 && (

@@ -1,10 +1,10 @@
-import Database from 'better-sqlite3'
+import { Database } from './sqlite.js'
 import { existsSync, mkdirSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join } from 'path'
 import { runMigrations } from './migrate.js'
 
-export type { Database } from 'better-sqlite3'
+export { Database, Statement, type RunResult } from './sqlite.js'
 export * from './types.js'
 export * from './queries.js'
 export * from './gates.js'
@@ -17,7 +17,7 @@ export * from './goal-tick.js'
 export * from './goal-overview.js'
 export * from './todos.js'
 export * from './goal-changes.js'
-export { runMigrations, REVISION_TRIGGERS } from './migrate.js'
+export { runMigrations, REVISION_TRIGGERS, SCHEMA_VERSION, dbSchemaVersion, schemaOutdated } from './migrate.js'
 
 /**
  * A `QUARTERDECK_<name>` setting from the environment, or its `CONDUCTOR_<name>`
@@ -41,7 +41,7 @@ export function defaultDbPath(env: NodeJS.ProcessEnv = process.env, home: string
 }
 
 /** Opens the shared database in WAL mode and brings its schema up to date. */
-export function openDatabase(path: string = defaultDbPath()): Database.Database {
+export function openDatabase(path: string = defaultDbPath()): Database {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true })
   const db = new Database(path)
   db.pragma('journal_mode = WAL')

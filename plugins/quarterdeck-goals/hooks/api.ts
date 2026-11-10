@@ -8,6 +8,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { Schedule, TodoList } from '../types'
 import type { GoalChanges, OverviewGoal } from './model'
+import { SERVER_PREFIXES } from './names'
 
 type $ = EngineInterface
 
@@ -53,37 +54,39 @@ function resultText(r: { text?: string; result?: unknown }): string {
 }
 
 /**
- * Why a call fails when the session has no `quarterdeck` server: usually it was
- * set up only in the Quarterdeck repo's .mcp.json, and this session runs elsewhere.
+ * Why a call fails when the session has no `quarterdeck` server: this plugin
+ * provides it, so it is usually still starting, failed to start, or (for an
+ * old hand-added server) was set up only in one project.
  */
-export const NOT_LOADED = "The quarterdeck MCP server isn't loaded in this session. To use goals in every project, add it for your user: claude mcp add --scope user quarterdeck -- node <path to Quarterdeck>/mcp/dist/index.js, then restart Claude Code (or reconnect with /mcp)."
+export const NOT_LOADED = "The quarterdeck MCP server isn't loaded in this session. It comes with this plugin: check it in /mcp (plugin:quarterdeck-goals:quarterdeck), or run /reload-plugins. `npm run doctor` in the Quarterdeck folder says more."
 
-/** True for the engine's answer when no `mcp__quarterdeck__*` tool exists in the session. */
+/** True for the engine's answer when the session has no such quarterdeck tool. */
 export function isNotLoaded(err: unknown): boolean {
   const msg = err instanceof Error ? err.message : String(err)
-  return /no tool named "mcp__quarterdeck__|no such tool available: mcp__quarterdeck__/i.test(msg)
+  return /no tool named "mcp__(plugin_quarterdeck-goals_)?quarterdeck__|no such tool available: mcp__(plugin_quarterdeck-goals_)?quarterdeck__|no implementation for tool\.call/i.test(msg)
 }
 
-/** Whether the session has any `quarterdeck` tool (asked only after a call failed). */
-async function quarterdeckListed($: $): Promise<boolean> {
-  try {
-    return (await $.tool.list()).some((t) => t.name.startsWith('mcp__quarterdeck__'))
-  } catch {
-    return true // can't tell: keep the original error
-  }
-}
+/** The prefix the session's quarterdeck server answered under last (a cache: call tries both). */
+let serverPrefix: string | null = null
 
 /** Calls one `quarterdeck` MCP tool and returns its JSON answer. */
 async function call<T>($: $, name: string, input: Record<string, unknown> = {}): Promise<T> {
-  let r: Awaited<ReturnType<$['tool']['call']>>
-  try {
-    r = await $.tool.call({ tool: `mcp__quarterdeck__${name}`, ...input } as never)
-  } catch (err) {
-    throw isNotLoaded(err) || !(await quarterdeckListed($)) ? new Error(NOT_LOADED) : err
+  const order = serverPrefix ? [serverPrefix, ...SERVER_PREFIXES.filter((p) => p !== serverPrefix)] : [...SERVER_PREFIXES]
+  let r: Awaited<ReturnType<$['tool']['call']>> | undefined
+  for (const prefix of order) {
+    try {
+      const answer = await $.tool.call({ tool: `${prefix}${name}`, ...input } as never)
+      if (isNotLoaded(resultText(answer))) continue
+      serverPrefix = prefix
+      r = answer
+      break
+    } catch (err) {
+      if (!isNotLoaded(err)) throw err
+    }
   }
+  if (r === undefined) throw new Error(NOT_LOADED)
   if (r.deny !== undefined) throw new Error(r.deny)
   const text = resultText(r)
-  if (isNotLoaded(text)) throw new Error(NOT_LOADED)
   if (r.isError === true || text.startsWith('Error:')) throw new Error(text.replace(/^Error:\s*/, '').replace(/^<tool_use_error>|<\/tool_use_error>$/g, ''))
   try {
     return JSON.parse(text) as T
@@ -98,10 +101,10 @@ async function call<T>($: $, name: string, input: Record<string, unknown> = {}):
 export type Hold = { until: string; reason: string }
 
 /** The overview: cards for every goal, full detail for the ids in `detail` (the expanded ones). */
-export async function fetchOverview($: $, etag: string | null, detail: readonly string[] = []): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null }> {
-  const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[]; hold?: Hold | null }>($, 'goals_overview', { ...(etag ? { etag } : {}), detail: [...detail] })
+export async function fetchOverview($: $, etag: string | null, detail: readonly string[] = []): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null; outdated: boolean }> {
+  const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[]; hold?: Hold | null; outdated?: boolean }>($, 'goals_overview', { ...(etag ? { etag } : {}), detail: [...detail] })
   if (!res.changed) return { changed: false }
-  return { changed: true, goals: res.goals ?? [], etag: res.etag, hold: res.hold ?? null }
+  return { changed: true, goals: res.goals ?? [], etag: res.etag, hold: res.hold ?? null, outdated: res.outdated === true }
 }
 
 /** Applies goal changes the person has confirmed; answers what changed. */

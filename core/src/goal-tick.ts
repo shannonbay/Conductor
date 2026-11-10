@@ -7,7 +7,7 @@
  * Several Claude Code sessions may run the plugin at once, so a pass first
  * takes a lease: only the lease holder runs health checks and claims runs.
  */
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { getTask, updateTask } from './queries.js'
 import { approveTask, isProposal, rejectTask, asksPerson } from './gates.js'
 import { getGoal, getOpenRun, getRun, listGoals, updateGoal, updateRun, insertRun, insertMemory } from './goals.js'
@@ -15,6 +15,7 @@ import { archiveResolved, decideTick, failRun, nextIntervalRun, queueRun, record
 import { healthDue, runHealthCheck } from './health.js'
 import type { GoalRun, Task } from './types.js'
 import { getRunHold, type RunHold } from './goal-changes.js'
+import { schemaOutdated } from './migrate.js'
 
 const LEASE_NAME = 'goals'
 /** A holder that misses this long (several 30 s ticks) loses the lease to the next session that asks. */
@@ -143,6 +144,8 @@ export interface PassResult {
   expired: string[]
   /** Set while goal runs are held (the usage limit is reached): nothing was claimed. */
   hold?: RunHold
+  /** Set when a newer Quarterdeck in another session has upgraded the database: this one schedules nothing. */
+  outdated?: true
 }
 
 export interface PassOptions {
@@ -159,6 +162,8 @@ export interface PassOptions {
 /** One scheduler pass: lease, stale runs, health checks, then claim every due run. */
 export async function schedulerPass(db: Database, opts: PassOptions): Promise<PassResult> {
   const now = opts.now ?? new Date()
+  // Older code leaves scheduling to the session that upgraded the database
+  if (schemaOutdated(db)) return { leader: false, claimed: [], expired: [], outdated: true }
   if (!opts.ignoreLease && !takeLease(db, opts.holder, now)) return { leader: false, claimed: [], expired: [] }
 
   const expired = expireStaleRuns(db, now, { skipRunIds: opts.trackedRunIds })

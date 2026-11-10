@@ -12,6 +12,7 @@ import type { EngineInterface } from 'claude-code'
 import type { RunEntry } from '../types'
 import { attachAgent, cancelRunRecord, failRun, releaseLease, tick, type ClaimedRun } from './api'
 import { addRun, getNotice, getRuns, getSnapshot, removeRun, setGuardMissing, setNotice } from './state'
+import { serverToolNames } from './names'
 
 type $ = EngineInterface
 
@@ -23,25 +24,25 @@ const ENDED = new Set(['completed', 'failed', 'killed'])
 export const GUARD_TOOL = 'mcp__quarterdeck-guard__status'
 export const GUARD_MISSING = 'Goal runs are paused: install the quarterdeck-guard plugin (it keeps runs within their goal), then /reload-plugins.'
 
-/** Quarterdeck tools a run's agent must never call: the human's and the plugin's own. */
-export const HUMAN_ONLY_TOOLS = [
-  'mcp__quarterdeck__goals_tick',
-  'mcp__quarterdeck__decide_item',
-  'mcp__quarterdeck__cancel_run',
-  'mcp__quarterdeck__set_goal_status',
-  'mcp__quarterdeck__attach_agent',
-  'mcp__quarterdeck__fail_run',
-  'mcp__quarterdeck__guard_check',
-  'mcp__quarterdeck__create_goal',
-  'mcp__quarterdeck__delete_goal',
-  'mcp__quarterdeck__delete_memory',
-  'mcp__quarterdeck__set_schedule',
-  'mcp__quarterdeck__update_goal',
-  'mcp__quarterdeck__report_run_end',
-]
+/** Quarterdeck tools a run's agent must never call: the human's and the plugin's own (under both server prefixes). */
+export const HUMAN_ONLY_TOOLS = serverToolNames(
+  'goals_tick',
+  'decide_item',
+  'cancel_run',
+  'set_goal_status',
+  'attach_agent',
+  'fail_run',
+  'guard_check',
+  'create_goal',
+  'delete_goal',
+  'delete_memory',
+  'set_schedule',
+  'update_goal',
+  'report_run_end',
+)
 
 /** Also refused to a run's agent: a run doesn't queue more runs. */
-export const RUN_AGENT_DENIED_TOOLS = [...HUMAN_ONLY_TOOLS, 'mcp__quarterdeck__run_goal']
+export const RUN_AGENT_DENIED_TOOLS = [...HUMAN_ONLY_TOOLS, ...serverToolNames('run_goal')]
 
 const RUNNER_PROMPT = `You carry out one run of a Quarterdeck persistent goal: a standing objective that is never finished. You start with no memory; the goal brief has everything. Work inside the goal's autonomy: never take an action whose category is "propose" or "off" unless the brief shows an approved item for it. Keep within the time you are given, and always finish with end_run. Your final message is shown to nobody but Quarterdeck, so keep it to one line.`
 
@@ -53,7 +54,7 @@ export async function registerRunnerAgent($: $): Promise<void> {
     prompt: RUNNER_PROMPT,
     // guard_check stays callable: the plugin calls it inside the run's loop (the guard refuses it to the agent)
     disallowedTools: [
-      ...RUN_AGENT_DENIED_TOOLS.filter((t) => t !== 'mcp__quarterdeck__guard_check'),
+      ...RUN_AGENT_DENIED_TOOLS.filter((t) => !t.endsWith('__guard_check')),
       'mcp__quarterdeck-goals__approve_item', 'mcp__quarterdeck-goals__reject_item', 'mcp__quarterdeck-goals__answer_item', 'mcp__quarterdeck-goals__run_goal', 'mcp__quarterdeck-goals__set_schedule', 'mcp__quarterdeck-goals__update_goal',
     ],
     background: true,

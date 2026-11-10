@@ -9,3 +9,6 @@ dist/
 .claude/settings.local.json
 next-env.d.ts
 .claude-plugin/types/
+
+# Built by `npm run build` (mcp/scripts/bundle.mjs); committed only on the release branch
+plugins/*/server/

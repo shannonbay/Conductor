@@ -2,7 +2,7 @@
  * Persistent goals — storage. A goal is a plan with kind = 'goal' plus a row
  * in `goals`; its work items are ordinary tasks. See specs/persistent-goals.md.
  */
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { randomUUID } from 'crypto'
 import { insertPlan, getPlan } from './queries.js'
 import {

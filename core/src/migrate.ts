@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 
 /** Triggers that keep plans.revision current; `quarterdeck doctor` checks they all exist. */
 export const REVISION_TRIGGERS = [
@@ -27,6 +27,24 @@ export const REVISION_TRIGGERS = [
  * New columns added to a CREATE TABLE below must also get an ALTER TABLE
  * entry for databases created before the column existed.
  */
+/**
+ * The schema this code writes, stored in the database as `PRAGMA user_version`.
+ * Bump it with every schema change (new table, column, trigger or data rewrite):
+ * a session still running older code then sees it is outdated (`schemaOutdated`)
+ * and leaves scheduling to the newer one.
+ */
+export const SCHEMA_VERSION = 1
+
+/** The schema version recorded in the database (0 before versions existed). */
+export function dbSchemaVersion(db: Database): number {
+  return Number(db.pragma('user_version', { simple: true }) ?? 0)
+}
+
+/** True when another session's newer Quarterdeck has upgraded the database past this code. */
+export function schemaOutdated(db: Database): boolean {
+  return dbSchemaVersion(db) > SCHEMA_VERSION
+}
+
 export function runMigrations(db: Database): void {
   // Legacy renames: projects → plans (idempotent via try/catch)
   try { db.exec('ALTER TABLE projects RENAME TO plans') } catch { /* already renamed or never existed */ }
@@ -375,4 +393,7 @@ export function runMigrations(db: Database): void {
     UPDATE goals SET tool_map = replace(tool_map, '"mcp__conductor__', '"mcp__quarterdeck__')
     WHERE instr(tool_map, '"mcp__conductor__') > 0
   `)
+
+  // Record the schema version, never lowering one a newer session wrote
+  if (dbSchemaVersion(db) < SCHEMA_VERSION) db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`)
 }

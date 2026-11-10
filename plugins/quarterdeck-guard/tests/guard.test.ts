@@ -11,7 +11,7 @@ const START = { cwd: '/work/project', surface: 'terminal', isInteractive: true }
  */
 const unsubscribeApproved = { value: false }
 
-function world(on: On) {
+function world(on: On, P = 'mcp__quarterdeck__') {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('tool.register', (_, e) => ({ value: { tool: `mcp__quarterdeck-guard__${e.name}` } }))
   on('agent.list', () => ({
@@ -21,12 +21,12 @@ function world(on: On) {
     ],
   }) as never)
   const scopes: unknown[] = []
-  on('tool.call', { tool: 'mcp__quarterdeck__get_goal_brief' }, (_, e) => {
+  on('tool.call', { tool: `${P}get_goal_brief` }, (_, e) => {
     scopes.push((e as unknown as { run_scope?: unknown }).run_scope)
     return { result: '{}' } as never
   })
-  on('tool.call', { tool: 'mcp__quarterdeck__decide_item' }, () => ({ result: '{"ok":true}' }) as never)
-  on('tool.call', { tool: 'mcp__quarterdeck__guard_check' }, (_, e) => {
+  on('tool.call', { tool: `${P}decide_item` }, () => ({ result: '{"ok":true}' }) as never)
+  on('tool.call', { tool: `${P}guard_check` }, (_, e) => {
     const name = (e as unknown as { tool_name: string }).tool_name
     return { result: JSON.stringify(name === 'mcp__gmail__delete'
       ? { decision: 'deny', category: 'email.delete', reason: 'email.delete is off for this goal' }
@@ -115,4 +115,18 @@ test("one-click unsubscribe goes through the goal's guard, and carries the run o
   await $.tool.call(call({ tool: 'mcp__quarterdeck__unsubscribe_one_click', url: 'https://x.example/u', agentId: 'run-agent' }))
   expect(sent).toEqual(['run_abc123'])
   expect(scopes).toEqual([])
+})
+
+test('with the server from the quarterdeck-goals plugin, its tools are named mcp__plugin_quarterdeck-goals_quarterdeck__* and the same rules apply', async ($, on) => {
+  const P = 'mcp__plugin_quarterdeck-goals_quarterdeck__'
+  const { scopes } = world(on, P)
+  await $.session.start(START)
+  await $.tool.call(call({ tool: `${P}get_goal_brief`, goal_id: 'g1', agentId: 'run-agent' }))
+  expect(scopes).toEqual(['run_abc123'])
+  const r = await $.tool.call(call({ tool: `${P}decide_item`, goal_id: 'g1', item_id: '1', decision: 'approve', agentId: 'run-agent' }))
+  expect(said(r)).toContain('Goals pane')
+  const m = await $.tool.call(call({ tool: `${P}decide_item`, goal_id: 'g1', item_id: '1', decision: 'approve' }))
+  expect(said(m)).toContain('Goals pane')
+  const d = await $.tool.call(call({ tool: 'mcp__gmail__delete', id: 'm1', agentId: 'run-agent' }))
+  expect(said(d)).toContain('email.delete is off')
 })

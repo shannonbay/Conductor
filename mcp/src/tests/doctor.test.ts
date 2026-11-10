@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, utimesSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  checkNode, checkBuild, checkMcpConfig, checkHooks, checkPlugin, checkDatabase, checkUserScope, checkRenameLeftovers, nativeLoadProblem, formatResults,
+  checkNode, checkBuild, checkBundle, checkServerSetup, checkPermissionRules, checkUpdates, checkHooks, checkPlugin, checkDatabase, checkRenameLeftovers, formatResults,
   type DoctorOptions,
 } from '../doctor.js'
 
@@ -22,16 +22,27 @@ beforeEach(() => {
 afterEach(() => rmSync(dir, { recursive: true, force: true }))
 
 describe('doctor', () => {
-  it('checkNode fails below Node 22', () => {
+  it('checkNode fails below Node 22.13 (node:sqlite without a flag)', () => {
     expect(checkNode(o).level).toBe('ok')
+    expect(checkNode({ ...o, nodeVersion: '22.13.0' }).level).toBe('ok')
+    expect(checkNode({ ...o, nodeVersion: '22.12.0' })).toMatchObject({ level: 'fail' })
     expect(checkNode({ ...o, nodeVersion: '20.11.0' })).toMatchObject({ level: 'fail' })
   })
 
   it('checkDatabase opens and migrates the database', async () => {
     const results = await checkDatabase(o)
-    expect(results.map((r) => [r.name, r.level])).toEqual([
-      ['SQLite native module', 'ok'], ['Database', 'ok'], ['Schema', 'ok'],
-    ])
+    expect(results.map((r) => [r.name, r.level])).toEqual([['Database', 'ok'], ['Schema', 'ok']])
+    expect(results[1].detail).toMatch(/version \d+/)
+  })
+
+  it('checkDatabase warns when a newer Quarterdeck has upgraded the database', async () => {
+    const core = await import('@quarterdeck/core')
+    const dbFile = join(dir, 'newer.db')
+    const db = core.openDatabase(dbFile)
+    db.exec(`PRAGMA user_version = ${core.SCHEMA_VERSION + 1}`)
+    db.close()
+    const schema = (await checkDatabase({ ...o, env: { QUARTERDECK_DB: dbFile } })).find((r) => r.name === 'Schema')
+    expect(schema).toMatchObject({ level: 'warn', fix: expect.stringContaining('/reload-plugins') })
   })
 
   describe('checkBuild', () => {
@@ -58,43 +69,72 @@ describe('doctor', () => {
     })
   })
 
-  describe('checkMcpConfig', () => {
-    it('warns when .mcp.json is missing', () => {
-      expect(checkMcpConfig(o)[0].level).toBe('warn')
-    })
-
-    it('fails on invalid JSON', () => {
-      write(join(dir, '.mcp.json'), '{ nope')
-      expect(checkMcpConfig(o)[0].level).toBe('fail')
-    })
-
-    it('fails when the quarterdeck server script does not exist', () => {
-      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: ['missing/index.js'] } } }))
-      expect(checkMcpConfig(o)[0]).toMatchObject({ level: 'fail', detail: expect.stringContaining('missing/index.js') })
-    })
-
-    it('passes and lists enabled flags', () => {
-      write(join(dir, 'mcp/dist/index.js'), '')
-      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: {
-        quarterdeck: { command: 'node', args: [join(dir, 'mcp/dist/index.js')], env: { QUARTERDECK_STRICT_COMPLETE: '1' } },
-      } }))
-      const [r] = checkMcpConfig(o)
-      expect(r).toMatchObject({ level: 'ok', detail: expect.stringContaining('QUARTERDECK_STRICT_COMPLETE') })
-    })
-
-    it('warns about a leftover conductor-channel entry', () => {
-      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: [] } } }))
-      expect(checkMcpConfig(o).some((r) => r.name.includes('conductor-channel'))).toBe(false)
-      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: [] }, 'conductor-channel': { command: 'node', args: [] } } }))
-      expect(checkMcpConfig(o).some((r) => r.name.includes('conductor-channel') && r.level === 'warn')).toBe(true)
+  describe('checkBundle', () => {
+    it('fails without the bundle and warns when sources are newer', () => {
+      write(join(dir, 'mcp/src/index.ts'), '')
+      write(join(dir, 'core/src/index.ts'), '')
+      expect(checkBundle(o)).toMatchObject({ level: 'fail', fix: expect.stringContaining('npm run build --prefix mcp') })
+      const bundle = join(dir, 'plugins/quarterdeck-goals/server/quarterdeck-mcp.mjs')
+      write(bundle, '')
+      expect(checkBundle(o).level).toBe('ok')
+      const old = new Date(Date.now() - 60_000)
+      utimesSync(bundle, old, old)
+      expect(checkBundle(o).level).toBe('warn')
     })
   })
 
-  describe('checkUserScope', () => {
-    it('warns until quarterdeck is added for the user, with the command', () => {
-      expect(checkUserScope(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude mcp add --scope user quarterdeck -- node ') })
+  describe('checkServerSetup', () => {
+    const enable = () => write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'quarterdeck-goals@quarterdeck': true } }))
+
+    it('is ok when only the plugin provides the server', () => {
+      enable()
+      expect(checkServerSetup(o)).toEqual([expect.objectContaining({ level: 'ok', detail: expect.stringContaining('plugin') })])
+    })
+
+    it('warns about a second copy set up by hand, with how to remove it', () => {
+      enable()
       write(join(dir, '.claude.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: ['x.js'] } } }))
-      expect(checkUserScope(o)).toMatchObject({ level: 'ok' })
+      expect(checkServerSetup(o)[0]).toMatchObject({ level: 'warn', detail: expect.stringContaining('two copies'), fix: expect.stringContaining('claude mcp remove --scope user quarterdeck') })
+    })
+
+    it('warns that a hand-added server without the plugin does not update', () => {
+      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { quarterdeck: { command: 'node', args: [] } } }))
+      expect(checkServerSetup(o)[0]).toMatchObject({ level: 'warn', detail: expect.stringContaining("doesn't update") })
+    })
+
+    it('says nothing when neither is set up (checkPlugin covers it)', () => {
+      expect(checkServerSetup(o)).toEqual([])
+    })
+
+    it('warns about a leftover conductor-channel entry', () => {
+      write(join(dir, '.mcp.json'), JSON.stringify({ mcpServers: { 'conductor-channel': { command: 'node', args: [] } } }))
+      expect(checkServerSetup(o).some((r) => r.name.includes('conductor-channel') && r.level === 'warn')).toBe(true)
+    })
+  })
+
+  describe('checkPermissionRules', () => {
+    it('warns about rules for the old tool names once the plugin provides the server', () => {
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ permissions: { allow: ['mcp__quarterdeck__goals_overview'] } }))
+      expect(checkPermissionRules(o)).toBeNull() // plugin not enabled: the old names are still right
+      write(join(dir, '.claude/settings.json'), JSON.stringify({ enabledPlugins: { 'quarterdeck-goals@quarterdeck': true }, permissions: { allow: ['mcp__quarterdeck__goals_overview'] } }))
+      expect(checkPermissionRules(o)).toMatchObject({ level: 'warn', detail: expect.stringContaining('mcp__plugin_quarterdeck-goals_quarterdeck__') })
+    })
+  })
+
+  describe('checkUpdates', () => {
+    const known = (entry: unknown) => write(join(dir, '.claude/plugins/known_marketplaces.json'), JSON.stringify({ quarterdeck: entry }))
+
+    it('is silent without the marketplace, ok for a local folder', () => {
+      expect(checkUpdates(o)).toBeNull()
+      known({ source: { source: 'directory', path: '/src/Quarterdeck' } })
+      expect(checkUpdates(o)).toMatchObject({ level: 'ok', detail: expect.stringContaining('local folder') })
+    })
+
+    it('warns until auto-update is on for a GitHub marketplace', () => {
+      known({ source: { source: 'github', repo: 'shannonbay/Quarterdeck' } })
+      expect(checkUpdates(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('Enable auto-update') })
+      known({ source: { source: 'github', repo: 'shannonbay/Quarterdeck' }, autoUpdate: true })
+      expect(checkUpdates(o)?.level).toBe('ok')
     })
   })
 
@@ -141,7 +181,7 @@ describe('doctor', () => {
 
   describe('checkPlugin', () => {
     it('warns with install steps when the plugin is not installed', () => {
-      expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringContaining('claude plugin install quarterdeck-goals@quarterdeck') })
+      expect(checkPlugin(o)).toMatchObject({ level: 'warn', fix: expect.stringMatching(/marketplace add shannonbay\/Quarterdeck#release.*claude plugin install quarterdeck-goals@quarterdeck/) })
     })
 
     it('warns when it is disabled, and until the guard plugin is enabled too', () => {
@@ -183,13 +223,5 @@ describe('checkGoals', () => {
 
     expect(await checkGoals(opts, okR)).toMatchObject({ level: 'ok', detail: expect.stringContaining('Inbox') })
     expect(await checkGoals(opts, { ...warnR, detail: 'quarterdeck-guard@quarterdeck not installed' })).toMatchObject({ level: 'warn', detail: expect.stringContaining('quarterdeck-guard') })
-  })
-})
-
-describe('nativeLoadProblem', () => {
-  it('tells a version mismatch from a native part that was never built', () => {
-    expect(nativeLoadProblem('was compiled against a different Node.js version using NODE_MODULE_VERSION 127')?.fix).toContain('npm rebuild better-sqlite3')
-    expect(nativeLoadProblem('Could not locate the bindings file. Tried: .../better_sqlite3.node')?.fix).toContain('npm install-scripts approve better-sqlite3')
-    expect(nativeLoadProblem("Cannot find module '@quarterdeck/core'")).toBeNull()
   })
 })

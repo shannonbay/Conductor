@@ -4,7 +4,7 @@
  * GET /api/goals/overview and the MCP tool goals_overview.
  */
 import { createHash } from 'crypto'
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { compareTaskIds, deserializeTask, getEvents } from './queries.js'
 import { isProposal, asksPerson } from './gates.js'
 import { getOpenRun, getGoal, listGoals, listMemory, listRuns } from './goals.js'
@@ -13,6 +13,7 @@ import { getSchedule } from './schedule.js'
 import { listHealth } from './health.js'
 import type { Event, Goal, GoalRun, Task } from './types.js'
 import { getRunHold } from './goal-changes.js'
+import { schemaOutdated } from './migrate.js'
 
 const RUNS = 5
 const OPEN_ITEMS = 10
@@ -252,7 +253,7 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all') {
         runs: g.runs.slice(0, 1), open_items: [], memory: [], instructions: '', tool_map: {},
       }
     })
-  return { goals, hold: getRunHold(db) }
+  return { goals, hold: getRunHold(db), ...(schemaOutdated(db) ? { outdated: true as const } : {}) }
 }
 
 export type Overview = ReturnType<typeof buildOverview>

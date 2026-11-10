@@ -1,12 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type Database from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, updateGoal, getGoal, queueRun, getRun, updateRun, addItem, getTask, listMemory, listRuns,
   takeLease, releaseLease, claimRun, schedulerPass, expireStaleRuns, decideItem, attachAgent, guardToolCallForRun,
   buildOverview, overviewWithEtag, LEASE_MS, insertRun, endRun, updateTask, reviveIfDone, insertMemory,
+  SCHEMA_VERSION, dbSchemaVersion, schemaOutdated, runMigrations,
 } from './index.js'
 
-let db: Database.Database
+let db: Database
 const now = new Date().toISOString()
 const plan = { id: 'g1', name: 'Inbox', description: null, status: 'active' as const, working_dir: '/tmp/inbox', created_at: now, updated_at: now }
 
@@ -233,5 +234,24 @@ describe('one-off goals', () => {
   it('other retired goals stay out of the overview', async () => {
     updateGoal(db, 'g1', { status: 'retired' })
     expect(buildOverview(db).goals.map((g) => g.id)).not.toContain('g1')
+  })
+})
+
+describe('schema version', () => {
+  it('records the schema version and never lowers a newer one', () => {
+    expect(dbSchemaVersion(db)).toBe(SCHEMA_VERSION)
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`)
+    runMigrations(db)
+    expect(dbSchemaVersion(db)).toBe(SCHEMA_VERSION + 1)
+  })
+
+  it('an outdated session schedules nothing and the overview says so', async () => {
+    queueRun(db, 'g1')
+    expect(buildOverview(db).outdated).toBeUndefined()
+    db.exec(`PRAGMA user_version = ${SCHEMA_VERSION + 1}`)
+    expect(schemaOutdated(db)).toBe(true)
+    const r = await schedulerPass(db, { holder: 'A' })
+    expect(r).toEqual({ leader: false, claimed: [], expired: [], outdated: true })
+    expect(buildOverview(db).outdated).toBe(true)
   })
 })

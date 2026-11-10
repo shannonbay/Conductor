@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { tmpdir } from 'os'
-import type Database from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import {
   openDatabase, insertPlan, insertTask, getTask, getPlan, getVerifications, updateTask,
   runVerifyCommand, checkCompletion, runChecks, approveTask, rejectTask, overrideCompletion, getGateStatus, GateError,
@@ -11,7 +11,7 @@ const PASS = 'node -e "console.log(\'all good\')"'
 const FAIL = 'node -e "console.log(\'boom\'); process.exit(3)"'
 const HANG = 'node -e "setTimeout(() => {}, 30000)"'
 
-let db: Database.Database
+let db: Database
 const now = new Date().toISOString()
 
 function addTask(fields: Partial<NewTask> = {}) {

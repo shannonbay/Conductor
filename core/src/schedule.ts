@@ -2,7 +2,7 @@
  * Goal schedules (interval or cron) and webhook (event) triggers.
  * Cron uses the standard five fields in local time: minute hour day-of-month month day-of-week.
  */
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { createHash, randomBytes, timingSafeEqual } from 'crypto'
 import { getIntervalTrigger, listTriggers, newId, setIntervalTrigger } from './goals.js'
 import type { CronConfig, EventConfig, GoalTrigger, IntervalConfig } from './types.js'

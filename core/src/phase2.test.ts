@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { tmpdir } from 'os'
-import type Database from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, updateGoal, getGoal, insertRun, addItem, approveTask, updateTask, getTask,
   parseCron, cronNext, getSchedule, setSchedule, nextScheduledRun, decideTick,
@@ -9,7 +9,7 @@ import {
   matchToolCategory, guardToolCallForRun, listToolCalls,
 } from './index.js'
 
-let db: Database.Database
+let db: Database
 const now = new Date().toISOString()
 const plan = (id = 'g1') => ({ id, name: 'Inbox', description: null, status: 'active' as const, working_dir: tmpdir(), created_at: now, updated_at: now })
 
@@ -134,6 +134,14 @@ describe('goal guard', () => {
     expect(matchToolCategory({ 'a__*': 'x', 'a__b': 'y' }, 'a__b')).toBe('y')
     expect(matchToolCategory({ 'a__*': 'x', 'a__b*': 'y' }, 'a__bc')).toBe('y')
     expect(matchToolCategory(MAP, 'mcp__gmail__search')).toBeNull()
+  })
+
+  it("matches Quarterdeck's own tools under the plugin server's prefix and the hand-added one", () => {
+    const map = { 'mcp__quarterdeck__unsubscribe_one_click': 'email.unsubscribe', 'mcp__plugin_quarterdeck-goals_quarterdeck__forget*': 'memory' }
+    expect(matchToolCategory(map, 'mcp__plugin_quarterdeck-goals_quarterdeck__unsubscribe_one_click')).toBe('email.unsubscribe')
+    expect(matchToolCategory(map, 'mcp__quarterdeck__unsubscribe_one_click')).toBe('email.unsubscribe')
+    expect(matchToolCategory(map, 'mcp__quarterdeck__forget')).toBe('memory')
+    expect(matchToolCategory(map, 'mcp__plugin_other_quarterdeck__forget')).toBeNull()
   })
 
   it('allows everything outside a goal run, and unmapped tools inside one', () => {

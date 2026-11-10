@@ -1,4 +1,4 @@
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { randomUUID } from 'crypto'
 import type {
   Event, GateKind, NewEvent, NewPlan, NewTask, NewVerification, PlanRow, Task, TreeStats, Verification,

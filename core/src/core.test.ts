@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import Database from 'better-sqlite3'
+import { Database } from './sqlite.js'
 import {
   openDatabase, runMigrations, insertPlan, insertTask, updateTask, updatePlan, touchPlan,
   deleteTaskTree, getPlanRevision, getTask, getChildren, getSiblings, nextChildId,
@@ -20,7 +20,7 @@ function task(id: string, planId = 'p1'): NewTask {
   return { id, plan_id: planId, goal: `Task ${id}`, status: 'pending', result: null, abandon_reason: null, state: {}, depends_on: null, created_at: now, updated_at: now }
 }
 
-let db: Database.Database
+let db: Database
 beforeEach(() => { db = openDatabase(':memory:') })
 
 describe('runMigrations', () => {

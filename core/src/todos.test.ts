@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type Database from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { openDatabase, insertPlan, insertTask, createGoal, todoLists, addTodo, setTodo, getTask, DEFAULT_LIST } from './index.js'
 
-let db: Database.Database
+let db: Database
 const now = new Date().toISOString()
 const DIR = 'C:\\Users\\me\\proj'
 

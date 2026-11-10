@@ -2,7 +2,7 @@
  * Goal health checks: a command that exits 0 while the goal is being met.
  * The last number it prints is stored as a trend value (e.g. unread count).
  */
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { runVerifyCommand } from './gates.js'
 import { getGoal, newId, updateGoal } from './goals.js'
 import { getPlan } from './queries.js'

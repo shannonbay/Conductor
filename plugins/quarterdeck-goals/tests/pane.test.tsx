@@ -147,7 +147,7 @@ test('without the quarterdeck MCP server the pane says how to connect it', async
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /isn't connected/ })).toBeDefined()
-    expect((await ui.find({ type: 'Text', text: /\/mcp/ }))?.text).toContain('claude mcp add --scope user quarterdeck')
+    expect((await ui.find({ type: 'Text', text: /\/mcp/ }))?.text).toContain('/reload-plugins')
     await ui.unmount()
   }
 })
@@ -321,5 +321,24 @@ test('Reschedule hands an answer it can\'t read to the small model, and says how
   await ui.press({ key: 'reschedule-g1' })
   expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 20160 } }])
   expect(toasts.at(-1)).toBe('Inbox now runs every 14d (read "every other week" as every 2w).')
+  await ui.unmount()
+})
+
+test("with the server from this plugin (mcp__plugin_quarterdeck-goals_quarterdeck__*) the pane works the same", async ($, on) => {
+  const { statuses } = engine(on)
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })], { prefix: 'mcp__plugin_quarterdeck-goals_quarterdeck__' })
+  await $.session.start(START)
+  expect(statuses.at(-1)).toBe('Quarterdeck: all clear')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Waiting for its first run/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('when a newer Quarterdeck has upgraded the database, the pane asks for /reload-plugins', async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })], { outdated: true })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /updated in another session/ }))?.text).toContain('/reload-plugins')
   await ui.unmount()
 })

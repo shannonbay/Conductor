@@ -22,12 +22,14 @@ It recognises a run's subagent by the engine's record of who spawned it (`spawne
 
 ## Install
 
+It is installed with quarterdeck-goals, which depends on it. To install it on its own:
+
 ```bash
-claude plugin marketplace add <path to the Quarterdeck repo>
+claude plugin marketplace add shannonbay/Quarterdeck#release
 claude plugin install quarterdeck-guard@quarterdeck --scope user
 ```
 
-`npm run doctor` reports whether both plugins are installed.
+Its rules match the quarterdeck server's tools under both names: `mcp__plugin_quarterdeck-goals_quarterdeck__*` (the server quarterdeck-goals brings) and `mcp__quarterdeck__*` (one added by hand). `npm run doctor` reports whether both plugins are installed.
 
 ## Development
 

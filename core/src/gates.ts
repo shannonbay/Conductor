@@ -12,7 +12,7 @@
  */
 import { spawn, spawnSync } from 'child_process'
 import { existsSync } from 'fs'
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { getLatestVerification, getPlan, getTask, insertVerification, updateTask } from './queries.js'
 import { insertMemory } from './goals.js'
 import type { PlanRow, Task, Verification } from './types.js'

@@ -13,7 +13,7 @@
  *
  * Calls outside goal runs, or to tools not in the map, are always allowed.
  */
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { autonomyFor } from './goal-engine.js'
 import { getGoal, newId } from './goals.js'
 import type { GoalRun, ToolCallRecord } from './types.js'
@@ -22,8 +22,23 @@ export type GuardDecision =
   | { decision: 'allow'; category?: string; run_id?: string }
   | { decision: 'deny'; category: string; run_id: string; reason: string }
 
-/** Matches a tool name against "exact" or glob ("mcp__gmail__send*") patterns; exact patterns win. */
-export function matchToolCategory(toolMap: Record<string, string>, toolName: string): string | null {
+/** The quarterdeck MCP server's tool prefix when it is set up by hand (`claude mcp add`). */
+export const QUARTERDECK_TOOL_PREFIX = 'mcp__quarterdeck__'
+/** Its prefix when the quarterdeck-goals plugin provides the server (Claude Code names plugin servers this way). */
+export const PLUGIN_QUARTERDECK_TOOL_PREFIX = 'mcp__plugin_quarterdeck-goals_quarterdeck__'
+
+/** A quarterdeck tool's name under either prefix, as `mcp__quarterdeck__<tool>`; other names unchanged. */
+export function canonicalToolName(name: string): string {
+  return name.startsWith(PLUGIN_QUARTERDECK_TOOL_PREFIX) ? QUARTERDECK_TOOL_PREFIX + name.slice(PLUGIN_QUARTERDECK_TOOL_PREFIX.length) : name
+}
+
+/**
+ * Matches a tool name against "exact" or glob ("mcp__gmail__send*") patterns; exact patterns win.
+ * Quarterdeck's own tools match under either prefix (see canonicalToolName).
+ */
+export function matchToolCategory(rawMap: Record<string, string>, rawName: string): string | null {
+  const toolName = canonicalToolName(rawName)
+  const toolMap = Object.fromEntries(Object.entries(rawMap).map(([p, c]) => [canonicalToolName(p), c]))
   if (toolMap[toolName]) return toolMap[toolName]
   const globs = Object.entries(toolMap)
     .filter(([p]) => p.includes('*'))

@@ -11,10 +11,14 @@
   "scripts": {
     "build": "npm run build --workspace=core --workspace=mcp --workspace=web",
     "test": "npm test --workspaces --if-present",
-    "doctor": "npm run build --prefix core && npm run build --prefix mcp && node mcp/dist/cli.js doctor"
+    "doctor": "npm run build --prefix core && npm run build --prefix mcp && node mcp/dist/cli.js doctor",
+    "release": "node scripts/release.mjs"
   },
   "overrides": {
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

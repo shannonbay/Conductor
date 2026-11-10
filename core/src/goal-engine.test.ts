@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type Database from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, updateGoal, getGoal, insertRun, getRun, updateRun, insertMemory, listMemory, getMemory, updateTask, getTask, getPlan,
   addItem, buildBrief, queueRun, startRun, endRun, failRun, archiveResolved, withinActiveHours, decideTick, nextIntervalRun, recordSkip,
   approveTask, rejectTask, checkCompletion, GoalError, listRuns, MEMORY_BRIEF_CHARS,
 } from './index.js'
 
-let db: Database.Database
+let db: Database
 const now = new Date().toISOString()
 const plan = { id: 'g1', name: 'Inbox', description: null, status: 'active' as const, working_dir: '/tmp', created_at: now, updated_at: now }
 

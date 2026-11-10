@@ -9,7 +9,7 @@
  * "1.2", ...) shows the children as its to-dos; the root is only a heading.
  */
 import { randomUUID } from 'crypto'
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { getAllTasks, getPlan, getTask, insertPlan, insertTask, nextChildId, touchPlan, updateTask } from './queries.js'
 import type { PlanRow, Task, TaskStatus } from './types.js'
 

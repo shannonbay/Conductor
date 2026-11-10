@@ -3,7 +3,7 @@
  * person to confirm first), and holding all goal runs while the person's
  * usage limit is reached.
  */
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { getPlan, updatePlan } from './queries.js'
 import { getGoal, getMemory, getRun, insertMemory, updateGoal, updateMemory, updateRun } from './goals.js'
 import { failRun, GoalError } from './goal-engine.js'

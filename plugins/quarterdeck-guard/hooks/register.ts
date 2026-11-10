@@ -28,22 +28,36 @@ const RUNNER_PLUGIN = 'quarterdeck-goals'
 /** "Goal: <name> (<run id>)", the description quarterdeck-goals starts every run's agent with. */
 const RUN_DESCRIPTION = /^Goal: .* \((run_[A-Za-z0-9]+)\)$/
 
+/**
+ * The quarterdeck server's tool prefixes: provided by the quarterdeck-goals
+ * plugin (Claude Code names plugin servers' tools this way), or added by hand
+ * with `claude mcp add` (older installs). Every rule here works with either.
+ */
+export const SERVER_PREFIXES = ['mcp__plugin_quarterdeck-goals_quarterdeck__', 'mcp__quarterdeck__'] as const
+
+/** A quarterdeck server tool's own name (`decide_item`), or null for any other tool. */
+export function serverTool(tool: string): string | null {
+  const prefix = SERVER_PREFIXES.find((p) => tool.startsWith(p))
+  return prefix ? tool.slice(prefix.length) : null
+}
+
 /** Quarterdeck actions that are the person's (or the runner plugin's own bookkeeping). */
 const HUMAN_ONLY = new Set([
-  'mcp__quarterdeck__goals_tick',
-  'mcp__quarterdeck__decide_item',
-  'mcp__quarterdeck__cancel_run',
-  'mcp__quarterdeck__set_goal_status',
-  'mcp__quarterdeck__attach_agent',
-  'mcp__quarterdeck__fail_run',
-  'mcp__quarterdeck__guard_check',
-  'mcp__quarterdeck__create_goal',
-  'mcp__quarterdeck__delete_goal',
-  'mcp__quarterdeck__delete_memory',
-  'mcp__quarterdeck__set_schedule',
-  'mcp__quarterdeck__update_goal',
-  'mcp__quarterdeck__report_run_end',
+  'goals_tick',
+  'decide_item',
+  'cancel_run',
+  'set_goal_status',
+  'attach_agent',
+  'fail_run',
+  'guard_check',
+  'create_goal',
+  'delete_goal',
+  'delete_memory',
+  'set_schedule',
+  'update_goal',
+  'report_run_end',
 ])
+const isHumanOnly = (tool: string) => HUMAN_ONLY.has(serverTool(tool) ?? '')
 const HUMAN_ONLY_REASON = "This Quarterdeck action is the person's: they take it from the Goals pane (/goals)."
 
 const allow = { decision: 'allow' as const }
@@ -81,7 +95,7 @@ const approvedCalls = new Set<string>()
  */
 let guardCallsInFlight = 0
 /** The person-only tools this plugin itself calls, inside a run's loop. */
-const OWN_CALLS = new Set(['mcp__quarterdeck__guard_check', 'mcp__quarterdeck__report_run_end'])
+const OWN_CALLS = new Set(['guard_check', 'report_run_end'])
 
 type Verdict = { decision: 'allow' | 'deny'; category?: string; reason?: string }
 
@@ -93,10 +107,35 @@ function resultText(r: { text?: string; result?: unknown }): string {
   return JSON.stringify(r.result ?? null)
 }
 
+/** The prefix the session's quarterdeck server answered under last (a cache: callServer tries both). */
+let serverPrefix: string | null = null
+const NO_SUCH_TOOL = /no tool named "mcp__|no such tool available: mcp__|no implementation for tool.call/i
+
+/** Calls a quarterdeck server tool under whichever prefix the session has. */
+async function callServer($: $, name: string, input: Record<string, unknown>): Promise<Awaited<ReturnType<$['tool']['call']>>> {
+  const order = serverPrefix ? [serverPrefix, ...SERVER_PREFIXES.filter((p) => p !== serverPrefix)] : [...SERVER_PREFIXES]
+  let missing: unknown
+  for (const prefix of order) {
+    try {
+      const r = await $.tool.call({ tool: prefix + name, ...input } as never)
+      if (NO_SUCH_TOOL.test(resultText(r))) {
+        missing = new Error(resultText(r))
+        continue
+      }
+      serverPrefix = prefix
+      return r
+    } catch (err) {
+      if (!NO_SUCH_TOOL.test(err instanceof Error ? err.message : String(err))) throw err
+      missing = err
+    }
+  }
+  throw missing
+}
+
 async function guardCheck($: $, runId: string, tool: string): Promise<Verdict> {
   guardCallsInFlight++
   try {
-    const r = await $.tool.call({ tool: 'mcp__quarterdeck__guard_check', run_id: runId, tool_name: tool } as never)
+    const r = await callServer($, 'guard_check', { run_id: runId, tool_name: tool })
     if (r.deny !== undefined) throw new Error(r.deny)
     const text = resultText(r)
     if (r.isError === true || text.startsWith('Error:')) throw new Error(text)
@@ -112,7 +151,7 @@ const STOPPED = /limit|rate|quota|credits|overloaded|api error/i
 async function reportRunEnd($: $, runId: string, answer: string, reason: string, usage?: unknown): Promise<void> {
   guardCallsInFlight++
   try {
-    await $.tool.call({ tool: 'mcp__quarterdeck__report_run_end', run_id: runId, answer, reason, ...(usage ? { usage } : {}) } as never)
+    await callServer($, 'report_run_end', { run_id: runId, answer, reason, ...(usage ? { usage } : {}) })
   } finally {
     guardCallsInFlight--
   }
@@ -122,20 +161,21 @@ async function reportRunEnd($: $, runId: string, answer: string, reason: string,
  * Quarterdeck tools with an effect outside the computer: a run may use them only
  * as the goal's guard allows (its tool rules map them to an action category).
  */
-const GUARDED_QUARTERDECK = new Set(['mcp__quarterdeck__unsubscribe_one_click'])
+const GUARDED_QUARTERDECK = new Set(['unsubscribe_one_click'])
+const isGuardedQuarterdeck = (tool: string) => GUARDED_QUARTERDECK.has(serverTool(tool) ?? '')
 
 /** Fixed rules for a run's agent; null when the goal's guard or the session decides. */
 function fixedVerdict(tool: string) {
-  if (GUARDED_QUARTERDECK.has(tool)) return null
-  if (HUMAN_ONLY.has(tool) || tool === 'mcp__quarterdeck__run_goal' || tool.startsWith('mcp__quarterdeck-goals__')) return deny(HUMAN_ONLY_REASON)
+  if (isGuardedQuarterdeck(tool)) return null
+  if (isHumanOnly(tool) || serverTool(tool) === 'run_goal' || tool.startsWith('mcp__quarterdeck-goals__')) return deny(HUMAN_ONLY_REASON)
   if (tool === 'Agent') return deny('Goal runs work on their own; they do not start other agents.')
-  if (tool.startsWith('mcp__quarterdeck__') || (tool as string) === 'SubagentHandback') return allow
+  if (serverTool(tool) !== null || (tool as string) === 'SubagentHandback') return allow
   return null
 }
 
 /** The runner plugin's own work: its Quarterdeck calls, starting and stopping runs. */
 function isRunnerTool(tool: string): boolean {
-  return tool.startsWith('mcp__quarterdeck__') || tool === 'Agent' || tool === 'TaskStop'
+  return serverTool(tool) !== null || tool === 'Agent' || tool === 'TaskStop'
 }
 
 // ── Reports ───────────────────────────────────────────────────────────────────
@@ -177,7 +217,7 @@ export const register: Register = (on) => {
   // Permission
   on('tool.check', async ($, e, next) => {
     // This plugin's own guard check, in whichever loop the engine places it
-    if (OWN_CALLS.has(e.tool) && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return allow
+    if (OWN_CALLS.has(serverTool(e.tool) ?? '') && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return allow
     const runId = await runIdFor($, e.agentId)
     if (runId) {
       const fixed = fixedVerdict(e.tool)
@@ -187,7 +227,7 @@ export const register: Register = (on) => {
     }
     const fromRunner = e.agentId === undefined && next.origin?.plugin === RUNNER_PLUGIN
     if (fromRunner && isRunnerTool(e.tool)) return allow
-    if (HUMAN_ONLY.has(e.tool)) return deny(HUMAN_ONLY_REASON)
+    if (isHumanOnly(e.tool)) return deny(HUMAN_ONLY_REASON)
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -197,13 +237,13 @@ export const register: Register = (on) => {
     const runId = await runIdFor($, e.agentId)
     if (!runId) return next(e)
     if ((e.tool as string) === 'SubagentHandback') return { result: { success: true, message: 'Report saved by Quarterdeck (end_run).' } } as never
-    if (e.tool.startsWith('mcp__quarterdeck__') && !GUARDED_QUARTERDECK.has(e.tool)) return next({ ...e, run_scope: runId } as typeof e)
+    if (serverTool(e.tool) !== null && !isGuardedQuarterdeck(e.tool)) return next({ ...e, run_scope: runId } as typeof e)
     if (fixedVerdict(e.tool) === null) {
       const verdict = await guardCheck($, runId, e.tool)
       if (verdict.decision === 'deny') return { deny: verdict.reason ?? "Not allowed by the goal's autonomy." }
       if (verdict.category) approvedCalls.add(e.tool_use_id)
     }
-    return e.tool.startsWith('mcp__quarterdeck__') ? next({ ...e, run_scope: runId } as typeof e) : next(e)
+    return serverTool(e.tool) !== null ? next({ ...e, run_scope: runId } as typeof e) : next(e)
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {

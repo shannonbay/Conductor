@@ -78,6 +78,8 @@ export type Snapshot = {
   etag: string | null
   /** Set while goal runs are held because the usage limit is reached. */
   hold: { until: string; reason: string } | null
+  /** Set when a newer Quarterdeck in another session has upgraded the database: this session should /reload-plugins. */
+  outdated?: boolean
 }
 
 /** One to-do on the person's list. */

@@ -91,7 +91,8 @@ const TOOLS = [
  */
 type FakeTodoList = { id: string; name: string; items: { id: string; text: string; status: string; depth: number; notes: string | null }[] }
 
-export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string } } = {}) {
+export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string }; outdated?: boolean; prefix?: string } = {}) {
+  const prefix = opts.prefix ?? 'mcp__quarterdeck__'
   const lists: FakeTodoList[] = opts.todos ?? []
   const listView = () => lists.map((l) => {
     const done = l.items.filter((i) => i.status === 'completed').length
@@ -107,10 +108,10 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
   const ended: Record<string, string> = {}
 
   for (const name of TOOLS) {
-    on('tool.call', { tool: `mcp__quarterdeck__${name}` }, (_, e) => {
+    on('tool.call', { tool: `${prefix}${name}` as `mcp__quarterdeck__${string}` }, (_, e) => {
       // Record only the plugin's own arguments, not the fields the engine sets on every call
       const { tool: _t, tool_use_id: _u, agentId: _a, ...input } = e as unknown as Record<string, unknown>
-      if (opts.fail) throw new Error(`$.tool.call: no tool named "mcp__quarterdeck__${name}" in this session`)
+      if (opts.fail) throw new Error(`$.tool.call: no tool named "${prefix}${name}" in this session`)
       calls.push({ tool: name, input })
       const error = opts.errors?.[name]
       if (error) return { result: `Error: ${error}`, isError: true } as never
@@ -118,7 +119,7 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
       switch (name) {
         case 'goals_overview':
           if (input.etag === etag()) return ok({ changed: false, etag: etag() }) as never
-          return ok({ changed: true, etag: etag(), goals: goals.map((x) => ({ ...x, open_item_count: x.open_items.length })), hold: opts.hold ?? null }) as never
+          return ok({ changed: true, etag: etag(), goals: goals.map((x) => ({ ...x, open_item_count: x.open_items.length })), hold: opts.hold ?? null, ...(opts.outdated ? { outdated: true } : {}) }) as never
         case 'delete_goal': {
           const at = goals.findIndex((x) => x.id === input.goal_id)
           if (at >= 0) goals.splice(at, 1)

@@ -2,19 +2,18 @@
 
 A Claude Code plugin that runs your Quarterdeck goals and puts them beside the chat. While Claude Code is open it starts each due goal run in a background subagent of its own. You approve or reject proposals, run, pause and inspect goals, and get alerts, all without leaving Claude Code. Claude can also check on your goals and act on them, always asking you first before it changes anything.
 
-It needs the `quarterdeck` MCP server, added for your user so it loads in every session (`claude mcp add --scope user quarterdeck -- node <path to Quarterdeck>/mcp/dist/index.js`, see Quarterdeck's README) and its companion plugin **quarterdeck-guard**, which keeps each run within its goal. The web app is optional: it gives goal pages in a browser and webhook triggers.
+It brings the `quarterdeck` MCP server with it (`.mcp.json` starts the bundled `server/quarterdeck-mcp.mjs`; Claude Code names its tools `mcp__plugin_quarterdeck-goals_quarterdeck__*`), and depends on its companion plugin **quarterdeck-guard**, which keeps each run within its goal. The web app is optional: it gives goal pages in a browser and webhook triggers.
 
 ## Install
 
-From a terminal, with this repository checked out:
-
 ```bash
-claude plugin marketplace add <path to the Quarterdeck repo>
+claude plugin marketplace add shannonbay/Quarterdeck#release
 claude plugin install quarterdeck-goals@quarterdeck --scope user
-claude plugin install quarterdeck-guard@quarterdeck --scope user
 ```
 
-Claude Code reads the plugins straight from `plugins/`, so after an edit run `/reload-plugins`. `npm run doctor` reports whether both are installed. Without the guard plugin no run starts, and the pane says so.
+quarterdeck-guard is installed with it. Turn on auto-update for the marketplace (`/plugin` → Marketplaces → quarterdeck → Enable auto-update) to get new versions, server included, then `/reload-plugins` when Claude Code says one arrived. Without the guard plugin no run starts, and the pane says so. An older hand-added `quarterdeck` server (`mcp__quarterdeck__*`) still works, but remove it once the plugin's is running (`claude mcp remove quarterdeck --scope user`) so two copies don't run.
+
+For development, add your checkout as the marketplace instead (`claude plugin marketplace add <path to the Quarterdeck repo>`). Claude Code then reads the plugins straight from `plugins/`: after an edit run `npm run build` (which bundles the server into `server/`) and `/reload-plugins`. `npm run doctor` reports what's installed.
 
 ## How runs work
 

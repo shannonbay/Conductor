@@ -18,13 +18,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
-  "dependencies": {
-    "better-sqlite3": "^13.0.3"
-  },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.8",
-    "@types/node": "^20.11.5",
+    "@types/node": "^22.13.0",
     "typescript": "^5.3.3",
     "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

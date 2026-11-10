@@ -82,77 +82,56 @@ The Next.js app shares the database and shows each goal as a page: items waiting
 
 ## Quickstart
 
-### MCP server (Claude Code)
+### Install (Claude Code)
+
+You need Claude Code and Node.js 22.13 or newer. From a terminal:
+
+```bash
+claude plugin marketplace add shannonbay/Quarterdeck#release
+claude plugin install quarterdeck-goals@quarterdeck --scope user
+```
+
+That's the whole setup. `quarterdeck-guard` comes with it as a dependency, and the plugin brings the `quarterdeck` MCP server with it, so there is nothing to clone, build or `claude mcp add`. Start Claude Code (or `/reload-plugins`) and type `/goals` to open the Goals pane. Due runs start on their own while Claude Code is open. The web app is optional.
+
+See [`plugins/quarterdeck-goals`](plugins/quarterdeck-goals/README.md) for the pane, commands, settings and how runs work, and [`plugins/quarterdeck-guard`](plugins/quarterdeck-guard/README.md) for what a run may do.
+
+### Turn on updates
+
+Claude Code updates Anthropic's marketplaces on its own but leaves others to you. Turn it on once: in Claude Code, `/plugin` → **Marketplaces** → **quarterdeck** → **Enable auto-update**. New versions then arrive in the background, and Claude Code says `Plugin updated · Run /reload-plugins to apply`. The plugins and the MCP server update together. Or update by hand at any time:
+
+```bash
+claude plugin update quarterdeck-goals@quarterdeck
+```
+
+With several sessions open, `/reload-plugins` in each. Until you do, a session that's still on the old version stops starting goal runs and its Goals pane says so: the updated session runs them.
+
+### Upgrading from a manual install
+
+If you set Quarterdeck up from a clone before (`claude mcp add ... quarterdeck`), remove the hand-added server so two copies don't run, then install as above:
+
+```bash
+claude mcp remove quarterdeck --scope user
+claude plugin marketplace remove quarterdeck
+```
+
+Your goals stay where they are, in `~/.quarterdeck/tasks.db`. The plugin's server names its tools `mcp__plugin_quarterdeck-goals_quarterdeck__*` (Claude Code's naming for a plugin's server), not `mcp__quarterdeck__*`. Goals' tool rules work with either name. Permission rules in your settings that name the old tools need the new prefix, and `npm run doctor` points them out.
+
+### Developing Quarterdeck
 
 ```bash
 git clone https://github.com/shannonbay/Quarterdeck
 cd Quarterdeck
 npm install
-cd mcp && npm run build
-```
-
-With npm 11 or newer, `npm install` may say it held back some install scripts. Quarterdeck's database library, `better-sqlite3`, usually ships a ready-built binary, but if `npm run doctor` (or the MCP server) says it can't load, run `npm install-scripts approve better-sqlite3` and then `npm rebuild better-sqlite3` from the repo root.
-
-Add the server for your user, so goals work in every Claude Code session, whatever folder it starts in:
-
-```bash
-claude mcp add --scope user quarterdeck -- node /path/to/Quarterdeck/mcp/dist/index.js
-```
-
-Or add it to one project's `.mcp.json`. Goals then work only in sessions started in that project:
-
-```json
-{
-  "mcpServers": {
-    "quarterdeck": {
-      "command": "node",
-      "args": ["/path/to/Quarterdeck/mcp/dist/index.js"]
-    }
-  }
-}
-```
-
-Or run without compiling using `tsx` (macOS/Linux):
-
-```json
-{
-  "mcpServers": {
-    "quarterdeck": {
-      "command": "npx",
-      "args": ["tsx", "/path/to/Quarterdeck/mcp/src/index.ts"]
-    }
-  }
-}
-```
-
-On Windows, use `cmd /c`:
-
-```json
-{
-  "mcpServers": {
-    "quarterdeck": {
-      "command": "cmd",
-      "args": ["/c", "npx", "tsx", "C:/path/to/Quarterdeck/mcp/src/index.ts"]
-    }
-  }
-}
-```
-
-### Goals in Claude Code (the plugins)
-
-The repository is a Claude Code plugin marketplace. From a terminal:
-
-```bash
-claude plugin marketplace add /path/to/Quarterdeck
+npm run build
+claude plugin marketplace add .
 claude plugin install quarterdeck-goals@quarterdeck --scope user
-claude plugin install quarterdeck-guard@quarterdeck --scope user
 ```
 
-Start (or `/reload-plugins` in) Claude Code with the `quarterdeck` MCP server configured as above, then type `/goals` to open the Goals pane. That's all goals need; the web app is optional. Due runs start on their own while Claude Code is open. quarterdeck-goals starts no run without the guard plugin, and the pane says so.
-
-See [`plugins/quarterdeck-goals`](plugins/quarterdeck-goals/README.md) for the pane, commands, settings and how runs work, and [`plugins/quarterdeck-guard`](plugins/quarterdeck-guard/README.md) for what a run may do.
+A local-folder marketplace is read straight from your checkout. After changing code, run `npm run build` (it bundles the server into `plugins/quarterdeck-goals/server/`, which is gitignored on main), then `/reload-plugins`. Releases: `npm run release -- <version>` tests everything, sets the version in both plugin.json files, and commits the built marketplace to the `release` branch with tags (add `--push` to publish).
 
 ### Web app (optional)
+
+The web app runs from a clone (see [Developing Quarterdeck](#developing-quarterdeck) for `npm install`):
 
 ```bash
 cd web && npm run dev
@@ -174,11 +153,11 @@ Open [http://localhost:3000](http://localhost:3000) for goal pages and webhooks.
 npm run doctor
 ```
 
-Rebuilds `core/` and `mcp/`, then checks Node.js, the SQLite native module, the database and schema, `.mcp.json` and whether `quarterdeck` is added for your user, leftover hooks from older versions, both goal plugins, the optional web app, and whether your active goals can run. Anything wrong comes with the command to fix it.
+Rebuilds `core/` and `mcp/`, then checks Node.js, the database and its schema version, the server bundle, where the `quarterdeck` server comes from (the plugin, and no second hand-added copy), leftover hooks from older versions, both goal plugins, whether updates are automatic, old permission rules, the optional web app, and whether your active goals can run. Anything wrong comes with the command to fix it. Without a clone, run the same checks with the copy inside the plugin: `node ~/.claude/plugins/cache/quarterdeck/quarterdeck-goals/<version>/server/quarterdeck-cli.mjs doctor`.
 
 ## Database
 
-Both the MCP server and web app write to `~/.quarterdeck/tasks.db` (SQLite, WAL mode). Override the path with the `QUARTERDECK_DB` environment variable — set it to `:memory:` in tests for an isolated in-memory database. The schema lives in one place, `core/src/migrate.ts`, and every change made by Claude or by you is recorded in the `events` table.
+Both the MCP server and web app write to `~/.quarterdeck/tasks.db` (SQLite through Node's built-in `node:sqlite`, WAL mode). Override the path with the `QUARTERDECK_DB` environment variable — set it to `:memory:` in tests for an isolated in-memory database. The schema lives in one place, `core/src/migrate.ts`, and every change made by Claude or by you is recorded in the `events` table.
 
 ## Project structure
 
@@ -202,9 +181,10 @@ Quarterdeck/
     __tests__/       Vitest test suites
     server.ts        Custom HTTP + WebSocket server
   plugins/
-    quarterdeck-goals/        Claude Code plugin: goal runner (subagents), Goals pane, /goal* commands
+    quarterdeck-goals/        Claude Code plugin: goal runner (subagents), Goals pane, /goal* commands, and the MCP server (.mcp.json, server/ built by `npm run build`)
     quarterdeck-guard/  Claude Code plugin: what a goal run may do
   .claude-plugin/    marketplace.json: makes the repo a plugin marketplace ("quarterdeck")
+  scripts/release.mjs  `npm run release`: builds and publishes to the release branch
   specs/             Original design specs
 ```
 
@@ -232,6 +212,8 @@ The packages use Vitest with `QUARTERDECK_DB=:memory:` so tests are isolated and
 | `QUARTERDECK_REQUIRE_DECOMPOSE` | off | MCP server, plan tools: `1` blocks activating a task with no sub-tasks unless `state.atomic` is true |
 | `QUARTERDECK_STRICT_COMPLETE` | off | MCP server, plan tools: `1` blocks completing a task while any child is unresolved (otherwise a warning) |
 | `QUARTERDECK_ALLOWED_HOSTS` | — | Web server: extra `host:port` values to accept besides localhost (comma-separated) |
+
+The MCP server gets Claude Code's environment, so set its variables where Claude Code starts, or under `env` in `~/.claude/settings.json`.
 
 **Renamed from Conductor.** Quarterdeck used to be called Conductor. The old `CONDUCTOR_*` env vars and the `x-conductor-secret` webhook header still work, and a database left in `~/.conductor` is used until you move it. `npm run doctor` lists anything still set up under the old name (the data folder, a `conductor` MCP server entry, the old `conductor-goals` plugins) and how to switch it over.
 

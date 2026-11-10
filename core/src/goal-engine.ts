@@ -2,7 +2,7 @@
  * Persistent goals — behaviour: work items, the run brief, run lifecycle,
  * retention, and the scheduler's decisions. Storage lives in goals.ts.
  */
-import type { Database } from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import { getPlan, getTask, insertTask, nextChildId, compareTaskIds, deserializeTask } from './queries.js'
 import { isProposal } from './gates.js'
 import {

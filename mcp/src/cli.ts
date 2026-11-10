@@ -14,7 +14,7 @@ if (command === 'doctor') {
     'Commands:',
     '  doctor    Check that Quarterdeck is installed and configured correctly',
     '',
-    'The MCP server itself is started by Claude Code from .mcp.json (mcp/dist/index.js).',
+    'The MCP server itself is started by Claude Code from the quarterdeck-goals plugin (server/quarterdeck-mcp.mjs).',
   ].join('\n'))
   process.exit(command === undefined || command === 'help' || command === '--help' ? 0 : 1)
 }

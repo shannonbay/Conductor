@@ -28,8 +28,7 @@ export interface DoctorOptions {
 
 export function defaultOptions(): DoctorOptions {
   return {
-    // This file lives in mcp/src (dev) or mcp/dist (built); the repo root is two levels up.
-    repoRoot: resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'),
+    repoRoot: findRepoRoot(dirname(fileURLToPath(import.meta.url))),
     cwd: process.cwd(),
     home: homedir(),
     env: process.env,
@@ -38,35 +37,33 @@ export function defaultOptions(): DoctorOptions {
   }
 }
 
+/**
+ * The Quarterdeck checkout this file runs from: mcp/src, mcp/dist, or the
+ * plugin's server/ bundle. An installed plugin isn't in a checkout, so this
+ * falls back to two levels up and the build checks skip themselves.
+ */
+function findRepoRoot(from: string): string {
+  for (let dir = from; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, 'core', 'src')) && existsSync(join(dir, 'mcp', 'src'))) return dir
+    if (dirname(dir) === dir) return resolve(from, '..', '..')
+  }
+}
+
+const PLUGIN = 'quarterdeck-goals@quarterdeck'
+const GUARD_PLUGIN = 'quarterdeck-guard@quarterdeck'
+
 const ok = (name: string, detail: string): CheckResult => ({ name, level: 'ok', detail })
 const warn = (name: string, detail: string, fix?: string): CheckResult => ({ name, level: 'warn', detail, fix })
 const fail = (name: string, detail: string, fix?: string): CheckResult => ({ name, level: 'fail', detail, fix })
 
 // ── Individual checks ─────────────────────────────────────────────────────────
 
+/** node:sqlite (the built-in database Quarterdeck uses) works without a flag from Node 22.13. */
 export function checkNode(o: DoctorOptions): CheckResult {
-  const major = Number(o.nodeVersion.split('.')[0])
-  return major >= 22
+  const [major, minor] = o.nodeVersion.split('.').map(Number)
+  return major > 22 || (major === 22 && minor >= 13)
     ? ok('Node.js', `v${o.nodeVersion}`)
-    : fail('Node.js', `v${o.nodeVersion} is too old (better-sqlite3 13 needs Node 22+)`, 'Install Node.js 22 or newer, then run `npm install`.')
-}
-
-/**
- * Why better-sqlite3's native part didn't load, and the fix; null when the error
- * is something else. Never built usually means npm held back its install script
- * (npm 11 asks before running install scripts).
- */
-export function nativeLoadProblem(msg: string): { detail: string; fix: string } | null {
-  if (/NODE_MODULE_VERSION/.test(msg)) {
-    return { detail: 'better-sqlite3 was built for a different Node.js version', fix: 'Run `npm rebuild better-sqlite3` (or `npm install`) from the repo root.' }
-  }
-  if (/bindings file|better_sqlite3\.node|Cannot find module.*better-sqlite3|was compiled against|prebuild/i.test(msg)) {
-    return {
-      detail: "better-sqlite3's native part isn't built (npm may have held back its install script)",
-      fix: 'From the repo root, run `npm install-scripts approve better-sqlite3` (npm 11+), then `npm rebuild better-sqlite3`.',
-    }
-  }
-  return null
+    : fail('Node.js', `v${o.nodeVersion} is too old (Quarterdeck's built-in database, node:sqlite, needs Node 22.13+)`, 'Install Node.js 22.13 or newer.')
 }
 
 export async function checkDatabase(o: DoctorOptions): Promise<CheckResult[]> {
@@ -74,13 +71,7 @@ export async function checkDatabase(o: DoctorOptions): Promise<CheckResult[]> {
   try {
     core = await import('@quarterdeck/core')
   } catch (e) {
-    const msg = (e as Error).message
-    const native = nativeLoadProblem(msg)
-    return [fail(
-      'SQLite native module',
-      native ? native.detail : `could not load @quarterdeck/core: ${firstLine(msg)}`,
-      native ? native.fix : 'Run `npm install` and `npm run build --prefix core` from the repo root.',
-    )]
+    return [fail('Database', `could not load @quarterdeck/core: ${firstLine((e as Error).message)}`, 'Run `npm install` and `npm run build --prefix core` from the repo root.')]
   }
 
   const path = core.defaultDbPath(o.env, o.home)
@@ -92,13 +83,16 @@ export async function checkDatabase(o: DoctorOptions): Promise<CheckResult[]> {
       const present = new Set((db.prepare("SELECT name FROM sqlite_master WHERE type = 'trigger'").all() as { name: string }[]).map((r) => r.name))
       const missing = core.REVISION_TRIGGERS.filter((t) => !present.has(t))
       const mode = String(db.pragma('journal_mode', { simple: true }))
-      const results = [
-        ok('SQLite native module', 'better-sqlite3 loads'),
-        ok('Database', `${path} — ${plans} plans, ${tasks} tasks`),
-      ]
-      results.push(missing.length === 0
-        ? ok('Schema', 'up to date (revision triggers present)')
-        : fail('Schema', `missing triggers: ${missing.join(', ')}`, 'Rebuild core (`npm run build --prefix core`) and rerun.'))
+      const version = core.dbSchemaVersion(db)
+      const results = [ok('Database', `${path} — ${plans} plans, ${tasks} tasks`)]
+      if (missing.length) {
+        results.push(fail('Schema', `missing triggers: ${missing.join(', ')}`, 'Rebuild core (`npm run build --prefix core`) and rerun.'))
+      } else if (core.schemaOutdated(db)) {
+        results.push(warn('Schema', `version ${version}, newer than this Quarterdeck (${core.SCHEMA_VERSION}): a newer version has used the database`,
+          'Update the plugin (`claude plugin update quarterdeck-goals@quarterdeck`), then /reload-plugins in every open session.'))
+      } else {
+        results.push(ok('Schema', `up to date (version ${version})`))
+      }
       if (path !== ':memory:' && mode !== 'wal') {
         results.push(warn('Journal mode', `${mode} (expected wal)`, 'Close other programs using the database and rerun.'))
       }
@@ -108,7 +102,6 @@ export async function checkDatabase(o: DoctorOptions): Promise<CheckResult[]> {
     }
   } catch (e) {
     return [
-      ok('SQLite native module', 'better-sqlite3 loads'),
       fail('Database', `cannot open ${path}: ${firstLine((e as Error).message)}`, 'Check the path is writable, or set QUARTERDECK_DB to a writable file.'),
     ]
   }
@@ -119,7 +112,7 @@ export function checkBuild(o: DoctorOptions, pkg: 'core' | 'mcp'): CheckResult {
   const name = `${pkg}/ build`
   const srcDir = join(o.repoRoot, pkg, 'src')
   const entry = join(o.repoRoot, pkg, 'dist', 'index.js')
-  if (!existsSync(srcDir)) return warn(name, 'not running from a Quarterdeck checkout — skipped')
+  if (!existsSync(srcDir)) return ok(name, 'not a Quarterdeck checkout (installed plugin) — skipped')
   if (!existsSync(entry)) return fail(name, `${pkg}/dist/index.js is missing`, `Run \`npm run build --prefix ${pkg}\`.`)
   const newestSrc = newestMtime(srcDir)
   const built = statSync(entry).mtimeMs
@@ -128,60 +121,82 @@ export function checkBuild(o: DoctorOptions, pkg: 'core' | 'mcp'): CheckResult {
     : ok(name, 'up to date')
 }
 
-/**
- * Goals work in every session only when `quarterdeck` is added for the user
- * (~/.claude.json). A repo .mcp.json loads only in sessions started in the repo,
- * so elsewhere the plugins find no quarterdeck tools.
- */
-export function checkUserScope(o: DoctorOptions): CheckResult {
-  const name = 'quarterdeck in every project'
-  let servers: Record<string, unknown> = {}
-  try {
-    servers = JSON.parse(readFileSync(join(o.home, '.claude.json'), 'utf8')).mcpServers ?? {}
-  } catch {
-    // no user config yet: treated as not added
-  }
-  if (servers.quarterdeck) return ok(name, 'added for your user')
-  const script = join(o.repoRoot, 'mcp', 'dist', 'index.js').replace(/\\/g, '/')
-  return warn(name, "only in this repo's .mcp.json, so goals, the Goals pane and /goal-new work only in sessions started here",
-    `Run \`claude mcp add --scope user quarterdeck -- node ${script}\`, then restart Claude Code.`)
+/** The bundled server the plugin starts, built from mcp/ and core/ (`npm run build`). */
+export function checkBundle(o: DoctorOptions): CheckResult {
+  const name = 'Plugin server bundle'
+  const srcDir = join(o.repoRoot, 'mcp', 'src')
+  const bundle = join(o.repoRoot, 'plugins', 'quarterdeck-goals', 'server', 'quarterdeck-mcp.mjs')
+  if (!existsSync(srcDir)) return ok(name, 'not a Quarterdeck checkout (installed plugin) — skipped')
+  if (!existsSync(bundle)) return fail(name, 'plugins/quarterdeck-goals/server/quarterdeck-mcp.mjs is missing, so the plugin has no server', 'Run `npm run build --prefix mcp`, then /reload-plugins.')
+  const built = statSync(bundle).mtimeMs
+  return Math.max(newestMtime(srcDir), newestMtime(join(o.repoRoot, 'core', 'src'))) > built + 1000
+    ? warn(name, 'source files changed since the last build', 'Run `npm run build --prefix mcp`, then /reload-plugins.')
+    : ok(name, 'up to date')
 }
 
-export function checkMcpConfig(o: DoctorOptions): CheckResult[] {
-  const file = [join(o.cwd, '.mcp.json'), join(o.repoRoot, '.mcp.json')].find((f) => existsSync(f))
-  if (!file) {
-    return [warn('.mcp.json', 'not found in this directory or the repo root',
-      'Add a `quarterdeck` server entry pointing at mcp/dist/index.js (see README).')]
-  }
-  let servers: Record<string, { command?: string; args?: string[]; env?: Record<string, string> }>
-  try {
-    servers = JSON.parse(readFileSync(file, 'utf8')).mcpServers ?? {}
-  } catch (e) {
-    return [fail('.mcp.json', `${file} is not valid JSON: ${firstLine((e as Error).message)}`, 'Fix the JSON syntax.')]
-  }
+type ServerEntry = { command?: string; args?: string[]; env?: Record<string, string> }
 
+/**
+ * Where the `quarterdeck` server comes from. The quarterdeck-goals plugin
+ * provides it (and updates it); one also added by hand (`claude mcp add`, or a
+ * project .mcp.json) runs a second, older copy beside it.
+ */
+export function checkServerSetup(o: DoctorOptions): CheckResult[] {
+  const name = 'quarterdeck MCP server'
+  const user = (readJson(join(o.home, '.claude.json')) as { mcpServers?: Record<string, ServerEntry> }).mcpServers ?? {}
+  const projectFile = [join(o.cwd, '.mcp.json'), join(o.repoRoot, '.mcp.json')].find((f) => existsSync(f))
+  const project = projectFile ? (readJson(projectFile) as { mcpServers?: Record<string, ServerEntry> }).mcpServers ?? {} : {}
+  const plugin = enabledPlugins(o)[PLUGIN] === true
+  const byHand = [user.quarterdeck && 'added for your user', project.quarterdeck && `in ${projectFile}`].filter(Boolean) as string[]
   const results: CheckResult[] = []
-  const quarterdeck = servers.quarterdeck
-  if (!quarterdeck) {
-    results.push(fail('.mcp.json quarterdeck', `no "quarterdeck" server in ${file}`, 'Add one with command "node" and args ["<repo>/mcp/dist/index.js"].'))
-  } else {
-    const script = (quarterdeck.args ?? []).find((a) => /\.(m?js|ts)$/.test(a))
-    if (script && !existsSync(resolve(dirname(file), script))) {
-      results.push(fail('.mcp.json quarterdeck', `server script not found: ${script}`, 'Fix the path, or build it with `npm run build --prefix mcp`.'))
-    } else {
-      const flags = ['REQUIRE_DECOMPOSE', 'STRICT_COMPLETE'].filter((k) => (quarterdeck.env?.[`QUARTERDECK_${k}`] ?? quarterdeck.env?.[`CONDUCTOR_${k}`]) === '1').map((k) => `QUARTERDECK_${k}`)
-      results.push(ok('.mcp.json quarterdeck', `configured${flags.length ? ` (${flags.join(', ')})` : ''}`))
-    }
+  if (plugin && byHand.length) {
+    const fixes = [user.quarterdeck && 'Run `claude mcp remove --scope user quarterdeck`', project.quarterdeck && `remove "quarterdeck" from ${projectFile}`].filter(Boolean)
+    results.push(warn(name, `provided by the ${PLUGIN} plugin, but also set up by hand (${byHand.join('; ')}), so two copies run`,
+      `${fixes.join(' and ')}, then restart Claude Code.`.replace(/^r/, 'R')))
+  } else if (plugin) {
+    results.push(ok(name, `provided by the ${PLUGIN} plugin`))
+  } else if (byHand.length) {
+    results.push(warn(name, `set up by hand (${byHand.join('; ')}), so it doesn't update`,
+      'Install the quarterdeck-goals plugin (see the plugins check), then remove the hand-added server.'))
   }
-  if (servers['conductor-channel']) {
+  if (project['conductor-channel']) {
     results.push(warn('.mcp.json conductor-channel', 'the channel server was removed, so this entry fails to start', 'Remove "conductor-channel" from .mcp.json.'))
   }
-  for (const [name, s] of Object.entries(servers)) {
-    if (process.platform === 'win32' && s.command === 'npx') {
-      results.push(warn(`.mcp.json ${name}`, '"npx" can\'t be launched directly on Windows', 'Use "command": "cmd" with args ["/c", "npx", ...].'))
-    }
-  }
   return results
+}
+
+/**
+ * Permission rules written for the hand-added server's tool names
+ * (`mcp__quarterdeck__*`) don't cover the plugin server's
+ * (`mcp__plugin_quarterdeck-goals_quarterdeck__*`). Null when there are none.
+ */
+export function checkPermissionRules(o: DoctorOptions): CheckResult | null {
+  if (enabledPlugins(o)[PLUGIN] !== true) return null
+  const files = [join(o.home, '.claude', 'settings.json'), join(o.cwd, '.claude', 'settings.json'), join(o.cwd, '.claude', 'settings.local.json')]
+  const stale = files.filter((f) => {
+    const perms = (readJson(f) as { permissions?: Record<string, unknown> }).permissions
+    return perms !== undefined && JSON.stringify(perms).includes('mcp__quarterdeck__')
+  })
+  if (!stale.length) return null
+  return warn('Permission rules', `${stale.join(', ')} ${stale.length === 1 ? 'has' : 'have'} rules for mcp__quarterdeck__* tools, which the plugin's server names mcp__plugin_quarterdeck-goals_quarterdeck__*`,
+    'Change those rules to the new prefix (or keep both).')
+}
+
+/**
+ * Updates reach you when auto-update is on for the quarterdeck marketplace
+ * (Claude Code leaves it off for marketplaces other than Anthropic's). Null
+ * when the marketplace isn't added (checkPlugin says how).
+ */
+export function checkUpdates(o: DoctorOptions): CheckResult | null {
+  const known = readJson(join(o.home, '.claude', 'plugins', 'known_marketplaces.json')) as Record<string, { source?: { source?: string; path?: string }; autoUpdate?: boolean }>
+  const m = known.quarterdeck
+  if (!m) return null
+  const name = 'Updates'
+  if (m.source?.source === 'directory') return ok(name, `from your local folder${m.source.path ? ` ${m.source.path}` : ''} (after changes: \`npm run build\`, then /reload-plugins)`)
+  return m.autoUpdate === true
+    ? ok(name, 'automatic (after one arrives, /reload-plugins or restart to use it)')
+    : warn(name, 'auto-update is off for the quarterdeck marketplace, so new versions arrive only when you update by hand',
+        'In Claude Code: /plugin → Marketplaces → quarterdeck → Enable auto-update. Or now: `claude plugin update quarterdeck-goals@quarterdeck`.')
 }
 
 export function checkHooks(o: DoctorOptions): CheckResult {
@@ -204,8 +219,8 @@ export function checkHooks(o: DoctorOptions): CheckResult {
   return ok('Claude Code hooks', 'up to date (none needed)')
 }
 
-const PLUGIN = 'quarterdeck-goals@quarterdeck'
-const GUARD_PLUGIN = 'quarterdeck-guard@quarterdeck'
+/** Where releases are published: the `release` branch on GitHub. */
+export const MARKETPLACE_SOURCE = 'shannonbay/Quarterdeck#release'
 
 /**
  * The Claude Code plugins that run goals: quarterdeck-goals (Goals pane, the
@@ -213,14 +228,8 @@ const GUARD_PLUGIN = 'quarterdeck-guard@quarterdeck'
  * each run within its goal; without it no run starts).
  */
 export function checkPlugin(o: DoctorOptions): CheckResult {
-  const install = (p: string) => `Run \`claude plugin marketplace add ${o.repoRoot}\` then \`claude plugin install ${p} --scope user\`.`
-  const file = join(o.home, '.claude', 'settings.json')
-  let enabled: Record<string, unknown> = {}
-  try {
-    enabled = (JSON.parse(readFileSync(file, 'utf8')) as { enabledPlugins?: Record<string, unknown> }).enabledPlugins ?? {}
-  } catch {
-    // a missing or broken settings file is reported by checkHooks
-  }
+  const install = (p: string) => `Run \`claude plugin marketplace add ${MARKETPLACE_SOURCE}\` then \`claude plugin install ${p} --scope user\`.`
+  const enabled = enabledPlugins(o)
   const name = 'Claude Code plugins'
   if (enabled[PLUGIN] === false) return warn(name, `${PLUGIN} is installed but disabled`, `Run \`claude plugin enable ${PLUGIN}\`.`)
   if (enabled[PLUGIN] !== true) return warn(name, `${PLUGIN} not installed (it runs goals and shows the Goals pane)`, install(PLUGIN))
@@ -303,11 +312,11 @@ export async function runDoctor(o: DoctorOptions = defaultOptions()): Promise<Ch
     ...db,
     checkBuild(o, 'core'),
     checkBuild(o, 'mcp'),
-    ...checkMcpConfig(o),
-    checkUserScope(o),
+    checkBundle(o),
+    ...checkServerSetup(o),
     checkHooks(o),
     plugins,
-    ...[checkRenameLeftovers(o)].filter((r): r is CheckResult => r !== null),
+    ...[checkUpdates(o), checkPermissionRules(o), checkRenameLeftovers(o)].filter((r): r is CheckResult => r !== null),
     web,
     ...[await checkGoals(o, plugins)].filter((r): r is CheckResult => r !== null),
   ]
@@ -327,6 +336,15 @@ export function formatResults(results: CheckResult[]): string {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+function readJson(file: string): Record<string, unknown> {
+  try { return JSON.parse(readFileSync(file, 'utf8')) } catch { return {} }
+}
+
+/** Plugins on or off in ~/.claude/settings.json (a missing or broken file is reported by checkHooks). */
+function enabledPlugins(o: DoctorOptions): Record<string, unknown> {
+  return (readJson(join(o.home, '.claude', 'settings.json')) as { enabledPlugins?: Record<string, unknown> }).enabledPlugins ?? {}
+}
 
 function firstLine(s: string): string {
   return s.split('\n')[0]

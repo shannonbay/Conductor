@@ -2,12 +2,12 @@
   "name": "@quarterdeck/mcp",
   "version": "1.0.0",
   "license": "Apache-2.0",
-  "description": "Task Tree MCP Server — persistent hierarchical task management for LLM agents",
+  "description": "Quarterdeck MCP server: persistent goals for AI agents (bundled into the quarterdeck-goals plugin)",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "prebuild": "npm run build --prefix ../core",
-    "build": "tsc",
+    "build": "tsc && node scripts/bundle.mjs",
     "predev": "npm run build --prefix ../core",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
@@ -17,24 +17,27 @@
     "test:watch": "vitest",
     "postinstall": "node scripts/install-hooks.mjs",
     "setup-hooks": "node scripts/install-hooks.mjs",
-    "doctor": "node dist/cli.js doctor"
+    "doctor": "node dist/cli.js doctor",
+    "bundle": "node scripts/bundle.mjs"
   },
   "dependencies": {
     "@quarterdeck/core": "*",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "better-sqlite3": "^13.0.3",
     "nanoid": "^5.0.7",
     "zod": "^3.22.4",
     "zod-to-json-schema": "^3.22.4"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.8",
-    "@types/node": "^20.11.5",
+    "@types/node": "^22.13.0",
     "tsx": "^4.7.0",
     "typescript": "^5.3.3",
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "esbuild": "0.27.4"
   },
   "bin": {
     "quarterdeck": "dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22.13"
   }
 }

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Quarterdeck runs **persistent goals** for AI agents — standing objectives like "keep my inbox under control" that never finish. A goal's state (instructions, open work items, memory, human decisions, run history) lives in SQLite outside any agent; the quarterdeck-goals Claude Code plugin starts each due run in a background subagent, each run reads a one-call brief (`get_goal_brief`) and ends with a summary (`end_run`), and a human approves proposed actions from the Goals pane (or the goal page in the web app). The main use case is goals; **plans** (finite task trees with verification gates) are the underlying building block and still work on their own for long multi-session projects.
 
-Parts: an **MCP server** (`mcp/`, the tools agents and the plugins call), two **Claude Code plugins** (`plugins/quarterdeck-goals` runs goals and shows the Goals pane; `plugins/quarterdeck-guard` keeps each run within its goal), and a **Next.js web app** (`web/`, optional: goal pages and webhooks). Shared schema and logic live in `core/`. Design spec: `specs/persistent-goals.md` (phases 1, 2 and 2.5 built).
+Parts: an **MCP server** (`mcp/`, the tools agents and the plugins call; bundled into the quarterdeck-goals plugin, which starts it), two **Claude Code plugins** (`plugins/quarterdeck-goals` runs goals and shows the Goals pane; `plugins/quarterdeck-guard` keeps each run within its goal), and a **Next.js web app** (`web/`, optional: goal pages and webhooks). Shared schema and logic live in `core/`. Design spec: `specs/persistent-goals.md` (phases 1, 2 and 2.5 built).
 
 ## Repository Structure
 
@@ -14,7 +14,8 @@ Parts: an **MCP server** (`mcp/`, the tools agents and the plugins call), two **
 Quarterdeck/
   package.json        — monorepo root (npm workspaces: ["core", "mcp", "web"])
   core/               — @quarterdeck/core: the one schema, migrations and shared plan/task queries
-    src/migrate.ts    — runMigrations(): every table, column and trigger lives here
+    src/migrate.ts    — runMigrations(): every table, column and trigger lives here; SCHEMA_VERSION
+    src/sqlite.ts     — Database: node:sqlite with the better-sqlite3 calls we use (transaction, pragma)
     src/queries.ts    — db-first query functions used by both mcp/ and web/
     src/types.ts      — PlanRow, Task, NewPlan, NewTask, TreeStats
     src/index.ts      — openDatabase() / defaultDbPath()
@@ -27,6 +28,7 @@ Quarterdeck/
       context.ts      — Builds context view objects
       tools/          — One file per MCP tool handler
       tool-filter.ts  — Which tools are listed (plan tools hidden unless QUARTERDECK_TOOLS=all)
+    scripts/bundle.mjs — esbuild: mcp + core → plugins/quarterdeck-goals/server/*.mjs (part of `npm run build`)
     package.json
     tsconfig.json
     vitest.config.ts
@@ -39,19 +41,24 @@ Quarterdeck/
     package.json
     tsconfig.json
     vitest.config.ts
-  plugins/quarterdeck-goals/ — Claude Code plugin: goal runner (runs in subagents), Goals pane, alerts, /goal* commands, tools for Claude
+  plugins/quarterdeck-goals/ — Claude Code plugin: goal runner (runs in subagents), Goals pane, alerts, /goal* commands, tools for Claude, and the MCP server (.mcp.json → server/, gitignored on main)
   plugins/quarterdeck-guard/ — Claude Code plugin: what a goal run may do (run tagging, autonomy guard, reports out of the chat)
   .claude-plugin/marketplace.json — makes the repo a plugin marketplace ("quarterdeck")
+  scripts/release.mjs — `npm run release -- <version> [--push]`: tests, bumps both plugin.json, commits the build to the `release` branch
   specs/
 ```
 
-Both `mcp/` and `web/` connect to the same `~/.quarterdeck/tasks.db` (SQLite WAL mode for concurrent access). Override with `QUARTERDECK_DB` env var.
+Both `mcp/` and `web/` connect to the same `~/.quarterdeck/tasks.db` (SQLite WAL mode for concurrent access) through Node's built-in `node:sqlite` (Node 22.13+; no native build step, which is what lets the server ship inside the plugin). Import `Database` from `@quarterdeck/core`, never a SQLite package. Override the path with `QUARTERDECK_DB` env var.
+
+**Distribution and updates**: people install `claude plugin marketplace add shannonbay/Quarterdeck#release` + `claude plugin install quarterdeck-goals@quarterdeck` (quarterdeck-guard comes as a dependency). The goals plugin's `.mcp.json` starts `${CLAUDE_PLUGIN_ROOT}/server/quarterdeck-mcp.mjs`, so the server updates with the plugin (Claude Code's plugin auto-update, off by default for our marketplace; `/reload-plugins` applies it). The `release` branch holds only what installs, built by `scripts/release.mjs`; main never commits `plugins/*/server/`. Claude Code sees a new version only when plugin.json's `version` changes, which the release script does for both plugins.
 
 **Renamed from Conductor** (Nov 2026). Old names still work on purpose: `CONDUCTOR_*` env vars (read through `envVar()` in `core/src/index.ts`), `~/.conductor/tasks.db` while `~/.quarterdeck` has none (`defaultDbPath`), the `x-conductor-secret` webhook header, and stored goal tool maps get `mcp__conductor__` rewritten by a migration. The doctor's `checkRenameLeftovers` and `install-hooks.mjs` match old names to clean up. Don't "fix" these. The plugin is `quarterdeck-goals`, not `quarterdeck`, because plugin tools are named `mcp__<plugin>__*` and would clash with the MCP server's `mcp__quarterdeck__*`.
 
+**Two names for the server's tools**: the plugin-provided server's tools are `mcp__plugin_quarterdeck-goals_quarterdeck__<tool>` (Claude Code's naming for a plugin's server); an older hand-added server's are `mcp__quarterdeck__<tool>`. Everything accepts both: `canonicalToolName` in `core/src/guard.ts` (tool maps), `hooks/names.ts` + `call()` in `hooks/api.ts` (tries both, caches the one that answers), and `SERVER_PREFIXES`/`serverTool` in the guard plugin. Never hard-code one prefix.
+
 ## Commands
 
-**`core/` must be built before `mcp/` or `web/` run or typecheck.** Their `prebuild`, `predev` and `pretypecheck` scripts do it automatically (`npm run build --prefix ../core`). Tests don't need it: both `vitest.config.ts` files alias `@quarterdeck/core` to `core/src`. After changing `core/`, rebuild `mcp/` and reconnect the `quarterdeck` server (`/mcp`) so Claude Code picks it up.
+**`core/` must be built before `mcp/` or `web/` run or typecheck.** Their `prebuild`, `predev` and `pretypecheck` scripts do it automatically (`npm run build --prefix ../core`). Tests don't need it: both `vitest.config.ts` files alias `@quarterdeck/core` to `core/src`. After changing `core/` or `mcp/`, run `npm run build --prefix mcp` (tsc, then the bundle into the plugin) and `/reload-plugins` so Claude Code picks it up.
 
 ### Core (`cd core`)
 
@@ -63,7 +70,8 @@ npm test            # Schema, migration and revision-trigger tests
 ### MCP Server (`cd mcp`)
 
 ```bash
-npm run build       # Compile TypeScript to dist/
+npm run build       # Compile TypeScript to dist/, then bundle into plugins/quarterdeck-goals/server/
+npm run bundle      # Only the bundle
 npm run dev         # Run directly with tsx (no compile step)
 npm run typecheck   # Type-check without emitting
 npm run start       # Run compiled output from dist/
@@ -92,6 +100,8 @@ To run a single test file: `npm test -- __tests__/api/goals.test.ts`
 
 ```bash
 npm install         # Install all workspace dependencies
+npm run build       # Build core, mcp (+ plugin server bundle) and web
+npm run release -- 0.12.0 [--push]   # Release (see Distribution and updates)
 ```
 
 ## MCP Server Architecture
@@ -107,7 +117,7 @@ npm install         # Install all workspace dependencies
 
 **Database layer** (`web/lib/db.ts`): Shared plan/task queries come from `@quarterdeck/core` via a lazy `getDb()`. Adds web-only queries: approval stats and the event log.
 
-**Migrations** (`core/src/migrate.ts`, re-exported by `web/lib/migrate.ts`): The only place the schema is defined; both processes run it on open. Adding a column uses try/catch around `ALTER TABLE` (SQLite lacks `IF NOT EXISTS` for ALTER). New columns added to a CREATE TABLE must also get an ALTER TABLE entry for existing databases, plus an UPDATE to backfill any NOT NULL semantics.
+**Migrations** (`core/src/migrate.ts`, re-exported by `web/lib/migrate.ts`): The only place the schema is defined; both processes run it on open. Adding a column uses try/catch around `ALTER TABLE` (SQLite lacks `IF NOT EXISTS` for ALTER). New columns added to a CREATE TABLE must also get an ALTER TABLE entry for existing databases, plus an UPDATE to backfill any NOT NULL semantics. **Bump `SCHEMA_VERSION`** with every schema change: it is stored as `PRAGMA user_version`, and a session running older code (sessions update separately) then sees `schemaOutdated`, claims no runs in `schedulerPass`, and its pane asks for `/reload-plugins` (`goals_overview` `outdated`).
 
 **Real-time updates**: SQLite triggers bump `plans.revision` on every task insert/update/delete and plan update, from any process. `web/lib/mcp-poller.ts` checks each watched plan's revision once a second and broadcasts `mcp_update` through `web/lib/ws-broadcaster.ts` when it changes. Custom server (`web/server.ts`) routes WebSocket upgrades for `/api/plans/:id/ws` (the goal page's live updates; a goal is a plan).
 

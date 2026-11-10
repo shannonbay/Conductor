@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import type Database from 'better-sqlite3'
+import type { Database } from './sqlite.js'
 import {
   openDatabase, insertTask, getTask, getPlan, getPlanRevision,
   createGoal, getGoal, listGoals, updateGoal, setIntervalTrigger, getIntervalTrigger,
@@ -8,7 +8,7 @@ import {
   deleteGoal, type NewTask,
 } from './index.js'
 
-let db: Database.Database
+let db: Database
 const now = new Date().toISOString()
 const plan = (id = 'g1') => ({ id, name: 'Inbox', description: null, status: 'active' as const, working_dir: '/tmp', created_at: now, updated_at: now })
 const item = (id: string, extra: Partial<NewTask> = {}): NewTask => ({
