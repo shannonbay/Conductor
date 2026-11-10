@@ -19,6 +19,9 @@ export type OverviewGoal = {
   open_run: { id: string; status: string } | null
   activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
   runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null; tokens?: number }[]
+  /** False for a card: runs, memory, open items, instructions and tool rules left out. */
+  detail?: boolean
+  needs_you_count?: number
   needs_you: OverviewItem[]
   open_items: OverviewItem[]
   open_item_count: number
@@ -45,6 +48,8 @@ export function toCard(g: OverviewGoal): GoalCard {
     // An older web app sends no activity: say nothing rather than guess.
     activity: g.activity ?? { state: g.status === 'paused' ? 'paused' : 'idle', text: '', at: null },
     needsYou: g.needs_you.map(toItem),
+    detail: g.detail !== false,
+    needsYouCount: g.needs_you_count ?? g.needs_you.length,
     openItems: g.open_items.map(toItem),
     openItemCount: g.open_item_count,
     openRun: g.open_run ? { id: g.open_run.id, status: g.open_run.status } : null,

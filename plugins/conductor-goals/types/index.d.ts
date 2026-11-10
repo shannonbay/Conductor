@@ -38,6 +38,10 @@ export type GoalCard = {
   status: string
   activity: Activity
   needsYou: Item[]
+  /** How many items wait for the person (needsYou may hold only the first few). */
+  needsYouCount: number
+  /** False when the overview gave only a card: no runs beyond the last, memory, open items, instructions or tool rules. */
+  detail: boolean
   /** The first open items (not awaiting review); `openItemCount` has the total. */
   openItems: Item[]
   openItemCount: number

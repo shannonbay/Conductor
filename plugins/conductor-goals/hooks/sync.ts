@@ -9,7 +9,7 @@ import { announce, showStatus, savePoll } from './alerts'
 import { fetchOverview, fetchTodos, settings } from './api'
 import { toCard } from './model'
 import { kick } from './runner'
-import { getSnapshot, setBusy, setNotice, setSnapshot, setTodos } from './state'
+import { getSnapshot, setBusy, setNotice, setSnapshot, setTodos, getExpanded } from './state'
 
 type $ = EngineInterface
 
@@ -37,7 +37,12 @@ async function load($: $): Promise<Snapshot> {
   const now = await $.clock.now()
   let next: Snapshot
   try {
-    const res = await fetchOverview($, previous.reachable ? previous.etag : null)
+    // Expanded goals come with their detail; if that ever makes the answer too large to read, cards alone still work
+    const res = await fetchOverview($, previous.reachable ? previous.etag : null, await getExpanded($))
+      .catch((err: unknown) => {
+        if (err instanceof Error && /too large/.test(err.message)) return fetchOverview($, null, [])
+        throw err
+      })
     failures = 0
     if (!res.changed) {
       // Unchanged: keep the stored value so nothing redraws, unless it was offline.

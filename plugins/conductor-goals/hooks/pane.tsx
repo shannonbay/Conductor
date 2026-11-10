@@ -110,7 +110,7 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
   const { Box, Text, Button, Link } = $.ui.resolve(e)
   const isOpen = view.shown.includes(g.id)
   const run = lastRun(g)
-  const toggle = () => void toggleExpanded($, g.id)
+  const toggle = () => void toggleExpanded($, g.id).then(() => refresh($))
 
   return (
     <Box key={g.id} flexDirection="column" marginBottom={1}>
@@ -133,6 +133,9 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
         </Text>
       )}
       {g.needsYou.map((item) => proposalRow($, e, view, g, item))}
+      {g.needsYouCount > g.needsYou.length && (
+        <Text dimColor>… and {g.needsYouCount - g.needsYou.length} more waiting: expand the goal ({index < 9 ? index + 1 : 'its name'}) to see them all</Text>
+      )}
       {controls($, e, view, g)}
       {isOpen && details($, e, view, g)}
       {g.suggestions.map((s) => autoSuggestion($, e, view, g, s))}
@@ -369,6 +372,7 @@ function controls($: $, e: E, view: View, g: GoalCard) {
 
 function details($: $, e: E, view: View, g: GoalCard) {
   const { Box, Text, Button, Link } = $.ui.resolve(e)
+  if (!g.detail) return <Text key={`details-${g.id}`} dimColor>  Loading… (if this stays, collapse some other goals: too many open at once)</Text>
   return (
     <Box key={`details-${g.id}`} flexDirection="column" marginTop={1}>
       <Text dimColor>{g.objective}</Text>

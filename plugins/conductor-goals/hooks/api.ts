@@ -88,15 +88,18 @@ async function call<T>($: $, name: string, input: Record<string, unknown> = {}):
   try {
     return JSON.parse(text) as T
   } catch {
-    throw new Error(`Unexpected answer from conductor: ${text.slice(0, 200)}`)
+    throw new Error(/persisted-output|Output too large/.test(text)
+      ? `Conductor's answer to ${name} was too large to read (Claude Code saved it to a file). Update Conductor, or tell its developer.`
+      : `Unexpected answer from conductor: ${text.slice(0, 200)}`)
   }
 }
 
 /** The overview; `{ changed: false }` when it matches `etag`. */
 export type Hold = { until: string; reason: string }
 
-export async function fetchOverview($: $, etag: string | null): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null }> {
-  const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[]; hold?: Hold | null }>($, 'goals_overview', etag ? { etag } : {})
+/** The overview: cards for every goal, full detail for the ids in `detail` (the expanded ones). */
+export async function fetchOverview($: $, etag: string | null, detail: readonly string[] = []): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null }> {
+  const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[]; hold?: Hold | null }>($, 'goals_overview', { ...(etag ? { etag } : {}), detail: [...detail] })
   if (!res.changed) return { changed: false }
   return { changed: true, goals: res.goals ?? [], etag: res.etag, hold: res.hold ?? null }
 }

@@ -18,6 +18,20 @@ const RUNS = 5
 const OPEN_ITEMS = 10
 const HEALTH = 20
 const MEMORY = 10
+
+/**
+ * The longest text each field carries in the overview. The overview reaches the
+ * plugin as one tool answer, and Claude Code hands a plugin an answer over
+ * about 50 KB as a "saved to file" note instead of data, so its size must not
+ * grow with how much runs write. The full text is in goal_detail and the
+ * goal page.
+ */
+const CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400 }
+
+function clip(text: string | null, max: number): string | null {
+  if (text === null || text.length <= max) return text
+  return `${text.slice(0, max - 1).trimEnd()}…`
+}
 /** Done one-off goals listed, newest first. */
 const DONE = 10
 /** Recent events read to find a running agent's latest step. */
@@ -61,7 +75,8 @@ export type ItemView = ReturnType<typeof itemView>
 function overviewItem(t: Task) {
   const v = itemView(t)
   const action = v.action as { category: string; summary: string } | null
-  return action ? { ...v, action: { category: action.category, summary: action.summary } } : v
+  const short = { ...v, goal: clip(v.goal, CLIP.title)!, notes: clip(v.notes, CLIP.notes), result: clip(v.result, CLIP.result) }
+  return action ? { ...short, action: { category: action.category, summary: clip(action.summary, CLIP.title)! } } : short
 }
 
 /**
@@ -163,7 +178,19 @@ export function describeActivity({ goal, openRun, lastRun, events, items }: Acti
 
 // ── Overview ──────────────────────────────────────────────────────────────────
 
-export function buildOverview(db: Database) {
+/**
+ * Which goals get their full detail (runs, memory, open items, instructions,
+ * tool rules): 'all', or the ids asked for (the pane's expanded goals). The
+ * rest are cards: the last run, up to NEEDS_YOU items waiting for the person
+ * (with a count), health and what's happening now. So the overview grows by a
+ * card per goal, not by everything every goal has done.
+ */
+export type OverviewDetail = 'all' | readonly string[]
+const NEEDS_YOU = 5
+/** The longest text a card's fields carry (its title line, objective and waiting items). */
+const CARD_TEXT = 160
+
+export function buildOverview(db: Database, detail: OverviewDetail = 'all') {
   const all = listGoals(db)
   // Done one-offs (retired) are listed too, the newest few; other retired goals are not
   const done = all.filter(({ goal }) => goal.status === 'retired' && goal.one_off)
@@ -179,24 +206,27 @@ export function buildOverview(db: Database) {
       return {
         id: plan.id,
         name: plan.name,
-        objective: goal.objective,
+        objective: clip(goal.objective, CLIP.objective)!,
         status: goal.status,
         one_off: goal.one_off,
-        instructions: goal.instructions,
+        instructions: clip(goal.instructions, CLIP.instructions)!,
         autonomy: goal.autonomy,
         tool_map: goal.tool_map,
         next_run_at: goal.next_run_at,
         schedule: getSchedule(db, plan.id),
         open_run: openRun,
-        activity: describeActivity({
-          goal,
-          openRun,
-          lastRun: runs.find((r) => r.status !== 'queued' && r.status !== 'running') ?? null,
-          events: openRun?.status === 'running' ? getEvents(db, plan.id, { limit: ACTIVITY_EVENTS }) : [],
-          items,
-        }),
+        activity: (() => {
+          const a = describeActivity({
+            goal,
+            openRun,
+            lastRun: runs.find((r) => r.status !== 'queued' && r.status !== 'running') ?? null,
+            events: openRun?.status === 'running' ? getEvents(db, plan.id, { limit: ACTIVITY_EVENTS }) : [],
+            items,
+          })
+          return { ...a, text: clip(a.text, CLIP.activity)! }
+        })(),
         runs: runs.map((r) => ({
-          id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, started_at: r.started_at, ended_at: r.ended_at, agent_id: r.agent_id,
+          id: r.id, status: r.status, trigger: r.trigger, summary: clip(r.summary, CLIP.summary), started_at: r.started_at, ended_at: r.ended_at, agent_id: r.agent_id,
           tokens: r.input_tokens + r.output_tokens + r.cache_read_tokens + r.cache_write_tokens, model: r.model,
         })),
         needs_you: open.filter((t) => t.review_requested_at).map(overviewItem),
@@ -204,8 +234,22 @@ export function buildOverview(db: Database) {
         open_item_count: open.filter((t) => !t.review_requested_at).length,
         health: listHealth(db, plan.id, HEALTH).map((h) => ({ passed: h.passed, value: h.value, created_at: h.created_at })),
         memory: listMemory(db, plan.id, { activeOnly: true }).slice(-MEMORY).reverse()
-          .map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned, created_at: m.created_at })),
+          .map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory)!, source: m.source, pinned: m.pinned, created_at: m.created_at })),
         suggestions: getAutonomySuggestions(db, plan.id),
+      }
+    })
+    .map((g) => {
+      const waiting = g.needs_you.length
+      if (detail === 'all' || detail.includes(g.id)) return { ...g, detail: true, needs_you_count: waiting }
+      return {
+        ...g, detail: false, needs_you_count: waiting,
+        objective: clip(g.objective, CARD_TEXT)!,
+        // On a card, each waiting item carries only what its row shows
+        needs_you: g.needs_you.slice(0, NEEDS_YOU).map((i) => ({
+          id: i.id, goal: clip(i.goal, CARD_TEXT)!, asks_person: i.asks_person,
+          action: i.action ? { category: (i.action as { category: string }).category, summary: clip((i.action as { summary: string }).summary, CARD_TEXT)! } : null,
+        })),
+        runs: g.runs.slice(0, 1), open_items: [], memory: [], instructions: '', tool_map: {},
       }
     })
   return { goals, hold: getRunHold(db) }
@@ -214,7 +258,7 @@ export function buildOverview(db: Database) {
 export type Overview = ReturnType<typeof buildOverview>
 
 /** The overview's JSON and a strong ETag for it (quoted, as HTTP sends it). */
-export function overviewWithEtag(db: Database): { body: string; etag: string } {
-  const body = JSON.stringify(buildOverview(db))
+export function overviewWithEtag(db: Database, detail: OverviewDetail = 'all'): { body: string; etag: string } {
+  const body = JSON.stringify(buildOverview(db, detail))
   return { body, etag: `"${createHash('sha256').update(body).digest('base64url').slice(0, 27)}"` }
 }

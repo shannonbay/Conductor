@@ -3,7 +3,7 @@ import type Database from 'better-sqlite3'
 import {
   openDatabase, createGoal, updateGoal, getGoal, queueRun, getRun, updateRun, addItem, getTask, listMemory, listRuns,
   takeLease, releaseLease, claimRun, schedulerPass, expireStaleRuns, decideItem, attachAgent, guardToolCallForRun,
-  buildOverview, overviewWithEtag, LEASE_MS, insertRun, endRun, updateTask, reviveIfDone,
+  buildOverview, overviewWithEtag, LEASE_MS, insertRun, endRun, updateTask, reviveIfDone, insertMemory,
 } from './index.js'
 
 let db: Database.Database
@@ -150,6 +150,29 @@ describe('guardToolCallForRun', () => {
 })
 
 describe('buildOverview', () => {
+  it('stays small however much runs write: long text is clipped', () => {
+    const long = 'x'.repeat(5000)
+    for (let i = 0; i < 12; i++) {
+      const id = `big${i}`
+      createGoal(db, { id, name: `Goal ${i}`, description: null, status: 'active', working_dir: '/tmp', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+        { objective: long, instructions: long })
+      for (let m = 0; m < 10; m++) insertMemory(db, { plan_id: id, kind: 'fact', text: long, source: 'agent' })
+      for (let n = 0; n < 15; n++) addItem(db, id, null, { goal: long, notes: long, action: { category: 'email.send', summary: long } })
+      for (let r = 0; r < 5; r++) {
+        const run = insertRun(db, id, 'manual', 'running')
+        db.prepare("UPDATE goal_runs SET status = 'completed', summary = ?, ended_at = ? WHERE id = ?").run(long, new Date().toISOString(), run.id)
+      }
+    }
+    // Cards for all stay well under the ~50 KB a plugin can read; one goal's full detail is bounded too
+    expect(JSON.stringify(buildOverview(db, [])).length).toBeLessThan(45_000)
+    expect(JSON.stringify(buildOverview(db, ['big0']).goals.find((g) => g.id === 'big0')).length).toBeLessThan(30_000)
+    const o = buildOverview(db, ['big0'])
+    expect(o.goals.find((g) => g.id === 'big0')).toMatchObject({ detail: true, needs_you_count: 15 })
+    expect(o.goals.find((g) => g.id === 'big0')!.runs[0]!.summary!.length).toBeLessThanOrEqual(300)
+    expect(o.goals.find((g) => g.id === 'big1')).toMatchObject({ detail: false, needs_you_count: 15, memory: [], open_items: [] })
+    expect(o.goals.find((g) => g.id === 'big1')!.needs_you).toHaveLength(5)
+  })
+
   it("leaves the actions params out (the goal page shows them)", () => {
     addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply', params: { body: 'x'.repeat(5000) } } })
     const item = buildOverview(db).goals[0]!.needs_you[0]!

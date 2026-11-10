@@ -6,8 +6,8 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
-import { addTodo, answerItem, approve, createGoal, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
-import { ago, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize, type GoalChanges } from './model'
+import { addTodo, answerItem, approve, createGoal, fetchOverview, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
+import { ago, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
 import { kick } from './runner'
 import { askSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
@@ -128,6 +128,13 @@ async function resolveGoal($: $, query: unknown): Promise<Resolved> {
   return 'goal' in found ? found : { error: noMatch(s.goals, String(query ?? ''), found.matches) }
 }
 
+/** The goal with its full detail, fetched for it alone. */
+async function withDetail($: $, goal: GoalCard): Promise<GoalCard> {
+  const res = await fetchOverview($, null, [goal.id])
+  const full = res.changed ? res.goals.find((g) => g.id === goal.id) : undefined
+  return full ? toCard(full) : goal
+}
+
 /** Asks the person; a dismissed dialog counts as no. */
 async function confirmWith($: $, question: string, yes: string): Promise<boolean> {
   try {
@@ -162,7 +169,9 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
 
   const found = await resolveGoal($, input.goal)
   if ('error' in found) return fail(found.error)
-  const { goal } = found
+  let { goal } = found
+  // goal_detail and update_goal read the goal's full detail, which the overview gives only on request
+  if (!goal.detail && (name === 'goal_detail' || name === 'update_goal')) goal = await withDetail($, goal)
 
   if (name === 'goal_detail') return { text: describe(goal, now), isError: false }
 
