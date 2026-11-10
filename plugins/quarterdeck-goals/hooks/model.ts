@@ -440,3 +440,12 @@ export function runCost(run: { tokens?: number; startedAt: string; endedAt: stri
   }
   return parts.join(' · ')
 }
+
+/**
+ * True when Claude Code refused one of this plugin's own writes because it
+ * needs the person's approval, which a plugin's call can't ask for. That
+ * happens in plan mode, where every call that isn't a read becomes an ask.
+ */
+export function planModeBlocked(message: string): boolean {
+  return /needs a person's approval/i.test(message)
+}

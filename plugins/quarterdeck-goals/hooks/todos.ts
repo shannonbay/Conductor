@@ -64,7 +64,7 @@ export async function todoCommand($: $, args: string): Promise<string> {
  * on a to-do happens here, where Claude can ask questions, not in a
  * background run (background runs are for goals).
  */
-export function todoPrompt(list: TodoList, item: TodoItem, mode: 'plan' | 'start' | 'ask', question?: string): string {
+export function todoPrompt(list: TodoList, item: TodoItem, mode: 'plan' | 'start' | 'ask', question?: string, opts: { planModeOn?: boolean } = {}): string {
   if (mode === 'ask' && question?.trim()) {
     return `About to-do ${item.id} on my list "${list.name}":\n\n${item.text}${item.notes ? `\n\n(Notes: ${item.notes})` : ''}\n\nMy question: ${question.trim()}\n\nAnswer it. Don't change anything or start work on it.`
   }
@@ -73,15 +73,42 @@ export function todoPrompt(list: TodoList, item: TodoItem, mode: 'plan' | 'start
   }
   const from = `From my to-do list "${list.name}", item ${item.id}:\n\n${item.text}${item.notes ? `\n\n(Notes: ${item.notes})` : ''}`
   const end = `When it's done, tick it off with complete_todo (item ${item.id}${list.name !== 'To do' ? `, list "${list.name}"` : ''}).`
+  const plan = opts.planModeOn
+    ? 'Plan this before changing anything (plan mode should be on; if it isn\'t, enter it first)'
+    : 'Enter plan mode and plan this before changing anything'
   return mode === 'plan'
-    ? `${from}\n\nEnter plan mode and plan this before changing anything: explore what it involves, ask me what you need to, and present the plan for me to review. ${end}`
+    ? `${from}\n\n${plan}: explore what it involves, ask me what you need to, and present the plan for me to review. ${end}`
     : `${from}\n\nLet's work on this now. Ask me if anything is unclear. ${end}`
+}
+
+/**
+ * Turns plan mode on with Claude Code's own /plan, when this session has it:
+ * then plan mode doesn't depend on Claude choosing to enter it. Only the
+ * built-in counts (a skill or command of the same name may do something else).
+ * False when there's none or it failed; the prompt then asks Claude instead.
+ */
+export async function enterPlanMode($: $): Promise<boolean> {
+  try {
+    const commands = await $.command.list()
+    if (!commands.some((c) => c.name === 'plan' && c.source === 'builtin')) return false
+    await $.command.run({ command: 'plan' })
+    return true
+  } catch {
+    return false
+  }
 }
 
 /** Plan / Start: marks the to-do under way and sends it to this conversation (it starts when Claude is free). */
 export async function workOnTodo($: $, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<void> {
-  await setTodo($, list.id, item.id, 'active', mode === 'plan' ? 'Planning it in the conversation' : 'Working on it in the conversation')
-  await $.prompt.submit({ text: todoPrompt(list, item, mode) })
+  // Marking it under way is a convenience: sending it is what the press is for.
+  // In plan mode Claude Code refuses this write, so carry on without it.
+  try {
+    await setTodo($, list.id, item.id, 'active', mode === 'plan' ? 'Planning it in the conversation' : 'Working on it in the conversation')
+  } catch {
+    // shown as ☐ instead of ◐ until the next change
+  }
+  const planModeOn = mode === 'plan' && (await enterPlanMode($))
+  await $.prompt.submit({ text: todoPrompt(list, item, mode, undefined, { planModeOn }) })
 }
 
 /**

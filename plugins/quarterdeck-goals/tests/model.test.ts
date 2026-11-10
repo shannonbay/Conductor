@@ -4,7 +4,7 @@ import { phoneText } from '../hooks/alerts'
 
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
-  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost} from '../hooks/model'
+  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked} from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -145,4 +145,10 @@ test('parseSchedule takes intervals with or without "every", in weeks, and as wo
   expect(minutes('hourly')).toBe(60)
   expect(parseSchedule('daily between 08:00-20:00')).toEqual({ schedule: { kind: 'interval', minutes: 1440, active_hours: '08:00-20:00' } })
   expect(minutes('30 fortnights')).toContain('minutes, hours, days or weeks')
+})
+
+test("planModeBlocked spots Claude Code refusing a plugin's write in plan mode, and nothing else", () => {
+  expect(planModeBlocked("mcp__plugin_quarterdeck-goals_quarterdeck__todo_set wasn't run: this call needs a person's approval, and a mod's own call can't ask for it.")).toBe(true)
+  expect(planModeBlocked('Feedback is required')).toBe(false)
+  expect(planModeBlocked('fetch failed')).toBe(false)
 })

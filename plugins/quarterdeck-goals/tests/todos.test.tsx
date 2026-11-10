@@ -55,6 +55,80 @@ test('pressing a to-do expands it; Plan and Start send it to this conversation',
   await ui.unmount()
 })
 
+test("Plan runs Claude Code's /plan first when the session has it, then sends the to-do", async ($, on) => {
+  const { prompts } = engine(on)
+  fakeQuarterdeck(on, [], { todos: [roadmap()] })
+  // Each /plan run notes how many prompts had gone before it
+  const planRuns: { args: string; promptsBefore: number }[] = []
+  on('command.list', () => ({ value: [{ name: 'plan', description: 'Enter plan mode', source: 'builtin' }] }) as never)
+  on('command.run', { command: 'plan' }, (_, e) => {
+    planRuns.push({ args: e.args, promptsBefore: prompts.length })
+    return {}
+  })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo-toggle-p1' })
+  await ui.press({ key: 'todo-open-p1/1.3' })
+  await ui.press({ key: 'todo-plan-p1/1.3' })
+  expect(planRuns).toEqual([{ args: '', promptsBefore: 0 }])
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain("plan mode should be on; if it isn't, enter it first")
+  expect(prompts[0]).not.toContain('Enter plan mode and plan this')
+
+  // Start never touches plan mode
+  await ui.press({ key: 'todo-start-p1/1.3' })
+  expect(planRuns).toHaveLength(1)
+  expect(prompts).toHaveLength(2)
+  await ui.unmount()
+})
+
+test('Plan falls back to asking Claude when /plan is not built in or fails', async ($, on) => {
+  const { prompts } = engine(on)
+  fakeQuarterdeck(on, [], { todos: [roadmap()] })
+  let failing = false
+  on('command.list', () => ({ value: [{ name: 'plan', description: 'my own skill', source: failing ? 'builtin' : 'user' }] }) as never)
+  on('command.run', { command: 'plan' }, () => {
+    throw new Error('refused')
+  })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo-toggle-p1' })
+  await ui.press({ key: 'todo-open-p1/1.3' })
+  await ui.press({ key: 'todo-plan-p1/1.3' }) // a user's own /plan: not run
+  expect(prompts[0]).toContain('Enter plan mode and plan this')
+  failing = true
+  await ui.press({ key: 'todo-plan-p1/1.3' }) // the built-in, but it fails
+  expect(prompts[1]).toContain('Enter plan mode and plan this')
+  await ui.unmount()
+})
+
+const PLAN_MODE_REFUSAL = "mcp__plugin_quarterdeck-goals_quarterdeck__todo_set wasn't run: this call needs a person's approval, and a mod's own call can't ask for it."
+
+test('in plan mode Plan still runs /plan and sends the to-do, though it cannot mark it under way', async ($, on) => {
+  const { prompts } = engine(on)
+  fakeQuarterdeck(on, [], { todos: [roadmap()], errors: { todo_set: PLAN_MODE_REFUSAL } })
+  let planRuns = 0
+  on('command.list', () => ({ value: [{ name: 'plan', description: 'Enter plan mode', source: 'builtin' }] }) as never)
+  on('command.run', { command: 'plan' }, () => {
+    planRuns++
+    return {}
+  })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo-toggle-p1' })
+  await ui.press({ key: 'todo-open-p1/1.3' })
+  await ui.press({ key: 'todo-plan-p1/1.3' })
+  expect(planRuns).toBe(1)
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('From my to-do list "Goals roadmap", item 1.3')
+  expect(await ui.find({ type: 'Text', text: /Couldn't/ })).toBeUndefined()
+
+  // A tick can't do without the write: the notice says plan mode is why
+  await ui.press({ key: 'todo-tick-p1/1.3' })
+  expect((await ui.find({ type: 'Text', text: /Couldn't update the to-do/ }))?.text).toContain('plan mode is on')
+  await ui.unmount()
+})
+
 test('ticking says how to undo; done to-dos can be put back; adding works', async ($, on) => {
   const { toasts } = engine(on)
   const fake = fakeQuarterdeck(on, [], { todos: [roadmap()] })
