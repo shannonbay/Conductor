@@ -12,9 +12,9 @@
  * - A run may use the goal tools. The person's Quarterdeck actions (approve,
  *   reject, cancel, pause...) and the plugin's tools are refused to it. Any
  *   other tool goes through the goal's guard (tool_map + autonomy): "off" and
- *   unapproved "propose" categories are refused with the reason, "auto" and
- *   approved ones are allowed, and tools outside the map follow the session's
- *   own permission rules.
+ *   unapproved "propose" categories are refused with the reason. Everything
+ *   else ("auto", approved, or outside the map) follows the session's own
+ *   permission rules: this plugin refuses, it never allows.
  * - A run's report is its end_run summary, shown in the Goals pane; it is kept
  *   out of the person's conversation.
  * - The person's Quarterdeck actions are also refused to the model and to other
@@ -61,8 +61,6 @@ const HUMAN_ONLY = new Set([
 const isHumanOnly = (tool: string) => HUMAN_ONLY.has(serverTool(tool) ?? '')
 const HUMAN_ONLY_REASON = "This Quarterdeck action is the person's: they take it from the Goals pane (/goals)."
 
-const allow = { decision: 'allow' as const }
-const deny = (reason: string) => ({ decision: 'deny' as const, reason })
 
 // ── Which subagents are runs ──────────────────────────────────────────────────
 
@@ -87,8 +85,6 @@ async function runIdFor($: Engine, agentId: string | undefined): Promise<string 
 
 // ── The goal's guard ──────────────────────────────────────────────────────────
 
-/** Calls the goal's guard allowed ("auto" or an approved category), by tool_use_id, for the permission check. */
-const approvedCalls = new Set<string>()
 /**
  * This plugin's own guard_check calls under way. guard_check is the person's
  * tool to everyone else, so the permission check lets it through only for this
@@ -165,12 +161,15 @@ async function reportRunEnd($: Engine, runId: string, answer: string, reason: st
 const GUARDED_QUARTERDECK = new Set(['unsubscribe_one_click'])
 const isGuardedQuarterdeck = (tool: string) => GUARDED_QUARTERDECK.has(serverTool(tool) ?? '')
 
-/** Fixed rules for a run's agent; null when the goal's guard or the session decides. */
-function fixedVerdict(tool: string) {
+/**
+ * Fixed rules for a run's agent: the reason a tool is refused, 'own' for
+ * Quarterdeck's own tools (no guard check), or null when the goal's guard decides.
+ */
+function fixedVerdict(tool: string): string | null {
   if (isGuardedQuarterdeck(tool)) return null
-  if (isHumanOnly(tool) || serverTool(tool) === 'run_goal' || tool.startsWith('mcp__quarterdeck-goals__')) return deny(HUMAN_ONLY_REASON)
-  if (tool === 'Agent') return deny('Goal runs work on their own; they do not start other agents.')
-  if (serverTool(tool) !== null || (tool as string) === 'SubagentHandback') return allow
+  if (isHumanOnly(tool) || serverTool(tool) === 'run_goal' || tool.startsWith('mcp__quarterdeck-goals__')) return HUMAN_ONLY_REASON
+  if (tool === 'Agent') return 'Goal runs work on their own; they do not start other agents.'
+  if (serverTool(tool) !== null || (tool as string) === 'SubagentHandback') return 'own'
   return null
 }
 
@@ -215,20 +214,19 @@ export const register: Register = (on) => {
     result: JSON.stringify({ guarded: true, runs: runIds.size, lastTurns }),
   })).catch(() => ({ result: JSON.stringify({ guarded: true }) }))
 
-  // Permission
+  // Permission. This hook only ever refuses or passes the check on: whether a
+  // tool may run is the person's own permission rules' to say, never this plugin's.
   on('tool.check', async ($, e, next) => {
     // This plugin's own guard check, in whichever loop the engine places it
-    if (OWN_CALLS.has(serverTool(e.tool) ?? '') && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return { decision: 'allow' }
+    if (OWN_CALLS.has(serverTool(e.tool) ?? '') && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return next(e)
     const runId = await runIdFor($, e.agentId)
     if (runId) {
       const fixed = fixedVerdict(e.tool)
-      if (fixed?.decision === 'deny') return { decision: 'deny', reason: 'Goal runs work within their goal: this action is not theirs.' }
-      if (fixed) return { decision: 'allow' }
-      if (e.tool_use_id && approvedCalls.delete(e.tool_use_id)) return { decision: 'allow' }
+      if (fixed !== null && fixed !== 'own') return { decision: 'deny', reason: fixed }
       return next(e)
     }
     const fromRunner = e.agentId === undefined && next.origin?.plugin === RUNNER_PLUGIN
-    if (fromRunner && isRunnerTool(e.tool)) return { decision: 'allow' }
+    if (fromRunner && isRunnerTool(e.tool)) return next(e)
     if (isHumanOnly(e.tool)) return { decision: 'deny', reason: HUMAN_ONLY_REASON }
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -243,7 +241,6 @@ export const register: Register = (on) => {
     if (fixedVerdict(e.tool) === null) {
       const verdict = await guardCheck($, runId, e.tool)
       if (verdict.decision === 'deny') return { deny: verdict.reason ?? "Not allowed by the goal's autonomy." }
-      if (verdict.category) approvedCalls.add(e.tool_use_id)
     }
     return serverTool(e.tool) !== null ? next({ ...e, run_scope: runId } as typeof e) : next(e)
   }).catch(($, e, next) => next(e))
