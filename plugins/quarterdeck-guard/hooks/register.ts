@@ -218,17 +218,18 @@ export const register: Register = (on) => {
   // Permission
   on('tool.check', async ($, e, next) => {
     // This plugin's own guard check, in whichever loop the engine places it
-    if (OWN_CALLS.has(serverTool(e.tool) ?? '') && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return allow
+    if (OWN_CALLS.has(serverTool(e.tool) ?? '') && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return { decision: 'allow' }
     const runId = await runIdFor($, e.agentId)
     if (runId) {
       const fixed = fixedVerdict(e.tool)
-      if (fixed) return fixed
-      if (e.tool_use_id && approvedCalls.delete(e.tool_use_id)) return allow
+      if (fixed?.decision === 'deny') return { decision: 'deny', reason: 'Goal runs work within their goal: this action is not theirs.' }
+      if (fixed) return { decision: 'allow' }
+      if (e.tool_use_id && approvedCalls.delete(e.tool_use_id)) return { decision: 'allow' }
       return next(e)
     }
     const fromRunner = e.agentId === undefined && next.origin?.plugin === RUNNER_PLUGIN
-    if (fromRunner && isRunnerTool(e.tool)) return allow
-    if (isHumanOnly(e.tool)) return deny(HUMAN_ONLY_REASON)
+    if (fromRunner && isRunnerTool(e.tool)) return { decision: 'allow' }
+    if (isHumanOnly(e.tool)) return { decision: 'deny', reason: HUMAN_ONLY_REASON }
     return next(e)
   }).catch(($, e, next) => next(e))
 
