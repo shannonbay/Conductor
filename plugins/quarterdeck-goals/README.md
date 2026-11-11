@@ -1,6 +1,12 @@
-# quarterdeck-goals
+# Quarterdeck
 
-A Claude Code plugin that runs your Quarterdeck goals and puts them beside the chat. While Claude Code is open it starts each due goal run in a background subagent of its own. You approve or reject proposals, run, pause and inspect goals, and get alerts, all without leaving Claude Code. Claude can also check on your goals and act on them, always asking you first before it changes anything.
+Quarterdeck gives Claude Code standing goals: things you want kept true, like "unsubscribe me from mailing lists I never read", "find me the three best new job ads each week" or "clear old installers out of Downloads". Each goal runs on its own schedule in the background of your Claude Code session, on your Claude plan. When it wants to act, it proposes, and you approve or reject from the Goals pane beside your chat. It remembers what you decided, so a rejection with "too formal" shapes later runs.
+
+Start with `/goal-new`: pick a ready-made goal or type your own.
+
+This plugin, `quarterdeck-goals`, runs the goals and shows the pane. While Claude Code is open it starts each due goal run in a background subagent of its own. You approve or reject proposals, run, pause and inspect goals, and get alerts, all without leaving Claude Code. Claude can also check on your goals and act on them, always asking you first before it changes anything.
+
+It works in Claude Code only (the pane and the runner are a Claude Code mod), and needs Node 22.13 or later on your `PATH` for its server.
 
 It brings the `quarterdeck` MCP server with it (`.mcp.json` starts the bundled `server/quarterdeck-mcp.mjs`; Claude Code names its tools `mcp__plugin_quarterdeck-goals_quarterdeck__*`), and depends on its companion plugin **quarterdeck-guard**, which keeps each run within its goal. The web app is optional: it gives goal pages in a browser and webhook triggers.
 
@@ -14,6 +20,16 @@ claude plugin install quarterdeck-goals@quarterdeck --scope user
 quarterdeck-guard is installed with it. Turn on auto-update for the marketplace (`/plugin` → Marketplaces → quarterdeck → Enable auto-update) to get new versions, server included, then `/reload-plugins` when Claude Code says one arrived. Without it, the pane says when a newer version is published and offers **Ask Claude to install it**. Without the guard plugin no run starts, and the pane says so. An older hand-added `quarterdeck` server (`mcp__quarterdeck__*`) still works, but remove it once the plugin's is running (`claude mcp remove quarterdeck --scope user`) so two copies don't run.
 
 For development, add your checkout as the marketplace instead (`claude plugin marketplace add <path to the Quarterdeck repo>`). Claude Code then reads the plugins straight from `plugins/`: after an edit run `npm run build` (which bundles the server into `server/`) and `/reload-plugins`. `npm run doctor` reports what's installed.
+
+## What it runs, stores and sends
+
+- **A local server.** `.mcp.json` starts `node server/quarterdeck-mcp.mjs` on your computer. That file is one bundle built with esbuild (not minified) from `mcp/` and `core/` in the [repository](https://github.com/shannonbay/Quarterdeck), where the source is.
+- **Your data stays on your computer.** Goals, their items, memory, run history and to-do lists are in one SQLite file, `~/.quarterdeck/tasks.db`. Quarterdeck has no service of its own and sends none of it anywhere.
+- **One network request of its own.** At most every 6 hours the server reads this plugin's `plugin.json` from the `release` branch on GitHub to see whether a newer version is published. It sends nothing about you. Turn it off with `QUARTERDECK_UPDATE_CHECK=0`.
+- **Background subagents.** Each goal run is a Claude Code subagent on your Claude plan. It can use the tools, MCP servers and connectors your session has, within the goal's rules: a kind of action is off, waits for your approval, or is allowed, as you set it (the quarterdeck-guard plugin holds a run to that). A small model call (Haiku) suggests a schedule and title for a new goal.
+- **Commands you give it.** A goal can have a health command, and an item a check command. The server runs them in the goal's directory. A goal has none unless you set one.
+- **Messages into your conversation.** Discuss, a to-do's Ask, Plan and Start, and phone alerts submit a prompt to your chat, each when you press the button (alerts: when you have been away 5 minutes, see below).
+- **Only if you ask: the standing session.** `quarterdeck-cli.mjs runner install` adds a scheduled task (Windows) or a systemd user timer (Linux) that keeps one Claude Code session running so goals run with no window open. Nothing installs it for you, and `runner uninstall` removes it.
 
 ## How runs work
 

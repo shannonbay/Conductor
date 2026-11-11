@@ -1,8 +1,22 @@
 {
   "name": "quarterdeck-goals",
-  "version": "0.17.0",
+  "displayName": "Quarterdeck",
+  "version": "0.17.1",
   "license": "Apache-2.0",
-  "description": "Runs Quarterdeck goals in background subagents and puts them beside the chat: approve or reject proposals, run, pause and inspect goals, and let Claude check on them",
+  "description": "Standing goals for Claude Code, like \"keep my inbox under control\" or \"find the best new job ads each week\". Each goal runs on a schedule in a background subagent, asks before it acts, and remembers what you decided. You approve or reject from the Goals pane beside the chat.",
+  "author": {
+    "name": "Shannon Bay"
+  },
+  "homepage": "https://github.com/shannonbay/Quarterdeck",
+  "repository": "https://github.com/shannonbay/Quarterdeck",
+  "keywords": [
+    "goals",
+    "automation",
+    "scheduled",
+    "background-agents",
+    "approvals",
+    "todo"
+  ],
   "types": "./types/index.d.ts",
   "dependencies": [
     "quarterdeck-guard"

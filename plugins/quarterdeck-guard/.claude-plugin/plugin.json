@@ -1,6 +1,18 @@
 {
   "name": "quarterdeck-guard",
-  "version": "0.17.0",
+  "displayName": "Quarterdeck Guard",
+  "version": "0.17.1",
   "license": "Apache-2.0",
-  "description": "Guards the Quarterdeck goal runs that quarterdeck-goals starts: each run acts on its own goal, stays within the goal's autonomy, and keeps its report out of your chat"
+  "description": "Holds each Quarterdeck goal run to what you have allowed: it refuses the kinds of action you turned off, makes the rest wait for your approval, and keeps run reports out of your chat. Required by quarterdeck-goals.",
+  "author": {
+    "name": "Shannon Bay"
+  },
+  "homepage": "https://github.com/shannonbay/Quarterdeck",
+  "repository": "https://github.com/shannonbay/Quarterdeck",
+  "keywords": [
+    "goals",
+    "guard",
+    "permissions",
+    "approvals"
+  ]
 }
