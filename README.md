@@ -157,13 +157,13 @@ node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install
 
 (Without a clone: `node ~/.claude/plugins/cache/quarterdeck/quarterdeck-goals/<version>/server/quarterdeck-cli.mjs` `runner install`.)
 
-This starts the **standing session**: one background Claude Code session (`claude --bg`) in `~/.quarterdeck/runner`, with Remote Control on. It is an ordinary session with both plugins, so runs, the guard, alerts and approvals work in it as in any window. A scheduled task ("Quarterdeck goals runner", Windows Task Scheduler) checks at logon and every 5 minutes that it is running, and restarts it after a Quarterdeck update once no run is going.
+This starts the **standing session**: one Claude Code session in `~/.quarterdeck/runner`, in a hidden console, with Remote Control on. **Windows only so far.** It is an ordinary session with both plugins, so runs, the guard, alerts and approvals work in it as in any window. A scheduled task ("Quarterdeck goals runner", Windows Task Scheduler) checks at logon and every 5 minutes that it is running, and restarts it after a Quarterdeck update once no run is going.
 
 - **Who starts runs:** one session at a time, as always. While a Claude Code window is open, that window may be the one; when it closes, the standing session takes over within 90 seconds. `runner status` says which.
 - **From your phone:** the standing session appears as "Quarterdeck goals" in the Claude app and at claude.ai/code. Alerts arrive there, and you can approve, reject or answer by replying.
 - **Permissions:** the session uses your default permission mode. Nobody is at its terminal, so a mode that doesn't stop to ask suits it: `runner install --permission-mode auto`. (Answering a permission prompt from the phone hasn't been tried yet.)
 - **Limits:** the computer must be on, awake, and you logged in. The standing session uses your subscription only when it works (a run, or passing an alert to your phone). An update that arrives while no window is open is picked up the next time you open one.
-- **Other commands:** `runner status`, `runner stop`, `runner start`, `runner uninstall`. On macOS and Linux `runner install` prints a crontab line instead of making a scheduled task (not yet tried there).
+- **Other commands:** `runner status`, `runner stop`, `runner start`, `runner uninstall`.
 
 ## Checking your setup
 

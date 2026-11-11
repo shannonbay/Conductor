@@ -2,7 +2,7 @@
 
 Roadmap 1.15 (research) and the first design for 1.2 (runs with Claude Code closed). Status: research done, design proposed, not built.
 
-**Update (2026-11-11):** runs with no Claude Code window open are built another way: the standing session (`quarterdeck runner install`, README "Running with Claude Code closed"), a background Claude Code session with Remote Control on. It needs the computer on and the person logged in. This spec now covers only what that leaves: gathering while the computer is off or asleep.
+**Update (2026-11-11):** runs with no Claude Code window open are built another way: the standing session (`quarterdeck runner install`, README "Running with Claude Code closed"), a Claude Code session in a hidden console with Remote Control on (Windows only so far). It needs the computer on and the person logged in. This spec now covers only what that leaves: gathering while the computer is off or asleep.
 
 ## Why
 

@@ -1,16 +1,21 @@
 /**
- * `quarterdeck runner …` — the standing session: one background Claude Code
- * session (`claude --bg`) with Remote Control on, in its own folder, that runs
- * goals while no Claude Code window is open. It is an ordinary session, so the
+ * `quarterdeck runner …` — the standing session: one Claude Code session with
+ * Remote Control on, in its own folder and a hidden console, that runs goals
+ * while no Claude Code window is open. It is an ordinary session, so the
  * quarterdeck-goals runner, the guard, alerts and phone approvals work in it
  * as anywhere; it takes the scheduler lease when no other session holds it.
  *
- * `ensure` keeps it alive (a scheduled task runs it every 15 minutes): it
+ * Not `claude --bg`: Claude Code's background service retires a background
+ * session a few minutes after it finishes a turn (an alert passed to the
+ * phone, a reply from it), which stopped goals each time (seen Nov 2026).
+ *
+ * `ensure` keeps it alive (a scheduled task runs it every few minutes): it
  * starts the session when it is missing and restarts it after an update.
- * The decisions here are pure; everything that touches Claude Code, the
+ * The decisions here are pure; everything that touches processes, the
  * database or the disk comes in through RunnerDeps.
  */
-import { execFileSync, execSync } from 'child_process'
+import { execFileSync } from 'child_process'
+import { randomUUID } from 'crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs'
 import { homedir, userInfo } from 'os'
 import { dirname, join } from 'path'
@@ -23,24 +28,14 @@ const PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 
 
 /** What `ensure` remembers between its runs (runner/state.json). */
 export interface RunnerState {
-  /** The session `start` made. */
+  /** The session's id, chosen at start (`--session-id`): the scheduler lease's holder when it runs goals. */
   sessionId: string
+  /** The hidden console's process; 0 once stopped. Claude Code doesn't list this session, so this is how it is found. */
+  pid: number
   /** The Quarterdeck build that session started with; a different one now means restart. */
   build: string
   /** `--permission-mode` for the session, kept so a restart uses it again. */
   permissionMode?: string
-}
-
-/** A row of `claude agents --json`. */
-export interface AgentRow {
-  id?: string
-  pid?: number
-  cwd?: string
-  kind?: string
-  sessionId?: string
-  name?: string
-  status?: string
-  state?: string
 }
 
 export interface RunnerDeps {
@@ -48,8 +43,13 @@ export interface RunnerDeps {
   dir: string
   /** This Quarterdeck's build id. */
   build: string
-  /** Runs `claude` with these arguments (in `cwd` when given) and answers its output. */
-  claude(args: string[], cwd?: string): string
+  /** Starts `claude` with these arguments in a hidden console in `dir`, on its own; answers the console's process id. */
+  spawnSession(args: string[]): number
+  /** Whether that console is still running. */
+  pidAlive(pid: number): boolean
+  /** Ends the console and everything under it. */
+  killTree(pid: number): void
+  newId(): string
   /** Goal runs going now: no restart while one is. */
   runsRunning(): number
   /** The session id holding the scheduler lease, or null. */
@@ -58,23 +58,11 @@ export interface RunnerDeps {
   writeState(state: RunnerState | null): void
 }
 
-/** Paths compared as Windows does: case and slash direction don't matter. */
-const samePath = (a: string, b: string) => a.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase() === b.replace(/[\\/]+/g, '/').replace(/\/$/, '').toLowerCase()
-
-/** The standing session's rows: background sessions in the runner folder. A live one has a pid. */
-export function runnerSessions(deps: RunnerDeps): AgentRow[] {
-  let rows: unknown
-  try {
-    rows = JSON.parse(deps.claude(['agents', '--json']))
-  } catch (err) {
-    throw new Error(`Couldn't list Claude Code sessions (claude agents --json): ${firstLine(err)}`)
-  }
-  if (!Array.isArray(rows)) return []
-  return (rows as AgentRow[]).filter((r) => r.kind === 'background' && typeof r.cwd === 'string' && samePath(r.cwd, deps.dir))
+/** The state of a session that is running now, or null. */
+function liveState(deps: RunnerDeps): RunnerState | null {
+  const state = deps.readState()
+  return state && state.pid > 0 && deps.pidAlive(state.pid) ? state : null
 }
-
-const alive = (r: AgentRow) => typeof r.pid === 'number'
-const shortId = (r: AgentRow) => r.id ?? r.sessionId?.slice(0, 8) ?? ''
 
 export interface RunnerStatus {
   running: boolean
@@ -88,15 +76,14 @@ export interface RunnerStatus {
 }
 
 export function status(deps: RunnerDeps): RunnerStatus {
-  const live = runnerSessions(deps).find(alive)
+  const live = liveState(deps)
   const holder = deps.leaseHolder()
-  const state = deps.readState()
   return {
-    running: live !== undefined,
+    running: live !== null,
     sessionId: live?.sessionId ?? null,
-    holdsLease: live !== undefined && holder !== null && holder === live.sessionId,
+    holdsLease: live !== null && holder === live.sessionId,
     leaseElsewhere: holder !== null && holder !== live?.sessionId,
-    stale: live !== undefined && state !== null && state.sessionId === live.sessionId && state.build !== deps.build,
+    stale: live !== null && live.build !== deps.build,
   }
 }
 
@@ -111,35 +98,35 @@ export function statusText(s: RunnerStatus): string {
 }
 
 /** The `claude` arguments that start the standing session. */
-export function startArgs(permissionMode?: string): string[] {
-  return ['--bg', '--remote-control', SESSION_NAME, '--name', SESSION_NAME, ...(permissionMode ? ['--permission-mode', permissionMode] : [])]
+export function startArgs(sessionId: string, permissionMode?: string): string[] {
+  return ['--remote-control', SESSION_NAME, '--name', SESSION_NAME, '--session-id', sessionId, ...(permissionMode ? ['--permission-mode', permissionMode] : [])]
 }
 
 export type StartResult = { started: boolean; sessionId: string | null; text: string }
 
+function checkMode(permissionMode: string | undefined): void {
+  if (permissionMode && !PERMISSION_MODES.includes(permissionMode)) throw new Error(`Unknown permission mode "${permissionMode}" (one of: ${PERMISSION_MODES.join(', ')}).`)
+}
+
 /** Starts the standing session unless one is alive. */
 export function start(deps: RunnerDeps, opts: { permissionMode?: string } = {}): StartResult {
   const permissionMode = opts.permissionMode ?? deps.readState()?.permissionMode
-  if (permissionMode && !PERMISSION_MODES.includes(permissionMode)) throw new Error(`Unknown permission mode "${permissionMode}" (one of: ${PERMISSION_MODES.join(', ')}).`)
-  const before = runnerSessions(deps)
-  const live = before.find(alive)
-  if (live) return { started: false, sessionId: live.sessionId ?? null, text: `The standing session is already running (${live.sessionId}).` }
-  // One that died without `claude stop` is still listed: clear it, so they don't pile up
-  for (const dead of before) if (shortId(dead)) tryRun(() => deps.claude(['rm', shortId(dead)]))
-  deps.claude(startArgs(permissionMode), deps.dir)
-  // The new session is listed a moment after `claude --bg` answers (each look takes about a second)
-  let made: AgentRow | undefined
-  for (let i = 0; i < 10 && !made?.sessionId; i++) made = runnerSessions(deps).find(alive)
-  if (!made?.sessionId) throw new Error('Claude Code did not list the new background session (claude agents --json).')
-  deps.writeState({ sessionId: made.sessionId, build: deps.build, ...(permissionMode ? { permissionMode } : {}) })
-  return { started: true, sessionId: made.sessionId, text: `Started the standing session (${made.sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` }
+  checkMode(permissionMode)
+  const live = liveState(deps)
+  if (live) return { started: false, sessionId: live.sessionId, text: `The standing session is already running (${live.sessionId}).` }
+  const sessionId = deps.newId()
+  const pid = deps.spawnSession(startArgs(sessionId, permissionMode))
+  deps.writeState({ sessionId, pid, build: deps.build, ...(permissionMode ? { permissionMode } : {}) })
+  return { started: true, sessionId, text: `Started the standing session (${sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` }
 }
 
 /** Stops the standing session. Its settings (the permission mode) are kept for the next start. */
-export function stop(deps: RunnerDeps): { stopped: number; text: string } {
-  const live = runnerSessions(deps).filter(alive)
-  for (const s of live) deps.claude(['stop', shortId(s)])
-  return { stopped: live.length, text: live.length ? 'Stopped the standing session.' : 'The standing session was not running.' }
+export function stop(deps: RunnerDeps): { stopped: boolean; text: string } {
+  const live = liveState(deps)
+  if (!live) return { stopped: false, text: 'The standing session was not running.' }
+  deps.killTree(live.pid)
+  deps.writeState({ ...live, pid: 0 })
+  return { stopped: true, text: 'Stopped the standing session.' }
 }
 
 export type EnsureAction = 'running' | 'started' | 'restarted' | 'restart-waits'
@@ -150,22 +137,11 @@ export type EnsureAction = 'running' | 'started' | 'restarted' | 'restart-waits'
  * while a goal run is going.
  */
 export function ensure(deps: RunnerDeps): { action: EnsureAction; text: string } {
-  const live = runnerSessions(deps).find(alive)
-  if (!live) {
-    const r = start(deps)
-    return { action: 'started', text: r.text }
-  }
-  const state = deps.readState()
-  // A session someone started by hand (no state): take it as it is
-  if (!state || state.sessionId !== live.sessionId) {
-    deps.writeState({ sessionId: live.sessionId!, build: deps.build, ...(state?.permissionMode ? { permissionMode: state.permissionMode } : {}) })
-    return { action: 'running', text: `The standing session is running (${live.sessionId}).` }
-  }
-  if (state.build === deps.build) return { action: 'running', text: `The standing session is running (${live.sessionId}).` }
+  const live = liveState(deps)
+  if (!live) return { action: 'started', text: start(deps).text }
+  if (live.build === deps.build) return { action: 'running', text: `The standing session is running (${live.sessionId}).` }
   if (deps.runsRunning() > 0) return { action: 'restart-waits', text: 'Quarterdeck was updated; the standing session restarts once no goal run is going.' }
   stop(deps)
-  // Claude Code may list the stopped session for a moment longer (each look takes about a second)
-  for (let i = 0; i < 5 && runnerSessions(deps).some(alive); i++) { /* look again */ }
   const r = start(deps)
   return { action: 'restarted', text: `Quarterdeck was updated: restarted the standing session (${r.sessionId}).` }
 }
@@ -259,45 +235,47 @@ export interface InstallDeps extends RunnerDeps {
   writeFile(path: string, content: string, encoding?: 'utf16le'): void
   removeFile(path: string): void
   schtasks(args: string[]): string
+  /** Waits, blocking. */
+  sleep(ms: number): void
 }
 
 /** Writes the launcher and creates the scheduled task, then starts the session. */
 export function install(deps: InstallDeps, opts: { permissionMode?: string } = {}): string {
+  if (deps.platform !== 'win32') throw new Error('The standing session is set up for Windows only so far (it needs a hidden console and Task Scheduler).')
   if (!deps.cliPath) throw new Error('Run this from the built CLI: node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install (after `npm run build --prefix mcp`).')
   const launcher = join(deps.dir, 'launch.mjs')
   deps.writeFile(launcher, LAUNCHER)
   deps.writeFile(join(deps.dir, 'cli-path'), deps.cliPath)
-  const lines: string[] = []
-  if (deps.platform === 'win32') {
-    const file = join(deps.dir, 'task.xml')
-    // schtasks reads UTF-16 with a byte order mark
-    deps.writeFile(file, '﻿' + taskXml({ user: deps.user, node: deps.node, launcher }), 'utf16le')
-    deps.schtasks(['/create', '/tn', TASK_NAME, '/xml', file, '/f'])
-    lines.push(`Created the scheduled task "${TASK_NAME}": it checks at logon and every ${ENSURE_MINUTES} minutes that the standing session is running.`)
-  } else {
-    lines.push(`Scheduled tasks are set up on Windows only. Add this line to your crontab (crontab -e) to keep the standing session running:`,
-      `*/${ENSURE_MINUTES} * * * * "${deps.node}" "${launcher}"`)
-  }
-  lines.push(deps.platform === 'win32' ? startByTask(deps, opts).text : start(deps, opts).text)
+  const file = join(deps.dir, 'task.xml')
+  // schtasks reads UTF-16 with a byte order mark
+  deps.writeFile(file, '\ufeff' + taskXml({ user: deps.user, node: deps.node, launcher }), 'utf16le')
+  deps.schtasks(['/create', '/tn', TASK_NAME, '/xml', file, '/f'])
+  const lines = [
+    `Created the scheduled task "${TASK_NAME}": it checks at logon and every ${ENSURE_MINUTES} minutes that the standing session is running.`,
+    startByTask(deps, opts).text,
+  ]
   lines.push('Goals now run while this computer is on and you are logged in, with no Claude Code window open. Remove with: quarterdeck runner uninstall')
   return lines.join('\n')
 }
 
 /**
  * Starts the session by running the scheduled task, so Task Scheduler is its
- * parent. Started from a command inside Claude Code, the background service
- * and the session end when that window closes (seen Nov 2026).
+ * parent. A session started from a command inside Claude Code would be a child
+ * of that window and may end with it.
  */
 export function startByTask(deps: InstallDeps, opts: { permissionMode?: string } = {}): StartResult {
-  if (opts.permissionMode && !PERMISSION_MODES.includes(opts.permissionMode)) throw new Error(`Unknown permission mode "${opts.permissionMode}" (one of: ${PERMISSION_MODES.join(', ')}).`)
-  const live = runnerSessions(deps).find(alive)
-  if (live) return { started: false, sessionId: live.sessionId ?? null, text: `The standing session is already running (${live.sessionId}).` }
+  checkMode(opts.permissionMode)
+  const live = liveState(deps)
+  if (live) return { started: false, sessionId: live.sessionId, text: `The standing session is already running (${live.sessionId}).` }
   // The task's `ensure` reads the permission mode from the state
-  if (opts.permissionMode) deps.writeState({ sessionId: deps.readState()?.sessionId ?? '', build: deps.build, permissionMode: opts.permissionMode })
+  if (opts.permissionMode) deps.writeState({ sessionId: deps.readState()?.sessionId ?? '', pid: 0, build: deps.build, permissionMode: opts.permissionMode })
   deps.schtasks(['/run', '/tn', TASK_NAME])
-  let made: AgentRow | undefined
-  for (let i = 0; i < 40 && !made?.sessionId; i++) made = runnerSessions(deps).find(alive)
-  if (!made?.sessionId) throw new Error(`The scheduled task ran but no session appeared. See ${join(deps.dir, 'ensure.log')}.`)
+  let made: RunnerState | null = null
+  for (let i = 0; i < 40 && !made; i++) {
+    deps.sleep(500)
+    made = liveState(deps)
+  }
+  if (!made) throw new Error(`The scheduled task ran but no session appeared. See ${join(deps.dir, 'ensure.log')}.`)
   return { started: true, sessionId: made.sessionId, text: `Started the standing session (${made.sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` }
 }
 
@@ -311,8 +289,6 @@ export function uninstall(deps: InstallDeps): string {
     } catch {
       lines.push(`There was no scheduled task "${TASK_NAME}".`)
     }
-  } else {
-    lines.push('If you added the crontab line, remove it (crontab -e).')
   }
   deps.removeFile(join(deps.dir, 'launch.mjs'))
   deps.removeFile(join(deps.dir, 'task.xml'))
@@ -368,6 +344,13 @@ export function standingSessionId(dir: string = runnerDir()): string | null {
   try { return (JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')) as RunnerState).sessionId ?? null } catch { return null }
 }
 
+/** The environment for the session: this process's, without what marks it as running inside another Claude Code session. */
+function sessionEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env }
+  for (const key of Object.keys(env)) if (/^CLAUDE(CODE$|_CODE_|_PID$|_EFFORT$)/.test(key)) delete env[key]
+  return env
+}
+
 export async function realDeps(): Promise<InstallDeps> {
   const core = await import('@quarterdeck/core')
   const dir = runnerDir()
@@ -381,10 +364,35 @@ export async function realDeps(): Promise<InstallDeps> {
   return {
     dir,
     build: currentBuild(),
-    // `claude` may be a .cmd (an npm install), which only the shell runs
-    claude: (args, cwd) => process.platform === 'win32'
-      ? execSync(['claude', ...args.map((a) => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a))].join(' '), { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
-      : execFileSync('claude', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
+    // conhost --headless gives `claude` a console with no window. Started through PowerShell's
+    // Start-Process: started by Node's spawn (detached or not, any stdio) it exits within seconds (seen Nov 2026)
+    spawnSession: (args) => {
+      if (process.platform !== 'win32') throw new Error('The standing session is set up for Windows only so far (it needs a hidden console).')
+      const claude = execFileSync('where.exe', ['claude'], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/)[0]!.trim()
+      const quote = (a: string) => (/[\s"]/.test(a) ? `"${a}"` : a)
+      // One PowerShell single-quoted string holds the whole argument line ('' is a quote inside it)
+      const ps = (s: string) => `'${s.replace(/'/g, "''")}'`
+      const line = ['--headless', quote(claude), ...args.map(quote)].join(' ')
+      const out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+        `(Start-Process -FilePath conhost.exe -ArgumentList ${ps(line)} -WorkingDirectory ${ps(dir)} -WindowStyle Hidden -PassThru).Id`,
+      ], { encoding: 'utf8', windowsHide: true, env: sessionEnv(), stdio: ['ignore', 'pipe', 'pipe'] })
+      const pid = Number(out.trim())
+      if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Could not start the hidden console (conhost.exe): ${out.trim().slice(0, 200)}`)
+      return pid
+    },
+    pidAlive: (pid) => {
+      try {
+        if (process.platform !== 'win32') { process.kill(pid, 0); return true }
+        return /conhost\.exe/i.test(execFileSync('tasklist.exe', ['/fi', `PID eq ${pid}`, '/fo', 'csv', '/nh'], { encoding: 'utf8', windowsHide: true }))
+      } catch { return false }
+    },
+    killTree: (pid) => {
+      try {
+        if (process.platform === 'win32') execFileSync('taskkill.exe', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true })
+        else process.kill(pid)
+      } catch { /* already gone */ }
+    },
+    newId: () => randomUUID(),
     runsRunning: () => withDb((db) => (db.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get() as { n: number }).n),
     leaseHolder: () => withDb((db) => core.leaseHolder(db)),
     readState: () => {
@@ -402,13 +410,14 @@ export async function realDeps(): Promise<InstallDeps> {
     writeFile: (path, content, encoding) => writeFileSync(path, content, encoding ?? 'utf8'),
     removeFile: (path) => rmSync(path, { force: true }),
     schtasks: (args) => execFileSync('schtasks.exe', args, { encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }),
+    sleep: (ms) => { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) },
   }
 }
 
 export const RUNNER_USAGE = [
   'Usage: quarterdeck runner <command>',
   '',
-  'The standing session: a background Claude Code session with Remote Control on, which runs',
+  'The standing session: a Claude Code session in a hidden console with Remote Control on, which runs',
   'goals while no Claude Code window is open (the computer must be on and you logged in).',
   '',
   '  install [--permission-mode <mode>]   Start it, and keep it running with a scheduled task',
@@ -433,7 +442,7 @@ export async function runnerCommand(args: string[], deps?: InstallDeps): Promise
       case 'start': {
         if (d.platform === 'win32' && taskInstalled(d)) return { text: startByTask(d, { permissionMode }).text, code: 0 }
         const r = start(d, { permissionMode })
-        const warning = r.started && d.insideClaudeCode ? '\nStarted from inside Claude Code, so it stops when this window closes. Run `quarterdeck runner install` (or start it from a terminal of its own) to keep it.' : ''
+        const warning = r.started && d.insideClaudeCode ? '\nStarted from inside Claude Code, so it may stop when this window closes. Run `quarterdeck runner install` (or start it from a terminal of its own) to keep it.' : ''
         return { text: r.text + warning, code: 0 }
       }
       case 'stop': return { text: stop(d).text, code: 0 }
@@ -451,8 +460,4 @@ export async function runnerCommand(args: string[], deps?: InstallDeps): Promise
 
 function firstLine(err: unknown): string {
   return (err instanceof Error ? err.message : String(err)).trim().split('\n')[0]!
-}
-
-function tryRun(fn: () => unknown): void {
-  try { fn() } catch { /* best effort */ }
 }

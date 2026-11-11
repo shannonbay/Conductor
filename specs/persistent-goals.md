@@ -376,7 +376,7 @@ After a few weeks, the approval stats show 40/40 `email.draft_reply` proposals a
 - **Answers open question 4:** runs no longer share the conversation; each has its own subagent and context.
 
 **Phase 3 — Off-machine**
-- **Built meanwhile (2026-11-11): the standing session.** `quarterdeck runner install` keeps one background Claude Code session with Remote Control running, so goals run with no window open while the computer is on (`mcp/src/runner-session.ts`). Off-machine runs are still open.
+- **Built meanwhile (2026-11-11): the standing session.** `quarterdeck runner install` keeps one Claude Code session with Remote Control running in a hidden console (Windows only so far), so goals run with no window open while the computer is on (`mcp/src/runner-session.ts`). Off-machine runs are still open.
 - **Status: waiting on the platform.** Self-hosting (a VPS, a tunnel, Docker plus auth) would push infrastructure onto users, so phase 3 waits for Anthropic-hosted pieces:
   - Cloud agents on a schedule or trigger (routines exist today).
   - Access to the user's services: **scoped connectors** (OAuth, e.g. Gmail with read and draft but no send) preferred, or a **cloud browser** for services without one. A logged-in cloud browser is riskier: it holds full sessions for many services, it's a high-value target, and an always-on agent reading email is exposed to prompt injection. Scoped tokens keep the blast radius small and can be revoked per service.

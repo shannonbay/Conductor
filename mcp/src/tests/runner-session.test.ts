@@ -3,20 +3,19 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  ensure, install, runnerCommand, start, startArgs, status, statusText, stop, taskXml, uninstall, SESSION_NAME, TASK_NAME,
-  type AgentRow, type InstallDeps, type RunnerState,
+  ensure, install, runnerCommand, start, startArgs, startByTask, status, statusText, stop, taskXml, uninstall, SESSION_NAME, TASK_NAME,
+  type InstallDeps, type RunnerState,
 } from '../runner-session.js'
 import { checkRunner } from '../doctor.js'
 
 const DIR = 'C:\\Users\\me\\.quarterdeck\\runner'
 
-/** A fake Claude Code: `--bg` adds a background session in the folder it is started in, `stop` and `rm` remove one. */
+/** A fake computer: started sessions are process ids in `alive`; running the scheduled task runs `ensure`, as Task Scheduler would. */
 function fake(over: Partial<InstallDeps> = {}) {
   const world = {
-    rows: [
-      { pid: 1, cwd: 'C:\\Users\\me\\GitHub\\app', kind: 'interactive', sessionId: 'aaaaaaaa-0000', name: 'app', status: 'idle' },
-    ] as AgentRow[],
-    calls: [] as string[][],
+    alive: new Set<number>(),
+    spawned: [] as string[][],
+    killed: [] as number[],
     state: null as RunnerState | null,
     files: {} as Record<string, string>,
     tasks: [] as string[][],
@@ -27,20 +26,18 @@ function fake(over: Partial<InstallDeps> = {}) {
   const deps: InstallDeps = {
     dir: DIR,
     build: '0.14.0+1',
-    claude: (args, cwd) => {
-      world.calls.push(args)
-      if (args[0] === 'agents') return JSON.stringify(world.rows)
-      if (args[0] === '--bg') {
-        const n = ++world.made
-        world.rows.push({ pid: 100 + n, id: `bg00000${n}`, cwd: cwd!.replace(/\\/g, '/').toUpperCase(), kind: 'background', sessionId: `bg00000${n}-1111`, name: SESSION_NAME, status: 'idle' })
-        return 'backgrounded'
-      }
-      if (args[0] === 'stop' || args[0] === 'rm') {
-        world.rows = world.rows.filter((r) => r.id !== args[1])
-        return 'stopped'
-      }
-      throw new Error(`unexpected: claude ${args.join(' ')}`)
+    spawnSession: (args) => {
+      world.spawned.push(args)
+      const pid = 100 + world.spawned.length
+      world.alive.add(pid)
+      return pid
     },
+    pidAlive: (pid) => world.alive.has(pid),
+    killTree: (pid) => {
+      world.killed.push(pid)
+      world.alive.delete(pid)
+    },
+    newId: () => `session-${++world.made}`,
     runsRunning: () => world.running,
     leaseHolder: () => world.holder,
     readState: () => world.state,
@@ -54,53 +51,50 @@ function fake(over: Partial<InstallDeps> = {}) {
     removeFile: (path) => { delete world.files[path] },
     schtasks: (args) => {
       world.tasks.push(args)
-      // Running the task runs `ensure`, as Task Scheduler would
-      if (args[0] === '/run') ensure(deps)
       if (args[0] === '/query' && !world.tasks.some((t) => t[0] === '/create')) throw new Error('ERROR: The system cannot find the file specified.')
+      if (args[0] === '/run') ensure(deps)
       return 'SUCCESS'
     },
+    sleep: () => {},
     ...over,
   }
   return { deps, world }
 }
 
-const started = (world: { calls: string[][] }) => world.calls.filter((c) => c[0] === '--bg')
-
 describe('the standing session', () => {
-  it('starts in its folder with Remote Control on, and remembers the session and build', () => {
+  it('starts in a hidden console with Remote Control on and an id of its own, and remembers it', () => {
     const { deps, world } = fake()
     const r = start(deps)
-    expect(r.started).toBe(true)
-    expect(started(world)).toEqual([['--bg', '--remote-control', SESSION_NAME, '--name', SESSION_NAME]])
-    expect(world.state).toEqual({ sessionId: 'bg000001-1111', build: '0.14.0+1' })
-    // A second start leaves the live one alone (its folder is matched whatever the case and slashes)
+    expect(r).toMatchObject({ started: true, sessionId: 'session-1' })
+    expect(world.spawned).toEqual([['--remote-control', SESSION_NAME, '--name', SESSION_NAME, '--session-id', 'session-1']])
+    expect(world.state).toEqual({ sessionId: 'session-1', pid: 101, build: '0.14.0+1' })
+    // Not `claude --bg`: the background service retires such a session after a turn
+    expect(startArgs('x')).not.toContain('--bg')
+    // A second start leaves the live one alone
     expect(start(deps).started).toBe(false)
-    expect(started(world)).toHaveLength(1)
+    expect(world.spawned).toHaveLength(1)
   })
 
   it('keeps a permission mode for later starts, and refuses an unknown one', () => {
     const { deps, world } = fake()
     start(deps, { permissionMode: 'auto' })
-    expect(startArgs('auto').slice(-2)).toEqual(['--permission-mode', 'auto'])
-    stop(deps)
+    expect(startArgs('x', 'auto').slice(-2)).toEqual(['--permission-mode', 'auto'])
+    expect(stop(deps).stopped).toBe(true)
+    expect(world.killed).toEqual([101])
+    expect(world.state).toMatchObject({ pid: 0, permissionMode: 'auto' })
     start(deps)
-    expect(started(world)[1]).toContain('auto')
+    expect(world.spawned[1]).toContain('auto')
     expect(() => start(fake().deps, { permissionMode: 'yolo' })).toThrow(/Unknown permission mode/)
   })
 
-  it('clears a session that died before starting a new one', () => {
-    const { deps, world } = fake()
-    world.rows.push({ id: 'dead0001', cwd: DIR, kind: 'background', sessionId: 'dead0001-2222', state: 'blocked' })
-    start(deps)
-    expect(world.calls).toContainEqual(['rm', 'dead0001'])
-    expect(world.rows.filter((r) => r.kind === 'background')).toHaveLength(1)
-  })
-
-  it('ensure starts a missing session and leaves a live one alone', () => {
+  it('ensure starts a missing session, leaves a live one alone, and starts again after it dies', () => {
     const { deps, world } = fake()
     expect(ensure(deps).action).toBe('started')
     expect(ensure(deps).action).toBe('running')
-    expect(started(world)).toHaveLength(1)
+    expect(world.spawned).toHaveLength(1)
+    world.alive.clear() // the computer restarted, or the session crashed
+    expect(ensure(deps).action).toBe('started')
+    expect(world.state).toMatchObject({ sessionId: 'session-2', pid: 102 })
   })
 
   it('ensure restarts after an update, but only when no run is going', () => {
@@ -109,49 +103,49 @@ describe('the standing session', () => {
     const updated = { ...deps, build: '0.15.0+2' }
     world.running = 1
     expect(ensure(updated).action).toBe('restart-waits')
-    expect(started(world)).toHaveLength(1)
+    expect(world.spawned).toHaveLength(1)
     world.running = 0
     expect(ensure(updated).action).toBe('restarted')
-    expect(world.state).toEqual({ sessionId: 'bg000002-1111', build: '0.15.0+2' })
-    expect(world.rows.filter((r) => r.kind === 'background')).toHaveLength(1)
+    expect(world.killed).toEqual([101])
+    expect(world.state).toEqual({ sessionId: 'session-2', pid: 102, build: '0.15.0+2' })
     expect(ensure(updated).action).toBe('running')
-  })
-
-  it('ensure takes a session started by hand as it is', () => {
-    const { deps, world } = fake()
-    world.rows.push({ pid: 7, id: 'hand0001', cwd: DIR, kind: 'background', sessionId: 'hand0001-3333', status: 'idle' })
-    expect(ensure(deps).action).toBe('running')
-    expect(world.state?.sessionId).toBe('hand0001-3333')
-    expect(started(world)).toHaveLength(0)
   })
 
   it('status says who starts goal runs', () => {
     const { deps, world } = fake()
     expect(statusText(status(deps))).toMatch(/not running/)
     start(deps)
-    world.holder = 'bg000001-1111'
+    world.holder = 'session-1'
     expect(status(deps)).toMatchObject({ running: true, holdsLease: true, leaseElsewhere: false, stale: false })
-    world.holder = 'aaaaaaaa-0000'
+    world.holder = 'a-window'
     expect(statusText(status(deps))).toMatch(/an open Claude Code window is starting goal runs/)
     expect(status({ ...deps, build: 'newer' }).stale).toBe(true)
+    stop(deps)
+    expect(status(deps)).toMatchObject({ running: false, sessionId: null })
   })
 
-  it('install writes the launcher and the task, then starts; uninstall undoes it', () => {
+  it('install writes the launcher and the task, and the task starts the session; uninstall undoes it', () => {
     const { deps, world } = fake()
-    const text = install(deps)
+    const text = install(deps, { permissionMode: 'auto' })
     expect(world.files[join(DIR, 'launch.mjs')]).toMatch(/runner', 'ensure'/)
     expect(world.files[join(DIR, 'cli-path')]).toBe(deps.cliPath)
     expect(world.tasks[0]).toEqual(['/create', '/tn', TASK_NAME, '/xml', join(DIR, 'task.xml'), '/f'])
     expect(world.files[join(DIR, 'task.xml')]!.startsWith('\ufeff<?xml')).toBe(true)
-    // The task starts the session, not this command: started from inside Claude Code it would end with that window
+    // The task starts the session, not this command: started from inside Claude Code it would be that window's child
     expect(world.tasks[1]).toEqual(['/run', '/tn', TASK_NAME])
-    expect(started(world)).toHaveLength(1)
+    expect(world.spawned).toHaveLength(1)
+    expect(world.spawned[0]).toContain('auto')
     expect(text).toMatch(/no Claude Code window open/)
 
     expect(uninstall(deps)).toMatch(/Deleted the scheduled task/)
     expect(world.tasks.at(-1)).toEqual(['/delete', '/tn', TASK_NAME, '/f'])
     expect(world.files[join(DIR, 'launch.mjs')]).toBeUndefined()
-    expect(world.rows.filter((r) => r.kind === 'background')).toHaveLength(0)
+    expect(world.alive.size).toBe(0)
+  })
+
+  it('says so when the task ran but no session appeared', () => {
+    const { deps } = fake({ schtasks: () => 'SUCCESS' })
+    expect(() => startByTask(deps)).toThrow(/no session appeared/)
   })
 
   it('the task runs at logon and every 5 minutes, as the person, on battery too, with no window', () => {
@@ -166,21 +160,19 @@ describe('the standing session', () => {
     expect(x).toContain('<StartBoundary>2026-11-10T02:03:04</StartBoundary>')
   })
 
-  it('install needs the built CLI, and other systems get a crontab line', () => {
+  it('install needs the built CLI, and Windows', () => {
     expect(() => install(fake({ cliPath: null }).deps)).toThrow(/built CLI/)
-    const { deps, world } = fake({ platform: 'linux', node: '/usr/bin/node', dir: '/home/me/.quarterdeck/runner' })
-    expect(install(deps)).toMatch(/\*\/5 \* \* \* \* "\/usr\/bin\/node" ".*launch\.mjs"/)
-    expect(world.tasks).toHaveLength(0)
+    expect(() => install(fake({ platform: 'linux' }).deps)).toThrow(/Windows only/)
   })
 
-  it('start goes through the task once it is installed, and warns when it would end with this window', async () => {
+  it('start goes through the task once it is installed, and warns when it would be this window\'s child', async () => {
     const { deps, world } = fake({ insideClaudeCode: true })
-    expect((await runnerCommand(['start'], deps)).text).toMatch(/stops when this window closes/)
+    expect((await runnerCommand(['start'], deps)).text).toMatch(/may stop when this window closes/)
     stop(deps)
     world.tasks.push(['/create'])
-    expect((await runnerCommand(['start', '--permission-mode', 'auto'], deps)).text).not.toMatch(/stops when/)
+    expect((await runnerCommand(['start', '--permission-mode', 'auto'], deps)).text).not.toMatch(/may stop when/)
     expect(world.tasks.at(-1)).toEqual(['/run', '/tn', TASK_NAME])
-    expect(started(world).at(-1)).toContain('auto')
+    expect(world.spawned.at(-1)).toContain('auto')
   })
 
   it('the command answers text and an exit code', async () => {
@@ -190,8 +182,8 @@ describe('the standing session', () => {
     expect(await runnerCommand(['status'], deps)).toMatchObject({ code: 0 })
     expect((await runnerCommand([], deps)).text).toMatch(/Usage: quarterdeck runner/)
     expect(await runnerCommand(['nonsense'], deps)).toMatchObject({ code: 1 })
-    const broken = fake({ claude: () => { throw new Error('claude: command not found\nmore') } }).deps
-    expect(await runnerCommand(['status'], broken)).toEqual({ code: 1, text: "quarterdeck runner: Couldn't list Claude Code sessions (claude agents --json): claude: command not found" })
+    const broken = fake({ spawnSession: () => { throw new Error('conhost.exe not found\nmore') } }).deps
+    expect(await runnerCommand(['start'], broken)).toEqual({ code: 1, text: 'quarterdeck runner: conhost.exe not found' })
   })
 
   it('the doctor reports it only once it is set up', async () => {
