@@ -73,6 +73,7 @@ function fake(over: Partial<InstallDeps> = {}) {
     systemdDir: UNITS,
     path: '/usr/local/bin:/home/me/.local/bin:/usr/bin',
     attach: () => { world.attached++ },
+    wsl: false,
     screenText: () => world.screen,
     sleep: () => {},
     ...over,
@@ -194,6 +195,7 @@ describe('the standing session', () => {
     expect(world.spawned[0]).toContain('auto')
     expect(text).toMatch(/systemd user timer .* every 5 minutes/)
     expect(text).toMatch(/loginctl enable-linger/)
+    expect(text).not.toMatch(/WSL/)
     // Started again, it goes through systemd too, not as this window's child
     stop(deps)
     await expect(runnerCommand(['start'], { ...deps, insideClaudeCode: true })).resolves.toMatchObject({ code: 0, text: expect.not.stringMatching(/may stop when/) })
@@ -203,6 +205,22 @@ describe('the standing session', () => {
     expect(world.files[`${UNITS}/${UNIT_NAME}.service`]).toBeUndefined()
     expect(world.files[`${UNITS}/${UNIT_NAME}.timer`]).toBeUndefined()
     expect(world.alive.size).toBe(0)
+  })
+
+  it('on WSL, install and the doctor say it runs only while a WSL window is open', async () => {
+    const { deps } = fake({ platform: 'linux', wsl: true })
+    const text = install(deps)
+    expect(text).toMatch(/This is WSL.*use the standing session on Windows/)
+    expect(text).not.toMatch(/enable-linger/)
+    const home = mkdtempSync(join(tmpdir(), 'quarterdeck-runner-'))
+    try {
+      mkdirSync(join(home, '.quarterdeck', 'runner'), { recursive: true })
+      writeFileSync(join(home, '.quarterdeck', 'runner', 'launch.mjs'), '')
+      const o = { repoRoot: home, cwd: home, home, env: {}, nodeVersion: '24.1.0', fetchTimeoutMs: 300 }
+      expect(await checkRunner(o, deps)).toMatchObject({ level: 'warn', detail: expect.stringMatching(/WSL stops/), fix: expect.stringMatching(/Windows terminal/) })
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
   })
 
   it('the systemd service leaves the tmux session running when it ends, and finds this Node first', () => {

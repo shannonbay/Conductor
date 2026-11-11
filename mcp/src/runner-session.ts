@@ -312,11 +312,16 @@ export interface InstallDeps extends RunnerDeps {
   path: string
   /** Linux: puts this terminal in the session's tmux session until Ctrl-b d. */
   attach(): void
+  /** Linux under WSL, which stops the whole distro once its last window closes, the standing session with it. */
+  wsl: boolean
   /** Waits, blocking. */
   sleep(ms: number): void
 }
 
 const SUPPORTED: NodeJS.Platform[] = ['win32', 'linux']
+
+/** WSL stops the distro about a minute after its last window closes (seen Nov 2026, WSL 2.6), so the standing session runs only while one is open. */
+export const WSL_WARNING = 'This is WSL, which stops a minute or so after its last window closes, and the standing session with it: goals run here only while a WSL window is open. To run them with every window closed, use the standing session on Windows instead (`runner install` from a Windows terminal).'
 
 /** Writes the launcher and creates the scheduled task (Windows) or systemd timer (Linux), then starts the session. */
 export function install(deps: InstallDeps, opts: { permissionMode?: string } = {}): string {
@@ -343,7 +348,8 @@ export function install(deps: InstallDeps, opts: { permissionMode?: string } = {
   }
   lines.push(startByTask(deps, opts).text)
   lines.push('Goals now run while this computer is on and you are logged in, with no Claude Code window open. Remove with: quarterdeck runner uninstall')
-  if (deps.platform === 'linux') lines.push('To keep it running after you log out too: loginctl enable-linger')
+  if (deps.platform === 'linux' && deps.wsl) lines.push(WSL_WARNING)
+  else if (deps.platform === 'linux') lines.push('To keep it running after you log out too: loginctl enable-linger')
   return lines.join('\n')
 }
 
@@ -599,6 +605,7 @@ export async function realDeps(): Promise<InstallDeps> {
     systemctl: (args) => execFileSync('systemctl', ['--user', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
     systemdDir: join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'systemd', 'user'),
     path: process.env.PATH ?? '',
+    wsl: process.platform === 'linux' && (() => { try { return /microsoft/i.test(readFileSync('/proc/version', 'utf8')) } catch { return false } })(),
     attach: () => {
       if (process.platform !== 'linux') throw new Error('attach is for Linux, where the session is in tmux.')
       if (!process.stdin.isTTY) throw new Error(`attach needs a terminal: run it in one of its own (or: tmux -L ${TMUX_SOCKET} attach -t ${TMUX_SESSION}).`)

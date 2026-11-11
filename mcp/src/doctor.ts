@@ -7,7 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { ATTACH_HINT, keepAliveName, realDeps, status, statusText, taskInstalled, type InstallDeps } from './runner-session.js'
+import { ATTACH_HINT, keepAliveName, WSL_WARNING, realDeps, status, statusText, taskInstalled, type InstallDeps } from './runner-session.js'
 
 export type Level = 'ok' | 'warn' | 'fail'
 
@@ -314,6 +314,7 @@ export async function checkRunner(o: DoctorOptions, deps?: InstallDeps): Promise
     const s = status(d)
     const task = !['win32', 'linux'].includes(d.platform) || taskInstalled(d)
     if (!s.running) return warn(name, `not running${task ? ` (${keepAliveName(d.platform)} starts it within 5 minutes)` : ''}, so goals run only while a Claude Code window is open`, 'Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.')
+    if (d.platform === 'linux' && d.wsl) return warn(name, `${statusText(s)} But ${WSL_WARNING.replace(/^This is WSL, which/, 'WSL')}`, 'Run `quarterdeck runner uninstall` here and `quarterdeck runner install` in a Windows terminal.')
     if (s.waiting) return warn(name, 'running but waiting to be told its folder is safe, so no goal runs in it', ATTACH_HINT)
     if (!task) return warn(name, `${statusText(s)} But ${keepAliveName(d.platform)} is missing, so nothing restarts it after a logon or an update`, 'Run `quarterdeck runner install`.')
     return ok(name, statusText(s))
