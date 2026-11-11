@@ -113,7 +113,7 @@ export function statusText(s: RunnerStatus): string {
   const who = s.holdsLease
     ? 'it is the session starting goal runs'
     : s.leaseElsewhere
-      ? 'an open Claude Code window is starting goal runs now; it takes over when that closes'
+      ? 'another session holds the goal runs (an open Claude Code window, or a session that just stopped); it takes over within 90 seconds of that one going quiet'
       : 'no session has started goal runs in the last minutes (it takes over within 90 seconds)'
   if (s.waiting) return `The standing session is running (${s.sessionId}) but waiting to be told its folder is safe, so no goal runs in it yet. ${ATTACH_HINT}`
   return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? ' It started with an older Quarterdeck and restarts at the next check with no run going.' : ''}`
@@ -503,6 +503,10 @@ function spawnInTmux(dir: string, args: string[]): number {
   return pid
 }
 
+function processAlive(pid: number): boolean {
+  try { process.kill(pid, 0); return true } catch { return false }
+}
+
 /** Linux: whether `pid` is the standing session's pane (not some later process that got the same id). */
 function tmuxPaneAlive(pid: number): boolean {
   try { return tmux(['list-panes', '-t', TMUX_SESSION, '-F', '#{pane_pid}']).split('\n').includes(String(pid)) } catch { return false }
@@ -549,8 +553,12 @@ export async function realDeps(): Promise<InstallDeps> {
     killTree: (pid) => {
       try {
         if (process.platform === 'win32') execFileSync('taskkill.exe', ['/pid', String(pid), '/t', '/f'], { stdio: 'ignore', windowsHide: true })
-        else if (process.platform === 'linux') tmux(['kill-session', '-t', TMUX_SESSION])
-        else process.kill(pid)
+        else if (process.platform === 'linux') {
+          tmux(['kill-session', '-t', TMUX_SESSION])
+          // claude takes a few seconds to exit after the hang-up (seen Nov 2026); stopped means stopped
+          for (let i = 0; i < 20 && processAlive(pid); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500)
+          if (processAlive(pid)) process.kill(pid, 'SIGKILL')
+        } else process.kill(pid)
       } catch { /* already gone */ }
     },
     screenText: (pid) => {

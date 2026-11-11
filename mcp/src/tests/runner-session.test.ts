@@ -137,7 +137,7 @@ describe('the standing session', () => {
     world.holder = 'session-1'
     expect(status(deps)).toMatchObject({ running: true, holdsLease: true, leaseElsewhere: false, stale: false })
     world.holder = 'a-window'
-    expect(statusText(status(deps))).toMatch(/an open Claude Code window is starting goal runs/)
+    expect(statusText(status(deps))).toMatch(/another session holds the goal runs \(an open Claude Code window, or a session that just stopped\)/)
     expect(status({ ...deps, build: 'newer' }).stale).toBe(true)
     stop(deps)
     expect(status(deps)).toMatchObject({ running: false, sessionId: null })
