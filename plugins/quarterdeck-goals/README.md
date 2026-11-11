@@ -11,7 +11,7 @@ claude plugin marketplace add shannonbay/Quarterdeck#release
 claude plugin install quarterdeck-goals@quarterdeck --scope user
 ```
 
-quarterdeck-guard is installed with it. Turn on auto-update for the marketplace (`/plugin` → Marketplaces → quarterdeck → Enable auto-update) to get new versions, server included, then `/reload-plugins` when Claude Code says one arrived. Without the guard plugin no run starts, and the pane says so. An older hand-added `quarterdeck` server (`mcp__quarterdeck__*`) still works, but remove it once the plugin's is running (`claude mcp remove quarterdeck --scope user`) so two copies don't run.
+quarterdeck-guard is installed with it. Turn on auto-update for the marketplace (`/plugin` → Marketplaces → quarterdeck → Enable auto-update) to get new versions, server included, then `/reload-plugins` when Claude Code says one arrived. Without it, the pane says when a newer version is published and offers **Ask Claude to install it**. Without the guard plugin no run starts, and the pane says so. An older hand-added `quarterdeck` server (`mcp__quarterdeck__*`) still works, but remove it once the plugin's is running (`claude mcp remove quarterdeck --scope user`) so two copies don't run.
 
 For development, add your checkout as the marketplace instead (`claude plugin marketplace add <path to the Quarterdeck repo>`). Claude Code then reads the plugins straight from `plugins/`: after an edit run `npm run build` (which bundles the server into `server/`) and `/reload-plugins`. `npm run doctor` reports what's installed.
 

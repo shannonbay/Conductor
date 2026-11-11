@@ -2,7 +2,7 @@
  * Pure functions: the web app's overview turned into cards, goal-name
  * matching, alert diffing and the small formatters the pane uses.
  */
-import type { GoalCard, Item, Schedule, Snapshot } from '../types'
+import type { GoalCard, Item, Schedule, Snapshot, Update } from '../types'
 
 /** One goal as GET /api/goals/overview returns it (the fields used here). */
 export type OverviewGoal = {
@@ -420,6 +420,19 @@ export function discussPrompt(g: GoalCard, run?: GoalCard['runs'][number], quest
     return `Let's talk about this run of my goal "${g.name}" (goal ${g.id}, run ${run.id}): ${when}.\n\nIts summary: ${run.summary ?? '(none)'}\n\n${`${transcript} ${how}`.trim()}\n\nMy question: ${asked}`
   }
   return `Let's talk about this run of my goal "${g.name}" (goal ${g.id}, run ${run.id}): ${when}.\n\nIts summary: ${run.summary ?? '(none)'}\n\n${isFailed(run.status) ? 'Why did it fail, and what should change so it doesn\'t again?' : 'Is this what should have happened, and what should change?'}${transcript} ${how}`
+}
+
+/** The prompt that asks Claude to install a published update (the pane's "Ask Claude to install it"). */
+export function updatePrompt(u: Update): string {
+  return [
+    `Quarterdeck ${u.latest} is available (I have ${u.installed}). Please install it:`,
+    '',
+    '1. `claude plugin marketplace update quarterdeck`',
+    '2. `claude plugin update quarterdeck-goals@quarterdeck`',
+    '3. `claude plugin update quarterdeck-guard@quarterdeck`',
+    '',
+    "Tell me what each one answered. If they worked, remind me to run /reload-plugins in every open Claude Code session (only I can type that), and that goal runs wait in a session until it has. If one failed, say why and don't try anything else without asking me.",
+  ].join('\n')
 }
 
 export type GoalChanges = {

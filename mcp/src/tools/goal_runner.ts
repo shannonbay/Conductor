@@ -17,6 +17,7 @@ import { existsSync } from 'fs'
 import { nanoid } from 'nanoid'
 import { record } from '../history.js'
 import { standingSessionId } from '../runner-session.js'
+import { availableUpdate, type AvailableUpdate } from '../update-check.js'
 
 const human = { actor: 'human' as const, via: 'plugin' }
 
@@ -40,8 +41,14 @@ export async function goals_tick(args: unknown) {
 export async function goals_overview(args: unknown) {
   const input = GoalsOverviewSchema.parse(args)
   const { body, etag } = overviewWithEtag(input.detail ?? 'all', standingSessionId())
-  if (input.etag === etag) return { changed: false, etag }
-  return { changed: true, etag, ...JSON.parse(body) as object }
+  return overviewAnswer(input.etag, body, etag, availableUpdate())
+}
+
+/** The overview's answer; a published update is part of it, so the etag changes when one appears. */
+export function overviewAnswer(asked: string | undefined, body: string, etag: string, update: AvailableUpdate | null) {
+  const tag = update ? `${etag}+update-${update.latest}` : etag
+  if (asked === tag) return { changed: false, etag: tag }
+  return { changed: true, etag: tag, ...JSON.parse(body) as object, ...(update ? { update } : {}) }
 }
 
 export async function decide_item(args: unknown) {

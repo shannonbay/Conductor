@@ -215,7 +215,7 @@ const TOOLS = [
   },
   {
     name: 'goals_overview',
-    description: 'Every goal that is not retired, with items waiting for the human, open items, recent runs, health and memory, in one call. Pass the last etag to get { changed: false } when nothing changed.',
+    description: 'Every goal that is not retired, with items waiting for the human, open items, recent runs, health and memory, in one call. Pass the last etag to get { changed: false } when nothing changed. Carries `update` when a newer Quarterdeck is published.',
     inputSchema: zodToJsonSchema(GoalsOverviewSchema),
     handler: goals_overview,
   },

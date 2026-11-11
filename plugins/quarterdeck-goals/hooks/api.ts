@@ -6,7 +6,7 @@
  */
 import type { EngineInterface } from 'claude-code'
 
-import type { Schedule, TodoList } from '../types'
+import type { Schedule, TodoList, Update } from '../types'
 import type { GoalChanges, OverviewGoal } from './model'
 import { SERVER_PREFIXES } from './names'
 
@@ -101,10 +101,10 @@ async function call<T>($: $, name: string, input: Record<string, unknown> = {}):
 export type Hold = { until: string; reason: string }
 
 /** The overview: cards for every goal, full detail for the ids in `detail` (the expanded ones). */
-export async function fetchOverview($: $, etag: string | null, detail: readonly string[] = []): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null; outdated: boolean; standing: boolean }> {
-  const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[]; hold?: Hold | null; outdated?: boolean; standing?: boolean }>($, 'goals_overview', { ...(etag ? { etag } : {}), detail: [...detail] })
+export async function fetchOverview($: $, etag: string | null, detail: readonly string[] = []): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null; outdated: boolean; standing: boolean; update: Update | null }> {
+  const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[]; hold?: Hold | null; outdated?: boolean; standing?: boolean; update?: Update }>($, 'goals_overview', { ...(etag ? { etag } : {}), detail: [...detail] })
   if (!res.changed) return { changed: false }
-  return { changed: true, goals: res.goals ?? [], etag: res.etag, hold: res.hold ?? null, outdated: res.outdated === true, standing: res.standing === true }
+  return { changed: true, goals: res.goals ?? [], etag: res.etag, hold: res.hold ?? null, outdated: res.outdated === true, standing: res.standing === true, update: res.update ?? null }
 }
 
 /** Applies goal changes the person has confirmed; answers what changed. */

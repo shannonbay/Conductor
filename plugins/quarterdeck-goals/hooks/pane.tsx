@@ -10,11 +10,11 @@
  */
 import type { EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
-import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
+import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, clip, discussPrompt, holdUntilText, isFailed, isQuiet, lastRun, nextRunText, runCost, scheduleLabel, spark } from './model'
+import { ago, clip, discussPrompt, holdUntilText, isFailed, isQuiet, lastRun, nextRunText, runCost, scheduleLabel, spark, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
 import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
@@ -127,6 +127,12 @@ export async function renderPane($: $, e: E) {
     <Box flexDirection="column">
       {guardMissing && <Text color="yellow">{GUARD_MISSING}</Text>}
       {s.outdated && <Text color="yellow">Quarterdeck was updated in another session: run /reload-plugins here to use the new version (this session won't start goal runs until then).</Text>}
+      {s.update && (
+        <Box>
+          <Text color="yellow">Quarterdeck {s.update.latest} is available (you have {s.update.installed}). </Text>
+          {action($, e, { key: 'update-install', label: view.doing === 'update-install' ? 'Sending…' : 'Ask Claude to install it', onPress: () => void askToUpdate($, s.update!) })}
+        </Box>
+      )}
       {s.standing && <Text dimColor>The standing session is starting goal runs, so they also run with this window closed.</Text>}
       {s.hold && <Text color="yellow">Goal runs are on hold until {holdUntilText(s.hold.until, view.now)}: the usage limit is reached. Due runs start after that.</Text>}
       {phone === 'no_transport' && (
@@ -670,6 +676,11 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
       })}
     </Box>
   )
+}
+
+/** Asks Claude, in the conversation, to install the published update. */
+async function askToUpdate($: $, update: Update): Promise<boolean> {
+  return act($, 'update-install', 'ask Claude to update', async () => void (await sendToChat($, updatePrompt(update), `install Quarterdeck ${update.latest}: claude plugin update quarterdeck-goals@quarterdeck`)))
 }
 
 /**

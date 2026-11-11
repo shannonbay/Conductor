@@ -105,6 +105,8 @@ Claude Code updates Anthropic's marketplaces on its own but leaves others to you
 claude plugin update quarterdeck-goals@quarterdeck
 ```
 
+Without auto-update you still hear about new versions: the server looks at the `release` branch every six hours, and the Goals pane then says `Quarterdeck 0.16.0 is available` with **Ask Claude to install it**, which sends Claude the update commands to run. Turn the check off with `QUARTERDECK_UPDATE_CHECK=0`.
+
 With several sessions open, `/reload-plugins` in each. Until you do, a session that's still on the old version stops starting goal runs and its Goals pane says so: the updated session runs them.
 
 ### Upgrading from a manual install

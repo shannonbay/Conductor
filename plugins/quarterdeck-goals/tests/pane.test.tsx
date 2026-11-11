@@ -404,6 +404,44 @@ test('when a newer Quarterdeck has upgraded the database, the pane asks for /rel
   await ui.unmount()
 })
 
+test('when a newer Quarterdeck is published, the pane says so and asks Claude to install it', async ($, on) => {
+  const { prompts, box, toasts } = engine(on)
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })], { update: { installed: '0.15.0', latest: '0.16.0' } })
+  await $.session.start(START)
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ type: 'Text', text: /is available/ }))?.text).toBe('Quarterdeck 0.16.0 is available (you have 0.15.0). ')
+    await ui.unmount()
+  }
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'update-install' })
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('Quarterdeck 0.16.0 is available (I have 0.15.0)')
+  expect(prompts[0]).toContain('claude plugin marketplace update quarterdeck')
+  expect(prompts[0]).toContain('claude plugin update quarterdeck-goals@quarterdeck')
+  expect(prompts[0]).toContain('claude plugin update quarterdeck-guard@quarterdeck')
+  expect(prompts[0]).toContain('/reload-plugins')
+
+  // With a prompt half typed, it is added to the draft instead of sent
+  box.draft = 'while you are at it'
+  await ui.press({ key: 'update-install' })
+  expect(prompts).toHaveLength(1)
+  expect(box.draft).toContain('install Quarterdeck 0.16.0')
+  expect(toasts.at(-1)).toContain('Added to your prompt')
+  await ui.unmount()
+})
+
+test('with no update published, the pane offers none', async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'update-install' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('while the standing session starts goal runs, the pane says so', async ($, on) => {
   engine(on)
   fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })], { standing: true })

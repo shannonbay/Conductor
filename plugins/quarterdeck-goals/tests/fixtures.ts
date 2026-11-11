@@ -91,7 +91,7 @@ const TOOLS = [
  */
 type FakeTodoList = { id: string; name: string; items: { id: string; text: string; status: string; depth: number; notes: string | null }[] }
 
-export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string }; outdated?: boolean; standing?: boolean; prefix?: string } = {}) {
+export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string }; outdated?: boolean; standing?: boolean; update?: { installed: string; latest: string }; prefix?: string } = {}) {
   const prefix = opts.prefix ?? 'mcp__quarterdeck__'
   const lists: FakeTodoList[] = opts.todos ?? []
   const listView = () => lists.map((l) => {
@@ -119,7 +119,7 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
       switch (name) {
         case 'goals_overview':
           if (input.etag === etag()) return ok({ changed: false, etag: etag() }) as never
-          return ok({ changed: true, etag: etag(), goals: goals.map((x) => ({ ...x, open_item_count: x.open_items.length })), hold: opts.hold ?? null, ...(opts.outdated ? { outdated: true } : {}), ...(opts.standing ? { standing: true } : {}) }) as never
+          return ok({ changed: true, etag: etag(), goals: goals.map((x) => ({ ...x, open_item_count: x.open_items.length })), hold: opts.hold ?? null, ...(opts.outdated ? { outdated: true } : {}), ...(opts.standing ? { standing: true } : {}), ...(opts.update ? { update: opts.update } : {}) }) as never
         case 'delete_goal': {
           const at = goals.findIndex((x) => x.id === input.goal_id)
           if (at >= 0) goals.splice(at, 1)
