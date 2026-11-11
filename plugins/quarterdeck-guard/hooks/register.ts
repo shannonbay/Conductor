@@ -22,7 +22,7 @@
  */
 import type { EngineInterface, Register } from 'claude-code'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const RUNNER_PLUGIN = 'quarterdeck-goals'
 /** "Goal: <name> (<run id>)", the description quarterdeck-goals starts every run's agent with. */
@@ -70,7 +70,7 @@ const deny = (reason: string) => ({ decision: 'deny' as const, reason })
 const runIds = new Map<string, string>()
 const otherAgents = new Set<string>()
 
-async function runIdFor($: $, agentId: string | undefined): Promise<string | null> {
+async function runIdFor($: Engine, agentId: string | undefined): Promise<string | null> {
   if (!agentId || otherAgents.has(agentId)) return null
   const known = runIds.get(agentId)
   if (known) return known
@@ -113,7 +113,7 @@ let serverPrefix: string | null = null
 const NO_SUCH_TOOL = /no tool named "mcp__|no such tool available: mcp__|no implementation for tool.call/i
 
 /** Calls a quarterdeck server tool under whichever prefix the session has. */
-async function callServer($: $, name: string, input: Record<string, unknown>): Promise<Awaited<ReturnType<$['tool']['call']>>> {
+async function callServer($: Engine, name: string, input: Record<string, unknown>): Promise<Awaited<ReturnType<Engine['tool']['call']>>> {
   const order = serverPrefix ? [serverPrefix, ...SERVER_PREFIXES.filter((p) => p !== serverPrefix)] : [...SERVER_PREFIXES]
   let missing: unknown
   for (const prefix of order) {
@@ -133,7 +133,7 @@ async function callServer($: $, name: string, input: Record<string, unknown>): P
   throw missing
 }
 
-async function guardCheck($: $, runId: string, tool: string): Promise<Verdict> {
+async function guardCheck($: Engine, runId: string, tool: string): Promise<Verdict> {
   guardCallsInFlight++
   try {
     const r = await callServer($, 'guard_check', { run_id: runId, tool_name: tool })
@@ -149,7 +149,7 @@ async function guardCheck($: $, runId: string, tool: string): Promise<Verdict> {
 /** A final message that may mean the run was stopped (Quarterdeck decides which, in report_run_end). */
 const STOPPED = /limit|rate|quota|credits|overloaded|api error/i
 
-async function reportRunEnd($: $, runId: string, answer: string, reason: string, usage?: unknown): Promise<void> {
+async function reportRunEnd($: Engine, runId: string, answer: string, reason: string, usage?: unknown): Promise<void> {
   guardCallsInFlight++
   try {
     await callServer($, 'report_run_end', { run_id: runId, answer, reason, ...(usage ? { usage } : {}) })

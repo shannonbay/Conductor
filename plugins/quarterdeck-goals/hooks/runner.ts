@@ -14,7 +14,7 @@ import { attachAgent, cancelRunRecord, failRun, releaseLease, reportWatch, resul
 import { addRun, getNotice, getRuns, getSnapshot, removeRun, setGuardMissing, setNotice } from './state'
 import { serverToolNames } from './names'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 export const RUNNER_AGENT = 'quarterdeck-goals:goal-runner'
 const TICK_MS = 30_000
@@ -51,7 +51,7 @@ export const RUN_AGENT_DENIED_TOOLS = [...HUMAN_ONLY_TOOLS, ...serverToolNames('
 const RUNNER_PROMPT = `You carry out one run of a Quarterdeck persistent goal: a standing objective that is never finished. You start with no memory; the goal brief has everything. Work inside the goal's autonomy: never take an action whose category is "propose" or "off" unless the brief shows an approved item for it. Keep within the time you are given, and always finish with end_run. Your final message is shown to nobody but Quarterdeck, so keep it to one line.`
 
 /** The agent type every run uses, hidden from the model (see register). */
-export async function registerRunnerAgent($: $): Promise<void> {
+export async function registerRunnerAgent($: Engine): Promise<void> {
   await $.agent.register({
     name: 'goal-runner',
     description: 'Runs one Quarterdeck goal run. Started by the quarterdeck-goals plugin only.',
@@ -71,7 +71,7 @@ let ticking: Promise<void> | null = null
 let guardMissingSince: number | null = null
 let recheck: { cancel: () => void } | null = null
 
-export function startRunner($: $): void {
+export function startRunner($: Engine): void {
   timer?.cancel()
   recheck?.cancel()
   recheck = null
@@ -81,7 +81,7 @@ export function startRunner($: $): void {
 }
 
 /** Stops ticking and gives the lease up, so another open session takes over. */
-export async function stopRunner($: $): Promise<void> {
+export async function stopRunner($: Engine): Promise<void> {
   timer?.cancel()
   timer = null
   recheck?.cancel()
@@ -90,11 +90,11 @@ export async function stopRunner($: $): Promise<void> {
 }
 
 /** A pass now (after "Run now" or an approval) instead of within 30 s. Shares a pass under way. */
-export function kick($: $): Promise<void> {
+export function kick($: Engine): Promise<void> {
   return runPass($)
 }
 
-function runPass($: $): Promise<void> {
+function runPass($: Engine): Promise<void> {
   ticking ??= pass($).catch(() => { /* not connected: the pane shows it; the next tick retries */ }).finally(() => {
     ticking = null
   })
@@ -102,7 +102,7 @@ function runPass($: $): Promise<void> {
 }
 
 // The pane re-reads on its own poll (every 5 s while a run is open).
-async function pass($: $): Promise<void> {
+async function pass($: Engine): Promise<void> {
   await reconcile($)
   // Unguarded runs could act outside their goal: start none without the guard plugin.
   // Checked every pass, so the pane's warning goes as soon as the guard loads.
@@ -143,7 +143,7 @@ const WATCH_TEXT_MAX = 60_000
  * asked, and reports the answer to Quarterdeck, which works out what is new.
  * True when that queued a run.
  */
-async function checkToolWatch($: $, watch: ToolWatch): Promise<boolean> {
+async function checkToolWatch($: Engine, watch: ToolWatch): Promise<boolean> {
   let report: { text: string } | { error: string }
   try {
     const answer = await Promise.race([
@@ -161,7 +161,7 @@ async function checkToolWatch($: $, watch: ToolWatch): Promise<boolean> {
 }
 
 /** Starts a claimed run in a subagent; a run that can't start is marked failed. */
-async function start($: $, run: ClaimedRun): Promise<void> {
+async function start($: Engine, run: ClaimedRun): Promise<void> {
   let agentId: string | undefined
   let why = 'no agent was started'
   const description = `Goal: ${run.name} (${run.run_id})`
@@ -192,7 +192,7 @@ async function start($: $, run: ClaimedRun): Promise<void> {
  * a turn and wait on background work, so only its status counts, not a turn
  * ending. Returns whether any run ended.
  */
-export async function reconcile($: $): Promise<boolean> {
+export async function reconcile($: Engine): Promise<boolean> {
   const runs = await getRuns($)
   const ids = Object.keys(runs)
   if (ids.length === 0) return false
@@ -224,12 +224,12 @@ export async function reconcile($: $): Promise<boolean> {
   return ended
 }
 
-async function stopAgent($: $, agentId: string): Promise<void> {
+async function stopAgent($: Engine, agentId: string): Promise<void> {
   await $.tool.call({ tool: 'TaskStop', task_id: agentId } as never).catch(() => {})
 }
 
 /** Cancels a goal's open run and stops its subagent if this session started it. */
-export async function cancelRun($: $, goalId: string): Promise<void> {
+export async function cancelRun($: Engine, goalId: string): Promise<void> {
   const { agentId } = await cancelRunRecord($, goalId)
   const runs = await getRuns($)
   const mine = agentId && runs[agentId] ? agentId : Object.keys(runs).find((id) => runs[id]!.goalId === goalId)

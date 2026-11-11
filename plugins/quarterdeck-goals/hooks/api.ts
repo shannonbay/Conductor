@@ -10,7 +10,7 @@ import type { Schedule, TodoList, Update } from '../types'
 import type { GoalChanges, OverviewGoal } from './model'
 import { SERVER_PREFIXES } from './names'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 export const DEFAULT_URL = 'http://localhost:3000'
 
@@ -34,13 +34,13 @@ export function configure(options: Readonly<Record<string, unknown>>): void {
  * The web app's address, for "Open in browser" links (the web app is
  * optional): the configured one, or one saved by the old /conductor-url command.
  */
-export async function baseUrl($: $): Promise<string> {
+export async function baseUrl($: Engine): Promise<string> {
   if (settings.url !== DEFAULT_URL) return settings.url
   const stored = await $.store.get('url')
   return typeof stored === 'string' && /^https?:\/\//.test(stored) ? stored.replace(/\/+$/, '') : DEFAULT_URL
 }
 
-export async function goalPageUrl($: $, goalId: string): Promise<string> {
+export async function goalPageUrl($: Engine, goalId: string): Promise<string> {
   return `${await baseUrl($)}/goals/${encodeURIComponent(goalId)}`
 }
 
@@ -70,9 +70,9 @@ export function isNotLoaded(err: unknown): boolean {
 let serverPrefix: string | null = null
 
 /** Calls one `quarterdeck` MCP tool and returns its JSON answer. */
-async function call<T>($: $, name: string, input: Record<string, unknown> = {}): Promise<T> {
+async function call<T>($: Engine, name: string, input: Record<string, unknown> = {}): Promise<T> {
   const order = serverPrefix ? [serverPrefix, ...SERVER_PREFIXES.filter((p) => p !== serverPrefix)] : [...SERVER_PREFIXES]
-  let r: Awaited<ReturnType<$['tool']['call']>> | undefined
+  let r: Awaited<ReturnType<Engine['tool']['call']>> | undefined
   for (const prefix of order) {
     try {
       const answer = await $.tool.call({ tool: `${prefix}${name}`, ...input } as never)
@@ -101,63 +101,63 @@ async function call<T>($: $, name: string, input: Record<string, unknown> = {}):
 export type Hold = { until: string; reason: string }
 
 /** The overview: cards for every goal, full detail for the ids in `detail` (the expanded ones). */
-export async function fetchOverview($: $, etag: string | null, detail: readonly string[] = []): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null; outdated: boolean; standing: boolean; update: Update | null }> {
+export async function fetchOverview($: Engine, etag: string | null, detail: readonly string[] = []): Promise<{ changed: false } | { changed: true; goals: OverviewGoal[]; etag: string | null; hold: Hold | null; outdated: boolean; standing: boolean; update: Update | null }> {
   const res = await call<{ changed: boolean; etag: string; goals?: OverviewGoal[]; hold?: Hold | null; outdated?: boolean; standing?: boolean; update?: Update }>($, 'goals_overview', { ...(etag ? { etag } : {}), detail: [...detail] })
   if (!res.changed) return { changed: false }
   return { changed: true, goals: res.goals ?? [], etag: res.etag, hold: res.hold ?? null, outdated: res.outdated === true, standing: res.standing === true, update: res.update ?? null }
 }
 
 /** Applies goal changes the person has confirmed; answers what changed, and how each new watch's first check went. */
-export async function updateGoal($: $, goalId: string, changes: GoalChanges): Promise<{ changed: string[]; watches: { name: string; result: string }[] }> {
+export async function updateGoal($: Engine, goalId: string, changes: GoalChanges): Promise<{ changed: string[]; watches: { name: string; result: string }[] }> {
   const r = await call<{ changed: string[]; watches?: { name: string; result: string }[] }>($, 'update_goal', { goal_id: goalId, ...changes })
   return { changed: r.changed, watches: r.watches ?? [] }
 }
 
 /** Deletes a goal for good (the pane confirms first). */
-export async function deleteGoal($: $, goalId: string): Promise<void> {
+export async function deleteGoal($: Engine, goalId: string): Promise<void> {
   await call($, 'delete_goal', { goal_id: goalId })
 }
 
 /** The person's answer to a question a run asked. */
-export async function answerItem($: $, goalId: string, itemId: string, text: string): Promise<void> {
+export async function answerItem($: Engine, goalId: string, itemId: string, text: string): Promise<void> {
   await call($, 'decide_item', { goal_id: goalId, item_id: itemId, decision: 'answer', feedback: text })
 }
 
-export async function approve($: $, goalId: string, itemId: string): Promise<void> {
+export async function approve($: Engine, goalId: string, itemId: string): Promise<void> {
   await call($, 'decide_item', { goal_id: goalId, item_id: itemId, decision: 'approve' })
 }
 
-export async function reject($: $, goalId: string, itemId: string, feedback: string): Promise<void> {
+export async function reject($: Engine, goalId: string, itemId: string, feedback: string): Promise<void> {
   await call($, 'decide_item', { goal_id: goalId, item_id: itemId, decision: 'reject', feedback })
 }
 
-export async function runNow($: $, goalId: string): Promise<void> {
+export async function runNow($: Engine, goalId: string): Promise<void> {
   await call($, 'run_goal', { goal_id: goalId })
 }
 
 /** Marks the goal's open run cancelled; answers the subagent doing it, to stop. */
-export async function cancelRunRecord($: $, goalId: string): Promise<{ runId: string; agentId: string | null }> {
+export async function cancelRunRecord($: Engine, goalId: string): Promise<{ runId: string; agentId: string | null }> {
   const r = await call<{ cancelled: string; agent_id: string | null }>($, 'cancel_run', { goal_id: goalId })
   return { runId: r.cancelled, agentId: r.agent_id }
 }
 
-export async function setGoalStatus($: $, goalId: string, status: 'active' | 'paused'): Promise<void> {
+export async function setGoalStatus($: Engine, goalId: string, status: 'active' | 'paused'): Promise<void> {
   await call($, 'set_goal_status', { goal_id: goalId, status })
 }
 
-export async function deleteMemory($: $, goalId: string, memoryId: string): Promise<void> {
+export async function deleteMemory($: Engine, goalId: string, memoryId: string): Promise<void> {
   await call($, 'delete_memory', { goal_id: goalId, memory_id: memoryId })
 }
 
 /** null: the goal runs only on demand. */
-export async function setSchedule($: $, goalId: string, schedule: Schedule | null, oneOff = false): Promise<{ next_run_at: string | null }> {
+export async function setSchedule($: Engine, goalId: string, schedule: Schedule | null, oneOff = false): Promise<{ next_run_at: string | null }> {
   return call($, 'set_schedule', { goal_id: goalId, schedule, ...(oneOff && { one_off: true }) })
 }
 
 export type CreatedGoal = { id: string; next_run_at: string | null; one_off: boolean; queued_run: string | null }
 
 export async function createGoal(
-  $: $, input: {
+  $: Engine, input: {
     name: string; objective: string; working_dir: string; schedule?: Schedule | null; one_off?: boolean
     instructions?: string; autonomy?: Record<string, string>; tool_map?: Record<string, string>
   },
@@ -182,7 +182,7 @@ export type ClaimedRun = {
 export type ToolWatch = { watch_id: string; goal_id: string; name: string; tool: string; input: Record<string, unknown> }
 
 /** One scheduler pass. `toolWatches` false asks for runs only (a second pass right after checking watches). */
-export async function tick($: $, holder: string, trackedRunIds: string[], toolWatches = true): Promise<{ leader: boolean; claimed: ClaimedRun[]; toolWatches: ToolWatch[] }> {
+export async function tick($: Engine, holder: string, trackedRunIds: string[], toolWatches = true): Promise<{ leader: boolean; claimed: ClaimedRun[]; toolWatches: ToolWatch[] }> {
   const r = await call<{ leader: boolean; claimed: ClaimedRun[]; tool_watches?: ToolWatch[] }>($, 'goals_tick', {
     holder, tracked_run_ids: trackedRunIds, max_concurrent: settings.maxConcurrent, ...(toolWatches && { tool_watches: true }),
   })
@@ -190,38 +190,38 @@ export async function tick($: $, holder: string, trackedRunIds: string[], toolWa
 }
 
 /** What a tool watch's call answered; `queued_run` is set when something new queued a run. */
-export async function reportWatch($: $, watchId: string, report: { text: string } | { error: string }): Promise<{ queued_run: string | null }> {
+export async function reportWatch($: Engine, watchId: string, report: { text: string } | { error: string }): Promise<{ queued_run: string | null }> {
   return call($, 'watch_report', { watch_id: watchId, ...report })
 }
 
-export async function releaseLease($: $, holder: string): Promise<void> {
+export async function releaseLease($: Engine, holder: string): Promise<void> {
   await call($, 'goals_tick', { holder, release: true })
 }
 
-export async function attachAgent($: $, runId: string, agentId: string): Promise<void> {
+export async function attachAgent($: Engine, runId: string, agentId: string): Promise<void> {
   await call($, 'attach_agent', { run_id: runId, agent_id: agentId })
 }
 
 /** Ends a run that is still open; `changed` is false when it had already ended (end_run). */
-export async function failRun($: $, runId: string, status: 'failed' | 'timed_out', reason: string): Promise<{ changed: boolean }> {
+export async function failRun($: Engine, runId: string, status: 'failed' | 'timed_out', reason: string): Promise<{ changed: boolean }> {
   return call<{ changed: boolean }>($, 'fail_run', { run_id: runId, status, reason })
 }
 
 // ── The person's to-do lists ──────────────────────────────────────────────────
 
-export async function fetchTodos($: $, dir: string): Promise<TodoList[]> {
+export async function fetchTodos($: Engine, dir: string): Promise<TodoList[]> {
   return (await call<{ lists: TodoList[] }>($, 'todo_list', { working_dir: dir })).lists
 }
 
-export async function addTodo($: $, input: { dir: string; text: string; listId?: string; by?: 'human' | 'agent' }): Promise<{ list_id: string; item_id: string }> {
+export async function addTodo($: Engine, input: { dir: string; text: string; listId?: string; by?: 'human' | 'agent' }): Promise<{ list_id: string; item_id: string }> {
   return call($, 'todo_add', { working_dir: input.dir, text: input.text, added_by: input.by ?? 'human', ...(input.listId && { list_id: input.listId }) })
 }
 
-export async function setTodo($: $, listId: string, itemId: string, status: 'pending' | 'active' | 'completed', notes?: string): Promise<void> {
+export async function setTodo($: Engine, listId: string, itemId: string, status: 'pending' | 'active' | 'completed', notes?: string): Promise<void> {
   await call($, 'todo_set', { list_id: listId, item_id: itemId, status, ...(notes !== undefined && { notes }) })
 }
 
 /** Rewords a to-do (and its notes, when given). */
-export async function editTodo($: $, listId: string, itemId: string, input: { text: string; notes?: string; by: 'human' | 'agent' }): Promise<void> {
+export async function editTodo($: Engine, listId: string, itemId: string, input: { text: string; notes?: string; by: 'human' | 'agent' }): Promise<void> {
   await call($, 'todo_set', { list_id: listId, item_id: itemId, text: input.text, changed_by: input.by, ...(input.notes !== undefined && { notes: input.notes }) })
 }

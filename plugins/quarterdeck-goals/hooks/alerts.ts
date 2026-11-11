@@ -19,7 +19,7 @@ import { settings } from './api'
 import { diffAlerts, statusText, type Seen } from './model'
 import { getPhone, setPhone } from './state'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const NOTIFY_GAP_MS = 60_000
 const PUSH_MAX = 200 // mobile systems cut longer pushes
@@ -39,7 +39,7 @@ const lastNotified = new Map<string, number>()
 export type AlertRecord = { at: number; text: string; notify: string; push: string }
 export const LAST_ALERT_KEY = 'lastAlert'
 
-export async function readLastAlert($: $): Promise<AlertRecord | null> {
+export async function readLastAlert($: Engine): Promise<AlertRecord | null> {
   try {
     const v = await $.store.get(LAST_ALERT_KEY)
     return v && typeof v === 'object' ? (v as AlertRecord) : null
@@ -49,7 +49,7 @@ export async function readLastAlert($: $): Promise<AlertRecord | null> {
 }
 
 /** The person typed or sent a message (terminal or phone): no relay for a while. */
-export async function markActive($: $, at: number): Promise<void> {
+export async function markActive($: Engine, at: number): Promise<void> {
   try {
     await $.store.set(ACTIVE_KEY, at)
   } catch {
@@ -57,7 +57,7 @@ export async function markActive($: $, at: number): Promise<void> {
   }
 }
 
-async function isIdle($: $, now: number): Promise<boolean> {
+async function isIdle($: Engine, now: number): Promise<boolean> {
   try {
     const v = await $.store.get(ACTIVE_KEY)
     return typeof v !== 'number' || now - v >= IDLE_MS
@@ -67,7 +67,7 @@ async function isIdle($: $, now: number): Promise<boolean> {
 }
 
 /** When the plugin's own timer last polled (not a refresh a tool or button asked for). */
-export async function readLastPoll($: $): Promise<number | null> {
+export async function readLastPoll($: Engine): Promise<number | null> {
   try {
     const v = await $.store.get('lastPoll')
     return typeof v === 'number' ? v : null
@@ -76,7 +76,7 @@ export async function readLastPoll($: $): Promise<number | null> {
   }
 }
 
-export async function savePoll($: $, at: number): Promise<void> {
+export async function savePoll($: Engine, at: number): Promise<void> {
   try {
     await $.store.set('lastPoll', at)
   } catch {
@@ -84,7 +84,7 @@ export async function savePoll($: $, at: number): Promise<void> {
   }
 }
 
-async function saveAlert($: $, record: AlertRecord): Promise<void> {
+async function saveAlert($: Engine, record: AlertRecord): Promise<void> {
   try {
     await $.store.set(LAST_ALERT_KEY, record)
   } catch {
@@ -94,7 +94,7 @@ async function saveAlert($: $, record: AlertRecord): Promise<void> {
 
 const SEEN_KEY = 'alertSeen'
 
-async function loadSeen($: $): Promise<Seen | null> {
+async function loadSeen($: Engine): Promise<Seen | null> {
   try {
     const v = (await $.store.get(SEEN_KEY)) as Seen | undefined
     return v && Array.isArray(v.items) && Array.isArray(v.failures) ? v : null
@@ -103,7 +103,7 @@ async function loadSeen($: $): Promise<Seen | null> {
   }
 }
 
-async function saveSeen($: $, value: Seen): Promise<void> {
+async function saveSeen($: Engine, value: Seen): Promise<void> {
   try {
     await $.store.set(SEEN_KEY, value)
   } catch {
@@ -112,7 +112,7 @@ async function saveSeen($: $, value: Seen): Promise<void> {
 }
 
 /** The last few alert checks, for goals_status (a diagnostic). */
-async function trace($: $, line: string): Promise<void> {
+async function trace($: Engine, line: string): Promise<void> {
   try {
     const prev = ((await $.store.get('alertTrace')) as string[] | undefined) ?? []
     await $.store.set('alertTrace', [...prev, line].slice(-6))
@@ -121,7 +121,7 @@ async function trace($: $, line: string): Promise<void> {
   }
 }
 
-export async function readTrace($: $): Promise<string[]> {
+export async function readTrace($: Engine): Promise<string[]> {
   try {
     return ((await $.store.get('alertTrace')) as string[] | undefined) ?? []
   } catch {
@@ -134,7 +134,7 @@ export function resetAlerts(): void {
   lastNotified.clear()
 }
 
-export async function announce($: $, goals: GoalCard[], now: number): Promise<void> {
+export async function announce($: Engine, goals: GoalCard[], now: number): Promise<void> {
   // What was already alerted on survives restarts and reloads (the store), so a
   // proposal that arrives while the plugin restarts still raises its alert
   const before = seen ? 'memory' : 'store'
@@ -217,7 +217,7 @@ export function relayPrompt(message: string): string {
 type PushAnswer = { deny?: string; pushSent?: boolean; disabledReason?: string; raw: unknown }
 
 /** Claude Code's own phone push, called by the plugin. */
-async function callPush($: $, message: string): Promise<PushAnswer> {
+async function callPush($: Engine, message: string): Promise<PushAnswer> {
   const r = await $.tool.call({ tool: 'PushNotification', message, status: 'proactive' } as never) as unknown as { result?: unknown; deny?: string }
   const res = (r.result ?? {}) as { pushSent?: boolean; disabledReason?: string }
   return { deny: r.deny, pushSent: res.pushSent, disabledReason: res.disabledReason, raw: r.result ?? r }
@@ -237,7 +237,7 @@ export const REMOTE_COMMAND = 'remote-control'
  *
  * What it learns goes to the `phone` state, which the pane shows.
  */
-async function whyNotRelay($: $, message: string): Promise<string | null> {
+async function whyNotRelay($: Engine, message: string): Promise<string | null> {
   let answer: PushAnswer
   try {
     answer = await callPush($, message)
@@ -258,7 +258,7 @@ async function whyNotRelay($: $, message: string): Promise<string | null> {
 }
 
 /** Passes the alert to Claude, which sends the push; only while the person seems away and it can arrive. */
-async function relayToPhone($: $, message: string, now: number): Promise<string> {
+async function relayToPhone($: Engine, message: string, now: number): Promise<string> {
   // Asked even while the person is typing: it costs no turn, and tells the pane
   // when alerts can't reach the phone at all
   const blocked = await whyNotRelay($, message)
@@ -276,7 +276,7 @@ async function relayToPhone($: $, message: string, now: number): Promise<string>
  * Claude Code's own phone push; it decides whether to send (Remote Control,
  * mobile push, presence). Answers what happened, in words.
  */
-async function pushToPhone($: $, message: string): Promise<string> {
+async function pushToPhone($: Engine, message: string): Promise<string> {
   try {
     const r = await callPush($, message)
     if (r.deny !== undefined) return `refused: ${r.deny}`
@@ -290,7 +290,7 @@ async function pushToPhone($: $, message: string): Promise<string> {
 }
 
 /** A message came from the phone or the web: Remote Control is connected. */
-export async function markRemote($: $): Promise<void> {
+export async function markRemote($: Engine): Promise<void> {
   // Mobile push being off is a separate fault a message from the phone doesn't clear
   if ((await getPhone($).catch(() => 'unknown')) !== 'config_off') await setPhone($, 'connected').catch(() => {})
 }
@@ -300,7 +300,7 @@ export async function markRemote($: $): Promise<void> {
  * an error to show, or null. Whether it connected isn't known until the next
  * alert or a message from the phone, so the pane's line just goes.
  */
-export async function connectRemote($: $): Promise<string | null> {
+export async function connectRemote($: Engine): Promise<string | null> {
   try {
     const commands = await $.command.list()
     if (!commands.some((c) => c.name === REMOTE_COMMAND)) return `This session has no /${REMOTE_COMMAND} command: phone alerts need Remote Control.`
@@ -313,7 +313,7 @@ export async function connectRemote($: $): Promise<string | null> {
 }
 
 /** One sentence for a new goal's message, while the phone isn't known to be reachable. */
-export async function phoneHint($: $): Promise<string> {
+export async function phoneHint($: Engine): Promise<string> {
   if (settings.alerts === 'off' || (!settings.phoneRelay && !settings.phonePush)) return ''
   const state = await getPhone($).catch(() => 'unknown' as const)
   if (state === 'connected') return ''
@@ -321,6 +321,6 @@ export async function phoneHint($: $): Promise<string> {
   return ` To hear on your phone when it needs you, connect Remote Control in this session (/${REMOTE_COMMAND}).`
 }
 
-export function showStatus($: $, s: Snapshot): void {
+export function showStatus($: Engine, s: Snapshot): void {
   $.ui.status(statusText(s))
 }

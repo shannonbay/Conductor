@@ -22,7 +22,7 @@ import { addFromPane, askFromPane, editFromPane, toggleTodo, workFromPane } from
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 type E = RenderInput<'Pane'>
 
 /** What every part of the pane reads, gathered once per draw. */
@@ -51,7 +51,7 @@ const ACTION_COLOR = 'suggestion'
  * one action colour, so it reads as something to press and not as text. Rows
  * that are content you press (a goal's name, a to-do's text, ☐) stay uncoloured.
  */
-function action($: $, e: E, p: { key: string; label: string; hotkey?: string; onPress: () => void }) {
+function action($: Engine, e: E, p: { key: string; label: string; hotkey?: string; onPress: () => void }) {
   const { Button, Text } = $.ui.resolve(e)
   return (
     <Button key={p.key} plain label={p.label} hotkey={p.hotkey} onPress={p.onPress}>
@@ -64,7 +64,7 @@ function canRun(g: GoalCard): boolean {
   return g.status === 'active' && !g.openRun
 }
 
-export async function renderPane($: $, e: E) {
+export async function renderPane($: Engine, e: E) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const s = await getSnapshot($)
   const message = await getNotice($)
@@ -169,7 +169,7 @@ export async function renderPane($: $, e: E) {
 }
 
 /** A blank pane (no goals, no to-dos): what Quarterdeck is and how to start. */
-function welcome($: $, e: E) {
+function welcome($: Engine, e: E) {
   const { Box, Text } = $.ui.resolve(e)
   return (
     <Box key="welcome" flexDirection="column" marginBottom={1}>
@@ -187,7 +187,7 @@ function welcome($: $, e: E) {
  * A goal with nothing for the person, on one line: its name (press it, or its
  * number, for the full card), the tokens its last run used and when it runs next.
  */
-function quietLine($: $, e: E, view: View, g: GoalCard, index: number, gap: number) {
+function quietLine($: Engine, e: E, view: View, g: GoalCard, index: number, gap: number) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const run = lastRun(g)
   const facts = [
@@ -207,7 +207,7 @@ function quietLine($: $, e: E, view: View, g: GoalCard, index: number, gap: numb
   )
 }
 
-function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
+function goalCard($: Engine, e: E, view: View, g: GoalCard, index: number) {
   const { Box, Text, Button, Link } = $.ui.resolve(e)
   const isOpen = view.shown.includes(g.id)
   const run = lastRun(g)
@@ -249,7 +249,7 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
  * A category whose proposals were approved every time lately: switch it to
  * auto here, after a second press, since runs then act without asking.
  */
-function autoSuggestion($: $, e: E, view: View, g: GoalCard, s: GoalCard['suggestions'][number]) {
+function autoSuggestion($: Engine, e: E, view: View, g: GoalCard, s: GoalCard['suggestions'][number]) {
   const { Box, Text, Button, Link } = $.ui.resolve(e)
   const key = `${g.id}-${s.category}`
   const confirming = view.pending?.kind === 'auto' && view.pending.goalId === g.id && view.pending.category === s.category
@@ -284,7 +284,7 @@ function autoSuggestion($: $, e: E, view: View, g: GoalCard, s: GoalCard['sugges
 }
 
 /** One line: what the goal's agent is doing now, or what happens next. */
-function activityLine($: $, e: E, view: View, g: GoalCard) {
+function activityLine($: Engine, e: E, view: View, g: GoalCard) {
   const { Text } = $.ui.resolve(e)
   const { state, text, at } = g.activity
   if (!text) return null
@@ -300,7 +300,7 @@ function activityLine($: $, e: E, view: View, g: GoalCard) {
   return <Text key={`activity-${g.id}`} dimColor>{state === 'queued' ? '◌ ' : ''}{clip(text, Math.max(view.columns - 2, 10))}</Text>
 }
 
-function proposalRow($: $, e: E, view: View, g: GoalCard, item: GoalCard['needsYou'][number]) {
+function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['needsYou'][number]) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   const key = `${g.id}/${item.id}`
   const isFirst = view.first === key
@@ -370,7 +370,7 @@ function proposalRow($: $, e: E, view: View, g: GoalCard, item: GoalCard['needsY
   )
 }
 
-function controls($: $, e: E, view: View, g: GoalCard) {
+function controls($: Engine, e: E, view: View, g: GoalCard) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const isCancelling = view.pending?.kind === 'cancel-run' && view.pending.goalId === g.id
   const isDeleting = view.pending?.kind === 'delete-goal' && view.pending.goalId === g.id
@@ -451,7 +451,7 @@ function controls($: $, e: E, view: View, g: GoalCard) {
   )
 }
 
-function details($: $, e: E, view: View, g: GoalCard) {
+function details($: Engine, e: E, view: View, g: GoalCard) {
   const { Box, Text, Button, Link, Input } = $.ui.resolve(e)
   // Discuss opens a box for the person's question, like a to-do's Ask…; Enter on an empty box asks the usual one
   const discussBox = (kind: 'goal' | 'run', id: string, run?: GoalCard['runs'][number]) => (
@@ -538,7 +538,7 @@ function details($: $, e: E, view: View, g: GoalCard) {
 const DONE_SECTION = '__done__'
 
 /** Done one-off goals, collapsed: each with its last run's summary and Run again. */
-function doneSection($: $, e: E, view: View, done: GoalCard[]) {
+function doneSection($: Engine, e: E, view: View, done: GoalCard[]) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const isOpen = view.shown.includes(DONE_SECTION)
   return (
@@ -568,7 +568,7 @@ function doneSection($: $, e: E, view: View, done: GoalCard[]) {
  * which goes back on the list when pressed. Ask… opens a box for the person's
  * question; Enter on an empty box asks for Claude's opinion.
  */
-function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | null, askingAbout: string | null, editing: string | null) {
+function todoSection($: Engine, e: E, view: View, todos: Todos, addingTo: string | null, askingAbout: string | null, editing: string | null) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   return (
     <Box key="todos" flexDirection="column" marginBottom={1}>
@@ -687,7 +687,7 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
 }
 
 /** Asks Claude, in the conversation, to install the published update. */
-async function askToUpdate($: $, update: Update): Promise<boolean> {
+async function askToUpdate($: Engine, update: Update): Promise<boolean> {
   return act($, 'update-install', 'ask Claude to update', async () => void (await sendToChat($, updatePrompt(update), `install Quarterdeck ${update.latest}: claude plugin update quarterdeck-goals@quarterdeck`)))
 }
 
@@ -696,7 +696,7 @@ async function askToUpdate($: $, update: Update): Promise<boolean> {
  * over (and change), with the person's question when they typed one in the
  * box. Closes the box once sent.
  */
-async function discuss($: $, g: GoalCard, run?: GoalCard['runs'][number], question?: string): Promise<boolean> {
+async function discuss($: Engine, g: GoalCard, run?: GoalCard['runs'][number], question?: string): Promise<boolean> {
   const asked = question?.trim()
   const about = run ? `about run ${run.id} of goal "${g.name}" (${g.id})` : `about goal "${g.name}" (${g.id})`
   const aside = asked ? `${about}: ${asked}` : about

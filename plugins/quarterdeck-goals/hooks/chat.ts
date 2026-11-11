@@ -5,9 +5,9 @@
  */
 import type { EngineInterface } from 'claude-code'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
-export async function sendToChat($: $, prompt: string, aside: string): Promise<'sent' | 'added'> {
+export async function sendToChat($: Engine, prompt: string, aside: string): Promise<'sent' | 'added'> {
   const { text: draft } = await $.prompt.read()
   if (draft.trim()) {
     const filled = await $.prompt.fill({ text: ` (${aside})`, mode: 'append' })

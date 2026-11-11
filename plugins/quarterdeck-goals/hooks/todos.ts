@@ -13,7 +13,7 @@ import { clip } from './model'
 import { act, refresh, refreshTodos } from './sync'
 import { setAskingAbout, setEditingTodo } from './state'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const isDone = (i: TodoItem) => i.status === 'completed' || i.status === 'abandoned'
 
@@ -37,7 +37,7 @@ export function findTodo(lists: TodoList[], itemId: string, listId?: string): { 
 }
 
 /** /todo <text> adds; /todo done <id> ticks off; /todo alone shows the lists. */
-export async function todoCommand($: $, args: string): Promise<string> {
+export async function todoCommand($: Engine, args: string): Promise<string> {
   const dir = await $.session.root()
   const text = args.trim()
   if (!text) {
@@ -87,7 +87,7 @@ export function todoPrompt(list: TodoList, item: TodoItem, mode: 'plan' | 'start
  * built-in counts (a skill or command of the same name may do something else).
  * False when there's none or it failed; the prompt then asks Claude instead.
  */
-export async function enterPlanMode($: $): Promise<boolean> {
+export async function enterPlanMode($: Engine): Promise<boolean> {
   try {
     const commands = await $.command.list()
     if (!commands.some((c) => c.name === 'plan' && c.source === 'builtin')) return false
@@ -99,7 +99,7 @@ export async function enterPlanMode($: $): Promise<boolean> {
 }
 
 /** Plan / Start: marks the to-do under way and sends it to this conversation (it starts when Claude is free). */
-export async function workOnTodo($: $, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<void> {
+export async function workOnTodo($: Engine, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<void> {
   // Marking it under way is a convenience: sending it is what the press is for.
   // In plan mode Claude Code refuses this write, so carry on without it.
   try {
@@ -115,28 +115,28 @@ export async function workOnTodo($: $, list: TodoList, item: TodoItem, mode: 'pl
  * Ask: the person's question about a to-do (typed in the pane's box), or
  * Claude's opinion when they leave it empty. Nothing is changed or started.
  */
-export async function askAboutTodo($: $, list: TodoList, item: TodoItem, question?: string): Promise<void> {
+export async function askAboutTodo($: Engine, list: TodoList, item: TodoItem, question?: string): Promise<void> {
   await $.prompt.submit({ text: todoPrompt(list, item, 'ask', question) })
 }
 
 /** The pane's actions, through the shared busy/notice/re-read wrapper. */
-export async function toggleTodo($: $, list: TodoList, item: TodoItem): Promise<boolean> {
+export async function toggleTodo($: Engine, list: TodoList, item: TodoItem): Promise<boolean> {
   const ticking = !isDone(item)
   const ok = await act($, `todo:${list.id}/${item.id}`, 'update the to-do', () => setTodo($, list.id, item.id, ticking ? 'completed' : 'pending'))
   if (ok) $.ui.toast(ticking ? `Ticked off ${item.id}. To undo, open "done" under ${list.name} and press it.` : `${item.id} is back on ${list.name}.`)
   return ok
 }
-export function addFromPane($: $, dir: string, list: TodoList, text: string): Promise<boolean> {
+export function addFromPane($: Engine, dir: string, list: TodoList, text: string): Promise<boolean> {
   return act($, `todo-add:${list.id}`, 'add the to-do', async () => void (await addTodo($, { dir, text, listId: list.id })))
 }
 /** Sends the question and closes the box. */
-export async function askFromPane($: $, list: TodoList, item: TodoItem, question: string): Promise<boolean> {
+export async function askFromPane($: Engine, list: TodoList, item: TodoItem, question: string): Promise<boolean> {
   const ok = await act($, `todo-ask:${list.id}/${item.id}`, 'ask about it', () => askAboutTodo($, list, item, question))
   if (ok) await setAskingAbout($, null)
   return ok
 }
 /** Saves the new wording from the pane's edit box and closes it; the toast keeps the old wording. */
-export async function editFromPane($: $, list: TodoList, item: TodoItem, text: string): Promise<boolean> {
+export async function editFromPane($: Engine, list: TodoList, item: TodoItem, text: string): Promise<boolean> {
   const wording = text.trim()
   if (!wording || wording === item.text) {
     await setEditingTodo($, null)
@@ -149,6 +149,6 @@ export async function editFromPane($: $, list: TodoList, item: TodoItem, text: s
   }
   return ok
 }
-export function workFromPane($: $, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<boolean> {
+export function workFromPane($: Engine, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<boolean> {
   return act($, `todo-${mode}:${list.id}/${item.id}`, mode === 'plan' ? 'plan it' : 'start it', () => workOnTodo($, list, item, mode))
 }

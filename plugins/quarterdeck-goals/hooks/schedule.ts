@@ -10,7 +10,7 @@ import type { GoalCard, Schedule } from '../types'
 import { setSchedule } from './api'
 import { choiceOptions, readAnswer, fallbackTitle, parseSuggestion, SCHEDULE_CHOICES, scheduleLabel, suggestByKeywords, type ScheduleChoice, type Suggestion, parseSchedule } from './model'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const SYSTEM = `You choose how often a standing goal for an AI agent should run. Most goals are ongoing work (keeping, maintaining, monitoring, triaging, checking, tidying) and should run on a schedule; pick a one-off only when the goal is clearly a single task that is finished once done (install, set up, migrate, fix this one thing).
 Answer with JSON only: {"choice": "hourly" | "6h" | "daily" | "weekly" | "one-off", "reason": "<one short sentence>"}, adding "title": "<2-5 word name, Title Case>" when the goal has no name yet.
@@ -21,7 +21,7 @@ Guide: inboxes, alerts and triage hourly; monitoring and watching every 6 hours;
  * a small model in one call; keyword rules and the objective's first words
  * stand in when it can't answer.
  */
-export async function suggestSchedule($: $, name: string | null, objective: string): Promise<Suggestion> {
+export async function suggestSchedule($: Engine, name: string | null, objective: string): Promise<Suggestion> {
   let suggestion: Suggestion | null = null
   try {
     const prompt = `Goal name: ${name ?? '(none yet: suggest a title)'}\nObjective: ${objective}`
@@ -45,7 +45,7 @@ If the words don't describe a schedule, answer: unclear`
 /** A typed schedule, read strictly, else by a small model whose answer must pass the same parser. */
 export type ReadSchedule = { schedule: Schedule | null; oneOff?: boolean; interpreted?: string } | { error: string }
 
-export async function readSchedule($: $, text: string): Promise<ReadSchedule> {
+export async function readSchedule($: Engine, text: string): Promise<ReadSchedule> {
   const strict = parseSchedule(text)
   if (!('error' in strict) || !text.trim()) return strict
   try {
@@ -62,7 +62,7 @@ export async function readSchedule($: $, text: string): Promise<ReadSchedule> {
 }
 
 /** Asks how often the goal runs, the suggestion first. A dismissed question takes the suggestion. */
-export async function askSchedule($: $, goalName: string, suggestion: Suggestion): Promise<ScheduleChoice> {
+export async function askSchedule($: Engine, goalName: string, suggestion: Suggestion): Promise<ScheduleChoice> {
   const suggested = SCHEDULE_CHOICES.find((c) => c.key === suggestion.choice)!
   const read = await ask($, goalName, suggestion, null)
   if (read && 'error' in read) $.ui.toast(`Couldn't read "${read.answer}", so it runs ${suggested.label.toLowerCase()}. ${read.error} Change it with Reschedule.`)
@@ -70,7 +70,7 @@ export async function askSchedule($: $, goalName: string, suggestion: Suggestion
 }
 
 /** The question itself; null when it was dismissed or the answer isn't a schedule. */
-async function ask($: $, goalName: string, suggestion: Suggestion, current: Schedule | null): Promise<{ choice: ScheduleChoice } | { error: string; answer: string } | null> {
+async function ask($: Engine, goalName: string, suggestion: Suggestion, current: Schedule | null): Promise<{ choice: ScheduleChoice } | { error: string; answer: string } | null> {
   const suggested = SCHEDULE_CHOICES.find((c) => c.key === suggestion.choice)!
   const now = current ? `Now: ${scheduleLabel(current)}. ` : ''
   let answer: string | null = null
@@ -94,7 +94,7 @@ async function ask($: $, goalName: string, suggestion: Suggestion, current: Sche
  * The pane's Reschedule, for a goal that has a schedule: the same choices,
  * with the current schedule shown. A dismissed question changes nothing.
  */
-export async function rescheduleGoal($: $, goal: GoalCard): Promise<void> {
+export async function rescheduleGoal($: Engine, goal: GoalCard): Promise<void> {
   const read = await ask($, goal.name, await suggestSchedule($, goal.name, goal.objective), goal.schedule)
   if (!read || 'error' in read) {
     $.ui.toast(read ? `Couldn't read "${read.answer}": ${read.error} The schedule is unchanged.` : `${goal.name}: schedule unchanged.`)
@@ -106,7 +106,7 @@ export async function rescheduleGoal($: $, goal: GoalCard): Promise<void> {
 }
 
 /** The pane's Set schedule: suggest, ask, set. Says what was chosen. */
-export async function chooseSchedule($: $, goal: GoalCard): Promise<ScheduleChoice> {
+export async function chooseSchedule($: Engine, goal: GoalCard): Promise<ScheduleChoice> {
   const choice = await askSchedule($, goal.name, await suggestSchedule($, goal.name, goal.objective))
   await setSchedule($, goal.id, choice.schedule, choice.oneOff)
   return choice

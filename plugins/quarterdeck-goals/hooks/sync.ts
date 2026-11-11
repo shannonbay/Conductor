@@ -11,7 +11,7 @@ import { planModeBlocked, toCard } from './model'
 import { kick } from './runner'
 import { getSnapshot, setBusy, setNotice, setSnapshot, setTodos, getExpanded } from './state'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const FAST_MS = 5_000
 const MAX_BACKOFF_MS = 60_000
@@ -21,7 +21,7 @@ let failures = 0
 let timer: { cancel: () => void } | null = null
 
 /** Reads the overview once; a read already under way is shared, not repeated. */
-export function refresh($: $): Promise<Snapshot> {
+export function refresh($: Engine): Promise<Snapshot> {
   // The to-do lists are re-read every time, even when the goals overview is unchanged
   inFlight ??= load($).then(async (s) => {
     await refreshTodos($)
@@ -32,7 +32,7 @@ export function refresh($: $): Promise<Snapshot> {
   return inFlight
 }
 
-async function load($: $): Promise<Snapshot> {
+async function load($: Engine): Promise<Snapshot> {
   const previous = await getSnapshot($)
   const now = await $.clock.now()
   let next: Snapshot
@@ -72,7 +72,7 @@ export function nextDelay(s: Snapshot): number {
 }
 
 /** Polls until `stopPolling`; each poll schedules the next. */
-export function startPolling($: $, first: Snapshot): void {
+export function startPolling($: Engine, first: Snapshot): void {
   timer?.cancel()
   timer = $.clock.after(nextDelay(first), () => {
     void $.clock.now().then((t) => savePoll($, t))
@@ -89,7 +89,7 @@ export function stopPolling(): void {
  * Runs one action for a button or tool: marks it busy under `key`, records
  * its error (or clears the last one), then re-reads. Resolves whether it worked.
  */
-export async function act($: $, key: string, label: string, run: () => Promise<void>): Promise<boolean> {
+export async function act($: Engine, key: string, label: string, run: () => Promise<void>): Promise<boolean> {
   await setBusy($, key)
   let ok = false
   try {
@@ -109,7 +109,7 @@ export async function act($: $, key: string, label: string, run: () => Promise<v
 }
 
 /** Re-reads this project's to-do lists (a failed read keeps the last one). The project is the session's root: a shell `cd` into a subfolder doesn't move it. */
-export async function refreshTodos($: $): Promise<void> {
+export async function refreshTodos($: Engine): Promise<void> {
   try {
     const dir = await $.session.root()
     await setTodos($, { dir, lists: await fetchTodos($, dir) })

@@ -15,7 +15,7 @@ import { act, refresh, refreshTodos } from './sync'
 import { phoneHint, readLastAlert, readLastPoll, readTrace } from './alerts'
 import { CV_FIND, CV_QUESTION, CV_SKIP, cvInstructions, FIRST_CHOICES, MORE, TEMPLATES } from './templates'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const GOAL = { type: 'string', description: 'Goal name (or a unique part of it) or goal id.' }
 const ITEM = { type: 'string', description: 'The item id, as goals_status lists it.' }
@@ -138,7 +138,7 @@ export const TOOLS = [
 
 export type ToolName = (typeof TOOLS)[number]['name']
 
-export async function registerTools($: $): Promise<void> {
+export async function registerTools($: Engine): Promise<void> {
   for (const tool of TOOLS) {
     try {
       await $.tool.register({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema })
@@ -150,7 +150,7 @@ export async function registerTools($: $): Promise<void> {
 
 type Resolved = { goal: GoalCard } | { error: string }
 
-async function resolveGoal($: $, query: unknown): Promise<Resolved> {
+async function resolveGoal($: Engine, query: unknown): Promise<Resolved> {
   const s = await refresh($)
   if (!s.reachable) return { error: `Quarterdeck isn't connected${s.error ? ` (${s.error})` : ''}. Check the quarterdeck MCP server with /mcp.` }
   const found = findGoal(s.goals, typeof query === 'string' ? query : '')
@@ -158,14 +158,14 @@ async function resolveGoal($: $, query: unknown): Promise<Resolved> {
 }
 
 /** The goal with its full detail, fetched for it alone. */
-async function withDetail($: $, goal: GoalCard): Promise<GoalCard> {
+async function withDetail($: Engine, goal: GoalCard): Promise<GoalCard> {
   const res = await fetchOverview($, null, [goal.id])
   const full = res.changed ? res.goals.find((g) => g.id === goal.id) : undefined
   return full ? toCard(full) : goal
 }
 
 /** Asks the person; a dismissed dialog counts as no. */
-async function confirmWith($: $, question: string, yes: string): Promise<boolean> {
+async function confirmWith($: Engine, question: string, yes: string): Promise<boolean> {
   try {
     return (await $.ui.ask(question, [yes, 'Cancel'])) === yes
   } catch {
@@ -174,7 +174,7 @@ async function confirmWith($: $, question: string, yes: string): Promise<boolean
 }
 
 /** The text a tool call answers with. */
-export async function runTool($: $, name: ToolName, input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
+export async function runTool($: Engine, name: ToolName, input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
   const now = await $.clock.now()
   const fail = (text: string) => ({ text, isError: true })
 
@@ -281,12 +281,12 @@ export const COMMANDS = [
   { name: 'goal-schedule', description: 'Set when a Quarterdeck goal runs on its own', argumentHint: '<goal> every 6h | cron ... | off' },
 ] as const
 
-export async function registerCommands($: $): Promise<void> {
+export async function registerCommands($: Engine): Promise<void> {
   for (const c of COMMANDS) await $.command.register(c)
 }
 
 /** /goal-run, /goal-pause, /goal-resume: the person typed it, so no confirm. */
-export async function goalCommand($: $, command: 'goal-run' | 'goal-pause' | 'goal-resume', args: string): Promise<string> {
+export async function goalCommand($: Engine, command: 'goal-run' | 'goal-pause' | 'goal-resume', args: string): Promise<string> {
   if (!args.trim()) {
     const s = await refresh($)
     return `Usage: /${command} <goal>. Goals: ${s.goals.map((g) => g.name).join(', ') || 'none'}.`
@@ -309,7 +309,7 @@ export async function goalCommand($: $, command: 'goal-run' | 'goal-pause' | 'go
  * /goal-new alone: offers the ready-made goals, or takes one typed under Other.
  * A template's own question (the job scan's criteria) completes it.
  */
-async function newFromTemplate($: $): Promise<string> {
+async function newFromTemplate($: Engine): Promise<string> {
   let picked: string
   try {
     // A question holds 4 choices: the first few templates, then More… for the rest
@@ -362,7 +362,7 @@ async function newFromTemplate($: $): Promise<string> {
  * /goal-new <objective> (a title is suggested) or /goal-new <name>: <objective>.
  * Asks how often it runs, with a suggestion first. Alone, it offers templates.
  */
-export async function newGoal($: $, args: string): Promise<string> {
+export async function newGoal($: Engine, args: string): Promise<string> {
   const { name: given, objective } = splitGoalArgs(args)
   if (!objective) return newFromTemplate($)
   const cwd = await $.session.root()
@@ -386,7 +386,7 @@ export async function newGoal($: $, args: string): Promise<string> {
 }
 
 /** Sets the schedule through the pane's action wrapper and says what happens next. */
-async function applySchedule($: $, goal: GoalCard, schedule: Parameters<typeof setSchedule>[2], oneOff = false): Promise<string> {
+async function applySchedule($: Engine, goal: GoalCard, schedule: Parameters<typeof setSchedule>[2], oneOff = false): Promise<string> {
   let next: string | null = null
   const done = await act($, `schedule:${goal.id}`, 'set the schedule', async () => {
     next = (await setSchedule($, goal.id, schedule, oneOff)).next_run_at
@@ -400,7 +400,7 @@ async function applySchedule($: $, goal: GoalCard, schedule: Parameters<typeof s
 }
 
 /** /goal-schedule <goal> <every …|cron …|off>: the person typed it, so no confirm. */
-export async function scheduleCommand($: $, args: string): Promise<string> {
+export async function scheduleCommand($: Engine, args: string): Promise<string> {
   const usage = `Usage: /goal-schedule <goal> <when>, e.g. /goal-schedule inbox every 6h, or 30d, weekly, cron 0 9 * * 1-5, off (${SCHEDULE_USAGE})`
   const words = args.trim().split(/\s+/).filter(Boolean)
   if (words.length < 2) return usage
@@ -426,7 +426,7 @@ export async function scheduleCommand($: $, args: string): Promise<string> {
 }
 
 /** The to-do tools: no confirm, since the person asked and every change is undone with one press. */
-async function todoTool($: $, name: 'todos' | 'add_todo' | 'complete_todo' | 'edit_todo', input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
+async function todoTool($: Engine, name: 'todos' | 'add_todo' | 'complete_todo' | 'edit_todo', input: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
   const dir = await $.session.root()
   const lists = await fetchTodos($, dir)
   const listArg = typeof input.list === 'string' && input.list.trim() ? input.list.trim() : undefined

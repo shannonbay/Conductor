@@ -17,14 +17,14 @@ import { goalCommand, newGoal, registerCommands, registerTools, runTool, schedul
 import { todoCommand } from './todos'
 import { serverToolNames } from './names'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 // Whether this copy of the module has started. session.start does it, but a
 // module loaded into a running session (a reload) may not see one, so the
 // first prompt or command does it instead.
 let started = false
 
-async function start($: $, openPane: boolean): Promise<void> {
+async function start($: Engine, openPane: boolean): Promise<void> {
   if (started) return
   started = true
   resetAlerts()
@@ -38,7 +38,7 @@ async function start($: $, openPane: boolean): Promise<void> {
 }
 
 /** Start-up must never block the session or a prompt; a failure retries on the next prompt. */
-async function safeStart($: $, openPane: boolean): Promise<void> {
+async function safeStart($: Engine, openPane: boolean): Promise<void> {
   try {
     await start($, openPane)
   } catch {
@@ -47,7 +47,7 @@ async function safeStart($: $, openPane: boolean): Promise<void> {
 }
 
 /** A tool call of this plugin, answered as text. */
-async function answerTool($: $, name: ToolName, e: object) {
+async function answerTool($: Engine, name: ToolName, e: object) {
   const { text, isError } = await runTool($, name, e as Record<string, unknown>)
   return { result: isError ? `Error: ${text}` : text }
 }
@@ -64,7 +64,7 @@ function runIds(e: object): { goalId: string | null; runId: string | null } {
 // Each hook's .catch: fall back to the engine's own behaviour (replaying it
 // if the hook had already called next), or answer with a plain error, so the
 // plugin can never block the session.
-function passOn<E, R>(_$: $, e: E, next: (e: E) => R): R {
+function passOn<E, R>(_$: Engine, e: E, next: (e: E) => R): R {
   return next(e)
 }
 function failedCommand() {
