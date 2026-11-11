@@ -4,7 +4,7 @@ import { phoneText } from '../hooks/alerts'
 
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
-  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet } from '../hooks/model'
+  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet, allowRules, allowRulesPrompt, describe } from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -166,4 +166,37 @@ test('a goal whose watch cannot check is not quiet, and an older server without 
   expect(isQuiet(card({ id: 'g1', name: 'Issues', watches: [watch(false)] }))).toBe(true)
   expect(isQuiet(card({ id: 'g1', name: 'Issues', watches: [watch(true)] }))).toBe(false)
   expect(card({ id: 'g1', name: 'Issues' })).toMatchObject({ watches: [], watchCount: 0, watchFailing: false })
+})
+
+test("allowRules lists a Claude Code allow rule for each of a goal's auto tool rules, and what can't be one", async () => {
+  const g = {
+    autonomy: { 'email.unsubscribe': 'auto', 'email.delete': 'propose', 'shell': 'auto', 'all': 'auto' },
+    toolMap: {
+      'mcp__claude_ai_Gmail__unsubscribe*': 'email.unsubscribe',
+      'mcp__claude_ai_Gmail__trash_thread': 'email.delete',
+      Bash: 'shell',
+      'mcp__quarterdeck__unsubscribe_one_click': 'email.unsubscribe',
+      'mcp__*': 'all',
+    },
+  }
+  expect(allowRules(g)).toEqual({
+    rules: [
+      'Bash',
+      'mcp__claude_ai_Gmail__unsubscribe*',
+      // Quarterdeck's own server under both of its names
+      'mcp__plugin_quarterdeck-goals_quarterdeck__unsubscribe_one_click',
+      'mcp__quarterdeck__unsubscribe_one_click',
+    ],
+    skipped: ['mcp__*'],
+  })
+  expect(allowRules({ autonomy: {}, toolMap: { Bash: 'shell' } })).toEqual({ rules: [], skipped: [] })
+
+  const prompt = allowRulesPrompt({ id: 'g1', name: 'Inbox' }, ['Bash'])
+  expect(prompt).toContain('"Inbox" (id g1)')
+  expect(prompt).toContain('- `Bash`')
+  expect(prompt).toContain('wait for my yes')
+
+  const detail = describe(card({ id: 'g1', name: 'Inbox', autonomy: { shell: 'auto' }, tool_map: { Bash: 'shell' } }), NOW)
+  expect(detail).toContain('Claude Code allow rules for its auto tools')
+  expect(describe(card({ id: 'g2', name: 'Quiet' }), NOW)).not.toContain('allow rules')
 })

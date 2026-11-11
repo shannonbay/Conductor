@@ -506,3 +506,29 @@ test('a goal with nothing for you is one line; one that needs you keeps its card
     await ui.unmount()
   }
 })
+
+test("an expanded goal lists its Claude Code allow rules when opened, and Claude is asked to add them", async ($, on) => {
+  const { prompts } = engine(on)
+  fakeQuarterdeck(on, [
+    goal({ id: 'g1', name: 'Inbox', autonomy: { shell: 'auto', 'email.delete': 'propose' }, tool_map: { Bash: 'shell', 'mcp__claude_ai_Gmail__trash_thread': 'email.delete' } }),
+    goal({ id: 'g2', name: 'Quiet' }),
+  ])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' })
+  await ui.press({ key: 'toggle-g2' })
+  // One line until opened, and none for a goal with no auto tool rules
+  expect((await ui.find({ key: 'allow-toggle-g1' }))?.props.label).toBe('▸ Claude Code allow rules (1)')
+  expect(await ui.find({ key: 'allow-toggle-g2' })).toBeUndefined()
+  expect(await ui.find({ key: 'allow-ask-g1' })).toBeUndefined()
+
+  await ui.press({ key: 'allow-toggle-g1' })
+  expect((await ui.find({ key: 'allow-toggle-g1' }))?.props.label).toBe('▾ Claude Code allow rules (1)')
+  expect((await ui.find({ type: 'Text', text: /^\s*Bash$/ }))?.text).toContain('Bash')
+  // A propose category's tool waits for an approval anyway: no rule for it
+  expect(await ui.find({ type: 'Text', text: /trash_thread/ })).toBeUndefined()
+  await ui.press({ key: 'allow-ask-g1' })
+  expect(prompts.at(-1)).toContain('- `Bash`')
+  expect(prompts.at(-1)).toContain('wait for my yes')
+  await ui.unmount()
+})

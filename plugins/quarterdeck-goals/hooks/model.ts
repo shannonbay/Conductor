@@ -198,6 +198,7 @@ export function describe(g: GoalCard, now: number): string {
       : null,
     `Autonomy (unlisted categories: propose): ${Object.entries(g.autonomy).map(([c, m]) => `${c}=${m}`).join(', ') || 'none set'}`,
     Object.keys(g.toolMap).length ? `Tool rules: ${Object.entries(g.toolMap).map(([p, c]) => `${p} → ${c}`).join(', ')}` : null,
+    allowRulesText(g),
     g.memory.length > 0 ? `Memory:\n${g.memory.map((m) => `- ${m.id} [${m.kind}${m.pinned ? ', pinned' : ''}] ${m.text}`).join('\n')}` : null,
   ].filter(Boolean).join('\n\n')
 }
@@ -431,6 +432,60 @@ export function discussPrompt(g: GoalCard, run?: GoalCard['runs'][number], quest
     return `Let's talk about this run of my goal "${g.name}" (goal ${g.id}, run ${run.id}): ${when}.\n\nIts summary: ${run.summary ?? '(none)'}\n\n${`${transcript} ${how}`.trim()}\n\nMy question: ${asked}`
   }
   return `Let's talk about this run of my goal "${g.name}" (goal ${g.id}, run ${run.id}): ${when}.\n\nIts summary: ${run.summary ?? '(none)'}\n\n${isFailed(run.status) ? 'Why did it fail, and what should change so it doesn\'t again?' : 'Is this what should have happened, and what should change?'}${transcript} ${how}`
+}
+
+// ── Allow rules for Claude Code ───────────────────────────────────────────────
+
+/** Quarterdeck's own server, under both of its names (plugin-provided and added by hand). */
+const OWN_SERVER_PREFIXES = ['mcp__plugin_quarterdeck-goals_quarterdeck__', 'mcp__quarterdeck__']
+
+/**
+ * The Claude Code allow rules that let a goal's `auto` tools run without a
+ * permission prompt: one per tool rule whose category is auto. The guard only
+ * refuses; whether a tool runs unasked is Claude Code's to say, so the person
+ * adds these themselves. A tool rule Claude Code can't take as an allow rule
+ * (a glob outside `mcp__<server>__`, such as `mcp__*`) is listed in `skipped`.
+ */
+export function allowRules(g: Pick<GoalCard, 'autonomy' | 'toolMap'>): { rules: string[]; skipped: string[] } {
+  const rules = new Set<string>()
+  const skipped: string[] = []
+  for (const [pattern, category] of Object.entries(g.toolMap)) {
+    if (g.autonomy[category] !== 'auto') continue
+    const own = OWN_SERVER_PREFIXES.find((p) => pattern.startsWith(p))
+    const names = own ? OWN_SERVER_PREFIXES.map((p) => p + pattern.slice(own.length)) : [pattern]
+    for (const name of names) {
+      const star = name.indexOf('*')
+      const server = /^mcp__([^*]+?)__/.exec(name)
+      // Claude Code takes a glob in an allow rule only after a literal mcp__<server>__
+      if (star >= 0 && !(server && star >= server[0].length)) {
+        if (!skipped.includes(pattern)) skipped.push(pattern)
+        continue
+      }
+      rules.add(name)
+    }
+  }
+  return { rules: [...rules].sort(), skipped }
+}
+
+/** The prompt behind the pane's "Ask Claude to add them": Claude shows the change and waits for a yes. */
+export function allowRulesPrompt(g: Pick<GoalCard, 'id' | 'name'>, rules: string[]): string {
+  return [
+    `My Quarterdeck goal "${g.name}" (id ${g.id}) lets its runs use these tools without asking me first, but Claude Code still asks me before each call. Please add these allow rules to my Claude Code settings:`,
+    '',
+    ...rules.map((r) => `- \`${r}\``),
+    '',
+    'Use my user settings (~/.claude/settings.json) unless I say otherwise: a goal run starts in whichever Claude Code window is running goals. An allow rule applies to everything in Claude Code, not only goal runs, so say in a sentence what each one lets through. Keep everything already in the file. Show me the exact change and wait for my yes before you write it.',
+  ].join('\n')
+}
+
+/** The goal's allow rules for goal_detail, or null when it has none. */
+function allowRulesText(g: Pick<GoalCard, 'autonomy' | 'toolMap'>): string | null {
+  const { rules, skipped } = allowRules(g)
+  if (rules.length === 0 && skipped.length === 0) return null
+  return [
+    rules.length > 0 ? `Claude Code allow rules for its auto tools (without them Claude Code asks before each call, unless the session is in auto mode): ${rules.join(', ')}` : null,
+    skipped.length > 0 ? `Tool rules Claude Code can't take as allow rules: ${skipped.join(', ')}` : null,
+  ].filter(Boolean).join('\n')
 }
 
 /** The prompt that asks Claude to install a published update (the pane's "Ask Claude to install it"). */

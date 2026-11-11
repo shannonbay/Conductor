@@ -14,7 +14,7 @@ import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, clip, discussPrompt, holdUntilText, isFailed, isQuiet, lastRun, nextRunText, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
+import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, holdUntilText, isFailed, isQuiet, lastRun, nextRunText, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
 import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
@@ -478,6 +478,7 @@ function details($: Engine, e: E, view: View, g: GoalCard) {
           {w.failing && <Text color="red"> · can't check: {w.error ?? 'the command fails'}</Text>}
         </Text>
       ))}
+      {allowSection($, e, view, g)}
 
       <Text bold>Open items</Text>
       {g.openItems.length === 0 && <Text dimColor>  none</Text>}
@@ -684,6 +685,34 @@ function todoSection($: Engine, e: E, view: View, todos: Todos, addingTo: string
       })}
     </Box>
   )
+}
+
+/**
+ * The Claude Code allow rules for a goal's auto tools, one line until opened.
+ * The guard never allows a call, so without these Claude Code asks before each
+ * one (unless the session is in auto mode). Claude adds them only after the
+ * person's yes: the mod itself never writes settings.
+ */
+function allowSection($: Engine, e: E, view: View, g: GoalCard) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const { rules, skipped } = allowRules(g)
+  if (rules.length === 0 && skipped.length === 0) return null
+  const key = `rules:${g.id}`
+  const isOpen = view.shown.includes(key)
+  return (
+    <Box key={`allow-${g.id}`} flexDirection="column">
+      <Button key={`allow-toggle-${g.id}`} plain label={`${isOpen ? '▾' : '▸'} Claude Code allow rules (${rules.length})`} onPress={() => void toggleExpanded($, key)} />
+      {isOpen && <Text key={`allow-why-${g.id}`} dimColor>  For the tools this goal may use without asking. Without them Claude Code asks before each call, unless it is in auto mode. They apply to all of Claude Code, not only goal runs.</Text>}
+      {isOpen && rules.map((r) => <Text key={`allow-rule-${g.id}/${r}`}>{`  ${r}`}</Text>)}
+      {isOpen && skipped.length > 0 && <Text key={`allow-skipped-${g.id}`} dimColor>  Claude Code can't take these tool rules as allow rules: {skipped.join(', ')}</Text>}
+      {isOpen && rules.length > 0 && action($, e, { key: `allow-ask-${g.id}`, label: view.doing === `allow:${g.id}` ? '  Asking…' : '  Ask Claude to add them', onPress: () => void askToAllow($, g, rules) })}
+    </Box>
+  )
+}
+
+/** Asks Claude, in the conversation, to add the allow rules: it shows the change and waits for the person's yes. */
+async function askToAllow($: Engine, g: GoalCard, rules: string[]): Promise<boolean> {
+  return act($, `allow:${g.id}`, 'ask Claude to add the allow rules', async () => void (await sendToChat($, allowRulesPrompt(g, rules), `add the Claude Code allow rules for goal "${g.name}" (${g.id})`)))
 }
 
 /** Asks Claude, in the conversation, to install the published update. */
