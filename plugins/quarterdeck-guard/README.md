@@ -17,6 +17,39 @@ For every subagent that quarterdeck-goals started for a goal run:
 
 It also refuses those person-only Quarterdeck actions to Claude in your conversation and to other agents. quarterdeck-goals itself takes them when you press the pane's buttons.
 
+## Everything it does by itself
+
+Claude Code's plugin directory asks a plugin to say plainly what it does without being asked. This is all of it; the source is `hooks/register.ts`.
+
+**Tools it calls itself.** Only two, both on the local quarterdeck server that quarterdeck-goals brings (under whichever name the session has: `mcp__plugin_quarterdeck-goals_quarterdeck__` or `mcp__quarterdeck__`):
+
+- `guard_check`, for each tool call a goal run's agent makes that the goal's tool rules may cover, with the run id and the tool's name (not its input). The answer is "deny, because …" or "no objection".
+- `report_run_end`, when a run agent's turn ends, with the run id, the agent's final message, why the turn ended and its token usage, so the run's tokens are counted and a stop on your usage limit or an error is recorded.
+
+It also reads the engine's list of running agents (`$.agent.list()`) to tell a goal run's subagent (`spawnedBy: quarterdeck-goals`, description `Goal: <name> (<run id>)`) from any other.
+
+**What it fetches, runs and sends.** Nothing outside your computer: it makes no network requests, runs no commands and starts no agents. What it reads (agent records, a run's tool names, a run agent's final message, messages handed back to your conversation) goes only to the local quarterdeck server, which keeps it in `~/.quarterdeck/tasks.db`.
+
+**The permission hook** (`tool.check`) only ever refuses, or passes the check on to Claude Code's own permission rules; it never allows. It refuses:
+
+- for a goal run's agent: the person-only Quarterdeck tools (`decide_item`, `cancel_run`, `set_goal_status`, `update_goal`, `create_goal`, `delete_goal`, `delete_memory`, `set_schedule`, `run_goal` and the rest), quarterdeck-goals' own tools (`mcp__quarterdeck-goals__*`), and the Agent tool (a run doesn't start other agents);
+- for Claude in your conversation and other agents: the same person-only tools, except `run_goal`. The quarterdeck-goals plugin itself still uses them when you press its buttons, and to start and stop runs.
+
+Everything else goes on to your permission rules unchanged.
+
+**Hooks on tool calls** (`tool.call`), for a goal run's agent only:
+
+- **Changes a tool's input**: adds `run_scope` (the run's id) to a Quarterdeck server call that doesn't already carry it, so the call acts on that run's goal and never on the plan open in your own conversation. A call that already carries it is left exactly as it is (auto mode refuses a call whose input changes after its review).
+- **The goal's guard**: before any other tool runs, asks `guard_check`; on "deny" the call is refused with the reason, and otherwise it goes on unchanged.
+- **Answers in place of a tool**: `SubagentHandback`, the tool a subagent's report would come back to your conversation through, is answered "Report saved by Quarterdeck (end_run)" without running, because a run reports in the Goals pane. And this plugin's own `status` tool (`mcp__quarterdeck-guard__status`, read-only) answers that runs are guarded, with the number of runs it knows and its last few turn ends; quarterdeck-goals starts no run without it.
+
+**Other hooks:**
+
+- `turn.complete`: for a run agent, sends `report_run_end` as above. Other turns are passed on untouched.
+- `session.send`: stops a run agent's messages to your conversation (the run reports through `end_run`). Other messages go on.
+- `session.receive`: reads a message arriving in your conversation only to recognise a run's handed-back report (by the sending agent, or by matching a run agent's last answer) and keep it out of your chat. Everything else goes on unchanged.
+- `session.start`: registers the `status` tool.
+
 ## Why it is a separate plugin
 
 The engine never shows a plugin the calls that its own timers and buttons cause. quarterdeck-goals starts most runs from its scheduler timer, so its own hooks would never see what those runs do. This plugin sees them.

@@ -32,6 +32,77 @@ For development, add your checkout as the marketplace instead (`claude plugin ma
 - **Messages into your conversation.** Discuss, a to-do's Ask, Plan and Start, and phone alerts submit a prompt to your chat, each when you press the button (alerts: when you have been away 5 minutes, see below).
 - **Only if you ask: the standing session.** `quarterdeck-cli.mjs runner install` adds a scheduled task (Windows) or a systemd user timer (Linux) that keeps one Claude Code session running so goals run with no window open. Nothing installs it for you, and `runner uninstall` removes it.
 
+## Everything it does by itself
+
+Claude Code's plugin directory asks a plugin to say plainly what it does without being asked. This is all of it. The source of every line is in `hooks/` here and in `mcp/` and `core/` in the [repository](https://github.com/shannonbay/Quarterdeck).
+
+### Tools it calls itself
+
+- **Quarterdeck's own server** (`mcp__plugin_quarterdeck-goals_quarterdeck__*`, or `mcp__quarterdeck__*` for a server added by hand). Every 30 seconds `goals_tick`, the scheduler pass (it runs due health checks and watches, and claims due runs). For the runs it starts and stops, `attach_agent`, `fail_run` and `cancel_run`. For the pane, `goals_overview` every `poll_seconds` (5 s while a run is going, up to a minute while the server doesn't answer). When you press a pane button, run a command or confirm one of the tools below, the server tool that does it (`decide_item`, `run_goal`, `set_goal_status`, `set_schedule`, `update_goal`, `create_goal`, `delete_memory`, `todo_list`, `todo_add`, `todo_set`). After checking a tool watch, `watch_report` with what it found.
+- **`PushNotification`** (Claude Code's phone push), when an alert comes up, with the alert's one line (`Quarterdeck: Inbox asks: "Reply to Alice". Reply "approve" or …`). Claude Code answers whether a push can reach your phone right now, which decides whether the phone relay below goes ahead. With the `phone_push` setting on (off by default), this is the push itself.
+- **A tool watch's tool**, only for a watch you set and confirmed: the connector tool and input you saw (a Gmail search for thread ids, say), every few minutes, with a 30-second limit. Your permission deny rules still apply. Its answer goes to the server, which keeps only the ids.
+- **`TaskStop`**, to stop a run's agent when you cancel the run or it passes its time limit.
+
+### Hooks, and what they do with what they see
+
+- `session.start`, `prompt.submit`, `session.receive`, `turn.complete`: start the plugin (the pane's polling and the runner) if it hasn't started. `prompt.submit` and `session.receive` look at where a prompt came from (typed, from your phone through Remote Control, or automatic), never at its text, to note when you last typed (the phone relay waits until you have been away 5 minutes) and that Remote Control is connected. `turn.complete` notices a run agent finishing, so the run is closed within 2 seconds instead of at the next tick. All of them pass the event on unchanged.
+- `session.end`: stops the timers and gives up the scheduler lease, so another open session takes over.
+- `tool.call` on the server's `get_goal_brief` and `end_run`: after the call has run, notes that a goal run is going in this conversation itself (for the band above the prompt) and refreshes the pane. The call and its answer are left as they are.
+- `tool.call` on its own tools (`mcp__quarterdeck-goals__*`, under "Tools Claude can call"): answers them.
+- `agent.offer`: hides the `goal-runner` agent type from Claude's Agent tool, so only the plugin starts runs.
+- `command.run` for its slash commands, and `ui.render` for the pane and the band.
+
+What a run may do is decided by the quarterdeck-guard plugin, not by these hooks.
+
+### Commands and programs it runs
+
+- **Slash commands**, each only when you press its button: `/plan` when you press **Plan** on a to-do (only Claude Code's built-in one), and `/remote-control` when you press **Connect** on the pane's "alerts can't reach your phone" line.
+- **Commands you set**: a goal's health command, its watches' commands and an item's check command, run by the server in the goal's directory with your user's rights. There are none unless you set them, and a watch is set only after you've read its whole command and confirmed it.
+- **The standing session**, only when you run `node server/quarterdeck-cli.mjs runner install` yourself: it adds a scheduled task (Windows: `schtasks`, PowerShell's `Start-Process`, `conhost --headless`) or a systemd user timer and a tmux session (Linux) that keep one Claude Code session running. `runner uninstall` removes them.
+
+### Network: what it fetches, what it sends, and where
+
+- **The plugin's hooks make no network requests.**
+- **The update check** is the server's only request of its own: at most every 6 hours, a plain GET of this plugin's public `plugin.json` from `raw.githubusercontent.com/shannonbay/Quarterdeck/release/…`. It uses no credential and sends nothing about you. `QUARTERDECK_UPDATE_CHECK=0` turns it off.
+- **`quarterdeck-cli.mjs doctor`**, when you run it, asks `http://localhost:3000/api/health` whether the optional web app is running.
+- **A small model call** (Haiku, through Claude Code on your plan) when you create a goal or press **Set schedule**: the goal's name and objective, to suggest a title and a schedule.
+- **Prompts into your conversation** (below), which go to Claude like anything you type, and **phone alerts**, which go to the Claude app through Claude Code's own push.
+- **Run agents** are Claude Code subagents on your plan. Like Claude in your conversation, they reach whatever tools, MCP servers and connectors your session has, within the goal's rules and Claude Code's permission rules.
+
+Everything it reads stays on your computer: the database, which way a prompt arrived, the list of running agents, and your unsent prompt (only to check whether you have started typing, below). It doesn't read your conversation.
+
+### Prompts it submits
+
+Each goes into your conversation as a prompt when you press the button. If you have started typing a prompt, a short note is added to your draft instead (`(discuss goal "Inbox" …)`), so nothing you typed is lost.
+
+| Button | What the prompt holds |
+| --- | --- |
+| **Discuss**, **Discuss this goal…** | The goal's name and id, your question if you typed one, and a request to read the goal with `goal_detail` and make agreed changes with `update_goal` or `set_schedule` (which ask you first) |
+| **Discuss this run…** | The same, plus the run's id, status, trigger, time and summary, and its agent id with where its transcript is (`agent-<id>.jsonl` under `~/.claude/projects`) |
+| A to-do's **Ask…** | The to-do's list, id, text and notes, and your question (or a request for Claude's opinion), with "don't change anything" |
+| A to-do's **Plan**, **Start** | The to-do's list, id, text and notes; plan it in plan mode for you to review, or begin; tick it off with `complete_todo` when done |
+| **Ask Claude to install it** (update notice) | The installed and new versions, and the three `claude plugin … update` commands to run |
+| **Ask Claude to add them** (allow rules) | The goal's name and id and its allow rules; show you the change to your settings and wait for your yes |
+
+One prompt is sent without a press: the **phone relay** (setting `phone_relay`, on by default). When an alert comes up, you haven't typed for 5 minutes, and Claude Code says a push could reach your phone, it sends:
+
+> [Quarterdeck alert, sent automatically while you're away] Send me this phone notification with the PushNotification tool (status "proactive"), word for word, then end your turn without doing anything else:
+> Quarterdeck: Inbox asks: "Reply to Alice". Reply "approve" or "reject, because ..." in Claude.
+
+### What it gives the run agents
+
+Each due run starts one background subagent of the plugin's own type, `quarterdeck-goals:goal-runner`, in the goal's working directory. Its instructions say to work within the goal's autonomy, pass its run id (`run_scope`) on every Quarterdeck call, keep to its time and finish with `end_run`. Its prompt holds the goal's name, goal and run ids, working directory and time limit, and the steps of a run (`goalRunPrompt` in `core/src/goal-tick.ts`). Nothing from your conversation goes with it. The agent reads the rest with `get_goal_brief`: the goal's objective, standing instructions, memory, your decisions since the last run, open items, recent run summaries and any new watch lines.
+
+A run agent can't use the person-only tools (`decide_item`, `cancel_run`, `update_goal`, `create_goal`, `delete_memory`, `run_goal` and the like) or this plugin's tools: Claude Code leaves them out of its tool list, and the guard refuses them too.
+
+### Notes on the directory's findings
+
+- **"Uses a credential" near `raw.githubusercontent.com`** (`server/quarterdeck-mcp.mjs`): the update check above. It reads no token or file.
+- **"Uses a credential" near `schemas.microsoft.com`** (`server/quarterdeck-cli.mjs`): the XML namespace of the Windows Task Scheduler task the standing session installs. It is never fetched.
+- **"Reads the installer's pat"** (`hooks/model.ts`): `pat` and `pattern` there are tool-name patterns from a goal's tool rules (`mcp__claude_ai_Gmail__*`), used to work out allow rules. Not a token.
+- **`fetch()` in the goal-watches skill**: example watch commands that read a public feed or web page the person names. Claude suggests one only when asked, and the person reads and confirms the whole command before it is set.
+- **The server bundle** (`server/quarterdeck-mcp.mjs`, about 830 KB) is too large for the directory to read. It is built with esbuild, not minified, from `mcp/` and `core/` in the repository (`npm run build`).
+
 ## How runs work
 
 - Every 30 seconds the plugin asks the quarterdeck server for a scheduler pass (`goals_tick`). The pass runs due health checks and watches, and claims the runs that are due: scheduled ones, ones you queued with "Run now", the one an approval queues, and the one a watch queues when it sees something new.
