@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.16.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.17.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -22420,7 +22420,7 @@ async function run_goal(args) {
 }
 
 // src/tools/goal_runner.ts
-import { existsSync as existsSync4 } from "fs";
+import { existsSync as existsSync5 } from "fs";
 
 // src/runner-session.ts
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync, rmSync, statSync, writeFileSync } from "fs";
@@ -22462,6 +22462,70 @@ var RUNNER_USAGE = [
   "  attach                               Linux: open its terminal (to answer a question); Ctrl-b d leaves it running"
 ].join("\n");
 
+// src/update-check.ts
+init_src();
+import { existsSync as existsSync4, readFileSync as readFileSync2 } from "fs";
+import { dirname as dirname3, join as join3 } from "path";
+import { fileURLToPath } from "url";
+var RELEASE_MANIFEST_URL = "https://raw.githubusercontent.com/shannonbay/Quarterdeck/release/plugins/quarterdeck-goals/.claude-plugin/plugin.json";
+var CHECK_EVERY_MS = 6 * 60 * 6e4;
+var RETRY_AFTER_MS = 30 * 6e4;
+var VERSION = /^(\d+)\.(\d+)\.(\d+)(-[0-9A-Za-z.]+)?$/;
+function isNewer(installed, latest) {
+  const a = VERSION.exec(installed);
+  const b = VERSION.exec(latest);
+  if (!a || !b) return false;
+  for (let i = 1; i <= 3; i++) {
+    const d = Number(b[i]) - Number(a[i]);
+    if (d !== 0) return d > 0;
+  }
+  return a[4] !== void 0 && b[4] === void 0;
+}
+function createUpdateCheck(deps) {
+  let latest = null;
+  let nextCheckAt = 0;
+  let pending = null;
+  function check2() {
+    pending ??= deps.fetchLatest().catch(() => null).then((v) => {
+      if (v) latest = v;
+      nextCheckAt = deps.now() + (v ? CHECK_EVERY_MS : RETRY_AFTER_MS);
+      pending = null;
+    });
+    return pending;
+  }
+  return {
+    check: check2,
+    /** The update known so far; starts a check in the background when one is due, so it never waits on the network. */
+    available() {
+      if (!deps.installed) return null;
+      if (!pending && deps.now() >= nextCheckAt) void check2();
+      return latest && isNewer(deps.installed, latest) ? { installed: deps.installed, latest } : null;
+    }
+  };
+}
+function installedVersion(scriptDir = dirname3(fileURLToPath(import.meta.url)), env = process.env) {
+  if (/^(0|false|off|no)$/i.test(envVar("UPDATE_CHECK", env) ?? "")) return null;
+  const plugin = join3(scriptDir, "..");
+  if (existsSync4(join3(plugin, "..", "..", "mcp", "src"))) return null;
+  try {
+    const version2 = JSON.parse(readFileSync2(join3(plugin, ".claude-plugin", "plugin.json"), "utf8")).version;
+    return typeof version2 === "string" && VERSION.test(version2) ? version2 : null;
+  } catch {
+    return null;
+  }
+}
+async function fetchReleaseVersion() {
+  const res = await fetch(RELEASE_MANIFEST_URL, { signal: AbortSignal.timeout(1e4) });
+  if (!res.ok) return null;
+  const version2 = (await res.json()).version;
+  return typeof version2 === "string" && VERSION.test(version2) ? version2 : null;
+}
+var shared = null;
+function availableUpdate() {
+  shared ??= createUpdateCheck({ installed: installedVersion(), fetchLatest: fetchReleaseVersion, now: Date.now });
+  return shared.available();
+}
+
 // src/tools/goal_runner.ts
 var human = { actor: "human", via: "plugin" };
 async function goals_tick(args) {
@@ -22483,8 +22547,12 @@ async function goals_tick(args) {
 async function goals_overview(args) {
   const input = GoalsOverviewSchema.parse(args);
   const { body, etag } = overviewWithEtag2(input.detail ?? "all", standingSessionId());
-  if (input.etag === etag) return { changed: false, etag };
-  return { changed: true, etag, ...JSON.parse(body) };
+  return overviewAnswer(input.etag, body, etag, availableUpdate());
+}
+function overviewAnswer(asked, body, etag, update) {
+  const tag = update ? `${etag}+update-${update.latest}` : etag;
+  if (asked === tag) return { changed: false, etag: tag };
+  return { changed: true, etag: tag, ...JSON.parse(body), ...update ? { update } : {} };
 }
 async function decide_item(args) {
   const input = DecideItemSchema.parse(args);
@@ -22541,7 +22609,7 @@ async function guard_check(args) {
 }
 async function create_goal(args) {
   const input = CreateGoalSchema.parse(args);
-  if (!existsSync4(input.working_dir)) throw new Error(`Working directory not found: ${input.working_dir}`);
+  if (!existsSync5(input.working_dir)) throw new Error(`Working directory not found: ${input.working_dir}`);
   if (input.one_off && input.schedule) throw new Error("A one-off goal has no schedule.");
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const id = `plan_${nanoid2(10)}`;
@@ -22736,8 +22804,8 @@ function isListed(name, env = process.env) {
 }
 
 // src/index.ts
-import { dirname as dirname3 } from "path";
-import { fileURLToPath } from "url";
+import { dirname as dirname4 } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
 var COMPACT_TOOLS = /* @__PURE__ */ new Set(["goals_overview", "goals_tick"]);
 var TOOLS = [
   {
@@ -22880,7 +22948,7 @@ var TOOLS = [
   },
   {
     name: "goals_overview",
-    description: "Every goal that is not retired, with items waiting for the human, open items, recent runs, health and memory, in one call. Pass the last etag to get { changed: false } when nothing changed.",
+    description: "Every goal that is not retired, with items waiting for the human, open items, recent runs, health and memory, in one call. Pass the last etag to get { changed: false } when nothing changed. Carries `update` when a newer Quarterdeck is published.",
     inputSchema: zodToJsonSchema(GoalsOverviewSchema),
     handler: goals_overview
   },
@@ -22946,6 +23014,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 server.setRequestHandler(ListResourcesRequestSchema, handleListResources);
 server.setRequestHandler(ReadResourceRequestSchema, handleReadResource);
-recordCliPath(dirname3(fileURLToPath(import.meta.url)));
+recordCliPath(dirname4(fileURLToPath2(import.meta.url)));
 var transport = new StdioServerTransport();
 await server.connect(transport);

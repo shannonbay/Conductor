@@ -82,7 +82,12 @@ export type Snapshot = {
   outdated?: boolean
   /** Set while the standing session (`quarterdeck runner`) is the one starting goal runs. */
   standing?: boolean
+  /** Set when a newer Quarterdeck than the installed one is published. */
+  update?: Update
 }
+
+/** A published Quarterdeck newer than the installed one. */
+export type Update = { installed: string; latest: string }
 
 /** One to-do on the person's list. */
 export type TodoItem = { id: string; text: string; status: string; depth: number; notes: string | null }
