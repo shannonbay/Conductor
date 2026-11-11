@@ -1,5 +1,6 @@
 {
   "name": "quarterdeck",
+  "description": "Quarterdeck: standing goals for Claude Code that run on a schedule, ask before they act, and remember what you decided",
   "owner": {
     "name": "Shannon Bay"
   },
@@ -7,12 +8,12 @@
     {
       "name": "quarterdeck-goals",
       "source": "./plugins/quarterdeck-goals",
-      "description": "Runs Quarterdeck goals in background subagents, with the Goals pane beside the chat: proposals to approve or reject, run status and health"
+      "description": "Standing goals for Claude Code, like \"keep my inbox under control\" or \"find the best new job ads each week\". Each goal runs on a schedule in a background subagent, asks before it acts, and remembers what you decided. You approve or reject from the Goals pane beside the chat."
     },
     {
       "name": "quarterdeck-guard",
       "source": "./plugins/quarterdeck-guard",
-      "description": "Keeps each Quarterdeck goal run within its goal: run tagging, the autonomy guard, and reports kept out of your chat. Needed by quarterdeck-goals."
+      "description": "Holds each Quarterdeck goal run to what you have allowed: it refuses the kinds of action you turned off, makes the rest wait for your approval, and keeps run reports out of your chat. Required by quarterdeck-goals."
     }
   ]
 }

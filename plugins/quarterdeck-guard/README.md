@@ -1,6 +1,8 @@
 # quarterdeck-guard
 
-A Claude Code plugin that keeps each Quarterdeck goal run within its goal. It works alongside **quarterdeck-goals**, which starts goal runs in background subagents; without this plugin, quarterdeck-goals starts no runs.
+A Claude Code plugin that keeps each Quarterdeck goal run within its goal. [Quarterdeck](https://github.com/shannonbay/Quarterdeck) gives Claude Code standing goals that run on a schedule in background subagents and ask before they act. This plugin works alongside **quarterdeck-goals**, which starts those runs; without this plugin, quarterdeck-goals starts no runs. On its own it does nothing.
+
+It works in Claude Code only. It runs no program of its own, stores nothing and makes no network requests: it is one hooks module that checks each tool call of a goal run with the quarterdeck server that quarterdeck-goals brings. It does change what a goal run is allowed to do, as described next.
 
 ## What it does
 
