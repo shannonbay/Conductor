@@ -48,7 +48,7 @@ export const HUMAN_ONLY_TOOLS = serverToolNames(
 /** Also refused to a run's agent: a run doesn't queue more runs. */
 export const RUN_AGENT_DENIED_TOOLS = [...HUMAN_ONLY_TOOLS, ...serverToolNames('run_goal')]
 
-const RUNNER_PROMPT = `You carry out one run of a Quarterdeck persistent goal: a standing objective that is never finished. You start with no memory; the goal brief has everything. Work inside the goal's autonomy: never take an action whose category is "propose" or "off" unless the brief shows an approved item for it. Keep within the time you are given, and always finish with end_run. Your final message is shown to nobody but Quarterdeck, so keep it to one line.`
+const RUNNER_PROMPT = `You carry out one run of a Quarterdeck persistent goal: a standing objective that is never finished. You start with no memory; the goal brief has everything. Work inside the goal's autonomy: never take an action whose category is "propose" or "off" unless the brief shows an approved item for it. Keep within the time you are given, and always finish with end_run. Pass run_scope, set to your run id, on every Quarterdeck tool call (get_goal_brief, add_item, end_run and the rest). Your final message is shown to nobody but Quarterdeck, so keep it to one line.`
 
 /** The agent type every run uses, hidden from the model (see register). */
 export async function registerRunnerAgent($: Engine): Promise<void> {

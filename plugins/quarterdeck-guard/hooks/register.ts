@@ -237,12 +237,15 @@ export const register: Register = (on) => {
     const runId = await runIdFor($, e.agentId)
     if (!runId) return next(e)
     if ((e.tool as string) === 'SubagentHandback') return { result: { success: true, message: 'Report saved by Quarterdeck (end_run).' } } as never
-    if (serverTool(e.tool) !== null && !isGuardedQuarterdeck(e.tool)) return next({ ...e, run_scope: runId } as typeof e)
+    // A call that already carries its run goes on untouched: auto mode reviews a call
+    // before this hook, and refuses one whose input changes after its review
+    const scoped = (e as { run_scope?: unknown }).run_scope === runId
+    if (serverTool(e.tool) !== null && !isGuardedQuarterdeck(e.tool)) return scoped ? next(e) : next({ ...e, run_scope: runId } as typeof e)
     if (fixedVerdict(e.tool) === null) {
       const verdict = await guardCheck($, runId, e.tool)
       if (verdict.decision === 'deny') return { deny: verdict.reason ?? "Not allowed by the goal's autonomy." }
     }
-    return serverTool(e.tool) !== null ? next({ ...e, run_scope: runId } as typeof e) : next(e)
+    return serverTool(e.tool) !== null && !scoped ? next({ ...e, run_scope: runId } as typeof e) : next(e)
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {

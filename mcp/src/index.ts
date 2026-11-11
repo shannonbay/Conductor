@@ -248,7 +248,7 @@ const TOOLS = [
 /** Set by the quarterdeck-goals plugin on calls from a goal run's subagent: the call acts on that run's goal. */
 const RUN_SCOPE = {
   type: 'string',
-  description: 'Set automatically for goal runs; leave it out.',
+  description: 'A goal run passes its run id here; anyone else leaves it out.',
 }
 
 function withRunScopeProperty(schema: object): object {
