@@ -72,11 +72,21 @@ if (!existsSync(join(root, 'plugins', 'quarterdeck-goals', 'server', 'quarterdec
 const work = join(mkdtempSync(join(tmpdir(), 'quarterdeck-release-')), 'tree')
 const hasLocal = git('branch', '--list', RELEASE_BRANCH) !== ''
 const hasRemote = (() => { try { return git('ls-remote', '--heads', 'origin', RELEASE_BRANCH) !== '' } catch { return false } })()
-if (hasLocal) {
-  run('git', ['worktree', 'add', work, RELEASE_BRANCH])
-} else if (hasRemote) {
+const isAncestor = (a, b) => { try { git('merge-base', '--is-ancestor', a, b); return true } catch { return false } }
+if (hasRemote) {
+  // Build on what is published. A local branch left behind by a release made on
+  // another computer once put v0.17.0 on top of v0.15.0, and the push was refused.
   run('git', ['fetch', 'origin', RELEASE_BRANCH])
-  run('git', ['worktree', 'add', '-b', RELEASE_BRANCH, work, `origin/${RELEASE_BRANCH}`])
+  const remote = `origin/${RELEASE_BRANCH}`
+  if (!hasLocal || isAncestor(RELEASE_BRANCH, remote)) {
+    run('git', ['worktree', 'add', '-B', RELEASE_BRANCH, work, remote])
+  } else if (isAncestor(remote, RELEASE_BRANCH)) {
+    run('git', ['worktree', 'add', work, RELEASE_BRANCH]) // ahead: a release not pushed yet
+  } else {
+    fail(`local ${RELEASE_BRANCH} and ${remote} have diverged; sort that out first`)
+  }
+} else if (hasLocal) {
+  run('git', ['worktree', 'add', work, RELEASE_BRANCH])
 } else {
   // First release: an orphan branch holding only what installs
   run('git', ['worktree', 'add', '--detach', work])
