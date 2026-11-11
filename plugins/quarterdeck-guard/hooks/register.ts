@@ -56,6 +56,7 @@ const HUMAN_ONLY = new Set([
   'set_schedule',
   'update_goal',
   'report_run_end',
+  'watch_report',
 ])
 const isHumanOnly = (tool: string) => HUMAN_ONLY.has(serverTool(tool) ?? '')
 const HUMAN_ONLY_REASON = "This Quarterdeck action is the person's: they take it from the Goals pane (/goals)."

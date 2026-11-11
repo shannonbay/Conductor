@@ -66,6 +66,21 @@ export type GoalCard = {
   memory: Memory[]
   /** Categories approved every time lately: candidates for 'auto'. */
   suggestions: { category: string; approvedInARow: number }[]
+  /** Checks whose new lines start a run (empty on a card: `watchCount` has how many). */
+  watches: Watch[]
+  watchCount: number
+  /** A watch's check has failed several times in a row. */
+  watchFailing: boolean
+}
+
+export type Watch = {
+  name: string
+  everyMinutes: number
+  /** The command it runs. */
+  runs: string
+  lastFiredAt: string | null
+  failing: boolean
+  error: string | null
 }
 
 /** The latest read of the Quarterdeck web app. */

@@ -233,6 +233,7 @@ function goalCard($: $, e: E, view: View, g: GoalCard, index: number) {
           {g.health.value !== null ? ` ${g.health.value}` : ''} <Text dimColor>{spark(g.trend)}</Text>
         </Text>
       )}
+      {g.watchFailing && <Text color="red">a watch can't check{isOpen ? '' : ': expand the goal to see why'}</Text>}
       {g.needsYou.map((item) => proposalRow($, e, view, g, item))}
       {g.needsYouCount > g.needsYou.length && (
         <Text dimColor>… and {g.needsYouCount - g.needsYou.length} more waiting: expand the goal ({index < 9 ? index + 1 : 'its name'}) to see them all</Text>
@@ -471,6 +472,12 @@ function details($: $, e: E, view: View, g: GoalCard) {
     <Box key={`details-${g.id}`} flexDirection="column" marginTop={1}>
       <Text dimColor>{g.objective}</Text>
       <Text dimColor>Runs {scheduleLabel(g.schedule)}{g.schedule ? '' : ' (set one with /goal-schedule)'}</Text>
+      {g.watches.map((w) => (
+        <Text key={`watch-${g.id}/${w.name}`} dimColor>
+          Also runs when "{w.name}" sees something new (checked every {w.everyMinutes} min{w.lastFiredAt ? `, last ${ago(w.lastFiredAt, view.now)}` : ''})
+          {w.failing && <Text color="red"> · can't check: {w.error ?? 'the command fails'}</Text>}
+        </Text>
+      ))}
 
       <Text bold>Open items</Text>
       {g.openItems.length === 0 && <Text dimColor>  none</Text>}

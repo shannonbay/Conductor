@@ -45,7 +45,7 @@ export async function goalPageUrl($: $, goalId: string): Promise<string> {
 }
 
 /** The text a tool answered with, whether core or a hook answered. */
-function resultText(r: { text?: string; result?: unknown }): string {
+export function resultText(r: { text?: string; result?: unknown }): string {
   if (typeof r.text === 'string') return r.text
   const res = r.result
   if (typeof res === 'string') return res
@@ -107,9 +107,10 @@ export async function fetchOverview($: $, etag: string | null, detail: readonly 
   return { changed: true, goals: res.goals ?? [], etag: res.etag, hold: res.hold ?? null, outdated: res.outdated === true, standing: res.standing === true, update: res.update ?? null }
 }
 
-/** Applies goal changes the person has confirmed; answers what changed. */
-export async function updateGoal($: $, goalId: string, changes: GoalChanges): Promise<string[]> {
-  return (await call<{ changed: string[] }>($, 'update_goal', { goal_id: goalId, ...changes })).changed
+/** Applies goal changes the person has confirmed; answers what changed, and how each new watch's first check went. */
+export async function updateGoal($: $, goalId: string, changes: GoalChanges): Promise<{ changed: string[]; watches: { name: string; result: string }[] }> {
+  const r = await call<{ changed: string[]; watches?: { name: string; result: string }[] }>($, 'update_goal', { goal_id: goalId, ...changes })
+  return { changed: r.changed, watches: r.watches ?? [] }
 }
 
 /** Deletes a goal for good (the pane confirms first). */
@@ -177,11 +178,20 @@ export type ClaimedRun = {
   prompt: string
 }
 
-export async function tick($: $, holder: string, trackedRunIds: string[]): Promise<{ leader: boolean; claimed: ClaimedRun[] }> {
-  const r = await call<{ leader: boolean; claimed: ClaimedRun[] }>($, 'goals_tick', {
-    holder, tracked_run_ids: trackedRunIds, max_concurrent: settings.maxConcurrent,
+/** A goal's tool watch that is due: call `tool` with `input` and report what it answered. */
+export type ToolWatch = { watch_id: string; goal_id: string; name: string; tool: string; input: Record<string, unknown> }
+
+/** One scheduler pass. `toolWatches` false asks for runs only (a second pass right after checking watches). */
+export async function tick($: $, holder: string, trackedRunIds: string[], toolWatches = true): Promise<{ leader: boolean; claimed: ClaimedRun[]; toolWatches: ToolWatch[] }> {
+  const r = await call<{ leader: boolean; claimed: ClaimedRun[]; tool_watches?: ToolWatch[] }>($, 'goals_tick', {
+    holder, tracked_run_ids: trackedRunIds, max_concurrent: settings.maxConcurrent, ...(toolWatches && { tool_watches: true }),
   })
-  return { leader: r.leader, claimed: r.claimed ?? [] }
+  return { leader: r.leader, claimed: r.claimed ?? [], toolWatches: r.tool_watches ?? [] }
+}
+
+/** What a tool watch's call answered; `queued_run` is set when something new queued a run. */
+export async function reportWatch($: $, watchId: string, report: { text: string } | { error: string }): Promise<{ queued_run: string | null }> {
+  return call($, 'watch_report', { watch_id: watchId, ...report })
 }
 
 export async function releaseLease($: $, holder: string): Promise<void> {

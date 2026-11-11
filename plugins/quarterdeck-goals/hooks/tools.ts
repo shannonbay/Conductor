@@ -7,7 +7,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
 import { addTodo, answerItem, approve, createGoal, fetchOverview, editTodo, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
-import { ago, clip, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
+import { ago, clip, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, soundsEventDriven, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
 import { kick } from './runner'
 import { askSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
@@ -90,7 +90,7 @@ export const TOOLS = [
   },
   {
     name: 'update_goal',
-    description: "Changes a Quarterdeck goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), or pause / resume. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
+    description: "Changes a Quarterdeck goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), watches, or pause / resume. A watch starts a run when something happens (a new issue, a feed entry, a file, an email): it is a shell command, run every few minutes in the goal's directory, that prints one line per current item, or a read-only connector tool called every few minutes; an item not there before starts a run, which is told the new ones. The answer says whether each new watch's command worked. Try the command or the tool yourself first; the goal-watches skill has recipes. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -105,6 +105,21 @@ export const TOOLS = [
           items: { type: 'object', properties: { kind: { type: 'string', enum: ['fact', 'rule', 'preference'] }, text: { type: 'string' }, pinned: { type: 'boolean' } }, required: ['kind', 'text'] },
         },
         forget_memory: { type: 'array', items: { type: 'string' }, description: 'Memory ids' },
+        watches: {
+          type: 'object',
+          description: 'Watch name → the watch; null removes it. Giving an existing name changes that watch',
+          additionalProperties: {
+            type: ['object', 'null'],
+            description: 'Give a command or a tool, one of them',
+            properties: {
+              command: { type: 'string', description: 'Prints one line per current item and exits 0. Runs under cmd.exe on Windows and sh elsewhere, so quote with double quotes' },
+              tool: { type: 'string', description: 'For what only a connector reaches (mail, calendar, files): the full name of a tool that only reads, e.g. a mail search. The session running goals calls it with nobody asked' },
+              input: { type: 'object', description: "The tool's arguments. Ask for ids only, and few results" },
+              match: { type: 'string', description: 'A regular expression over the tool\'s answer; each match (its first group) is one item. Left out: every "id" in a JSON answer' },
+              every_minutes: { type: 'number', description: 'How often to check (default 5, at least 1)' },
+            },
+          },
+        },
         status: { type: 'string', enum: ['active', 'paused'] },
       },
       required: ['goal'],
@@ -191,16 +206,21 @@ export async function runTool($: $, name: ToolName, input: Record<string, unknow
 
   if (name === 'update_goal') {
     // Only the change fields: the call also carries the engine's own (tool, tool_use_id)
-    const keys = ['name', 'objective', 'instructions', 'autonomy', 'tool_map', 'add_memory', 'forget_memory', 'status'] as const
+    const keys = ['name', 'objective', 'instructions', 'autonomy', 'tool_map', 'add_memory', 'forget_memory', 'watches', 'status'] as const
     const changes = Object.fromEntries(keys.filter((k) => input[k] !== undefined).map((k) => [k, input[k]])) as GoalChanges
     const lines = describeGoalChanges(goal, changes)
     if (lines.length === 0) return fail(`Nothing to change in ${goal.name}: give at least one new value.`)
     if (!(await confirmWith($, `Change the goal "${goal.name}"?\n${lines.map((l) => `• ${l}`).join('\n')}`, 'Apply changes'))) return fail('The person declined; the goal is unchanged.')
     let changed: string[] = []
+    let watches: { name: string; result: string }[] = []
     const ok = await act($, `update:${goal.id}`, 'change the goal', async () => {
-      changed = await updateGoal($, goal.id, changes)
+      ({ changed, watches } = await updateGoal($, goal.id, changes))
     })
-    return ok ? { text: `Changed ${goal.name}: ${changed.join('; ') || 'nothing (already so)'}.`, isError: false } : fail("The change didn't go through; see the Goals pane.")
+    if (!ok) return fail("The change didn't go through; see the Goals pane.")
+    // A new tool watch is first called by the session running goals: if that is this one, now
+    if (watches.length) void kick($).catch(() => {})
+    const checks = watches.map((w) => ` Watch "${w.name}": ${w.result}.`).join('')
+    return { text: `Changed ${goal.name}: ${changed.join('; ') || 'nothing (already so)'}.${checks}`, isError: false }
   }
 
   if (name === 'set_schedule') {
@@ -359,8 +379,10 @@ export async function newGoal($: $, args: string): Promise<string> {
   await refresh($)
   const where = `in ${cwd}`
   if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${await phoneHint($)}`
-  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${await phoneHint($)}`
-  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${await phoneHint($)}`
+  // A goal about things happening can also start when they do, not only on its timer
+  const watch = soundsEventDriven(objective) ? ` To start a run as soon as something happens, not only on a timer, ask Claude to add a watch to "${name}".` : ''
+  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${watch}${await phoneHint($)}`
+  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${watch}${await phoneHint($)}`
 }
 
 /** Sets the schedule through the pane's action wrapper and says what happens next. */

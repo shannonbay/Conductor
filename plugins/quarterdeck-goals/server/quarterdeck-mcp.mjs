@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.17.2, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.18.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -7223,6 +7223,56 @@ function runMigrations(db2) {
     );
   `);
   db2.exec(`
+    CREATE TABLE IF NOT EXISTS goal_watches (
+      id              TEXT PRIMARY KEY,
+      plan_id         TEXT NOT NULL REFERENCES plans(id),
+      name            TEXT NOT NULL,
+      kind            TEXT NOT NULL CHECK (kind IN ('command', 'tool')),
+      command         TEXT,
+      tool            TEXT,
+      tool_input      TEXT NOT NULL DEFAULT '{}',
+      match           TEXT,
+      every_minutes   INTEGER NOT NULL DEFAULT 5,
+      -- JSON array of the lines seen so far, capped
+      seen            TEXT NOT NULL DEFAULT '[]',
+      -- null until the first check that worked: that one only records what is there
+      baseline_at     TEXT,
+      last_checked_at TEXT,
+      asked_at        TEXT,
+      last_fired_at   TEXT,
+      last_error      TEXT,
+      fail_count      INTEGER NOT NULL DEFAULT 0,
+      created_at      TEXT NOT NULL,
+      UNIQUE (plan_id, name)
+    );
+
+    -- One row per new line; it waits (run_id null) until a run's brief carries it
+    CREATE TABLE IF NOT EXISTS goal_watch_events (
+      id         TEXT PRIMARY KEY,
+      watch_id   TEXT NOT NULL,
+      plan_id    TEXT NOT NULL REFERENCES plans(id),
+      line       TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      queued_at  TEXT,
+      run_id     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_watch_events_plan ON goal_watch_events(plan_id, run_id);
+
+  `);
+  try {
+    db2.exec("ALTER TABLE goal_watches ADD COLUMN asked_at TEXT");
+  } catch {
+  }
+  db2.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_goal_watches_insert_revision AFTER INSERT ON goal_watches
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    -- Not on every check: only when what the pane shows changes
+    CREATE TRIGGER IF NOT EXISTS trg_goal_watches_update_revision AFTER UPDATE OF name, kind, command, tool, tool_input, match, every_minutes, last_fired_at, last_error ON goal_watches
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_watches_delete_revision AFTER DELETE ON goal_watches
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
+  `);
+  db2.exec(`
     CREATE TABLE IF NOT EXISTS transcript_messages (
       id          TEXT PRIMARY KEY,
       session_id  TEXT NOT NULL REFERENCES agent_sessions(id),
@@ -7244,7 +7294,7 @@ var SCHEMA_VERSION;
 var init_migrate = __esm({
   "../core/src/migrate.ts"() {
     "use strict";
-    SCHEMA_VERSION = 1;
+    SCHEMA_VERSION = 2;
   }
 });
 
@@ -7679,6 +7729,8 @@ var init_goals = __esm({
     init_types();
     newId = (prefix) => `${prefix}_${randomUUID2().replace(/-/g, "").slice(0, 12)}`;
     GOAL_TABLES = [
+      "goal_watch_events",
+      "goal_watches",
       "goal_tool_calls",
       "goal_health",
       "goal_memory",
@@ -7697,7 +7749,8 @@ var init_goals = __esm({
 // ../core/src/gates.ts
 import { spawn, spawnSync } from "child_process";
 import { existsSync } from "fs";
-function runVerifyCommand(command, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S) {
+function runVerifyCommand(command, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S, opts = {}) {
+  const tailChars = opts.tailChars ?? OUTPUT_TAIL_CHARS;
   const started = Date.now();
   const done = (r) => ({ ...r, duration_ms: Date.now() - started });
   if (!existsSync(cwd)) {
@@ -7705,9 +7758,13 @@ function runVerifyCommand(command, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S) {
   }
   return new Promise((resolve) => {
     let output = "";
+    let errors = "";
     let timedOut = false;
     const append = (chunk) => {
-      output = (output + chunk.toString()).slice(-OUTPUT_TAIL_CHARS);
+      output = (output + chunk.toString()).slice(-tailChars);
+    };
+    const appendErrors = (chunk) => {
+      errors = (errors + chunk.toString()).slice(-OUTPUT_TAIL_CHARS);
     };
     const child = spawn(command, {
       cwd,
@@ -7717,7 +7774,7 @@ function runVerifyCommand(command, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S) {
       detached: process.platform !== "win32"
     });
     child.stdout?.on("data", append);
-    child.stderr?.on("data", append);
+    child.stderr?.on("data", opts.stdoutOnly ? appendErrors : append);
     const timer = setTimeout(() => {
       timedOut = true;
       killTree(child.pid);
@@ -7728,9 +7785,9 @@ function runVerifyCommand(command, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S) {
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (timedOut) output = `${output}
-[timed out after ${timeoutS}s]`.slice(-OUTPUT_TAIL_CHARS);
-      resolve(done({ passed: !timedOut && code === 0, exit_code: code, output, timed_out: timedOut }));
+      if (timedOut && !opts.stdoutOnly) output = `${output}
+[timed out after ${timeoutS}s]`.slice(-tailChars);
+      resolve(done({ passed: !timedOut && code === 0, exit_code: code, output, timed_out: timedOut, ...opts.stdoutOnly && { stderr: errors } }));
     });
   });
 }
@@ -8037,6 +8094,273 @@ var init_health = __esm({
   }
 });
 
+// ../core/src/guard.ts
+function canonicalToolName(name) {
+  return name.startsWith(PLUGIN_QUARTERDECK_TOOL_PREFIX) ? QUARTERDECK_TOOL_PREFIX + name.slice(PLUGIN_QUARTERDECK_TOOL_PREFIX.length) : name;
+}
+function matchToolCategory(rawMap, rawName) {
+  const toolName = canonicalToolName(rawName);
+  const toolMap = Object.fromEntries(Object.entries(rawMap).map(([p, c]) => [canonicalToolName(p), c]));
+  if (toolMap[toolName]) return toolMap[toolName];
+  const globs = Object.entries(toolMap).filter(([p]) => p.includes("*")).sort(([a], [b]) => b.length - a.length);
+  for (const [pattern, category] of globs) {
+    const re = new RegExp("^" + pattern.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
+    if (re.test(toolName)) return category;
+  }
+  return null;
+}
+function record2(db2, run, toolName, category, decision, reason) {
+  db2.prepare(`
+    INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(newId("tc"), run.plan_id, run.id, toolName, category, decision, reason, (/* @__PURE__ */ new Date()).toISOString());
+}
+function guardToolCallForRun(db2, runId, toolName) {
+  const run = db2.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId);
+  return run ? guardRun(db2, run, toolName) : { decision: "allow" };
+}
+function guardRun(db2, run, toolName) {
+  const goal = getGoal(db2, run.plan_id);
+  if (!goal) return { decision: "allow" };
+  const category = matchToolCategory(goal.tool_map, toolName);
+  if (!category) return { decision: "allow", run_id: run.id };
+  const mode = autonomyFor(goal, category);
+  if (mode === "auto") {
+    record2(db2, run, toolName, category, "allow", null);
+    return { decision: "allow", category, run_id: run.id };
+  }
+  if (mode === "off") {
+    const reason2 = `Quarterdeck goal guard: "${category}" is off for this goal, so ${toolName} is not allowed. Don't take or propose this action.`;
+    record2(db2, run, toolName, category, "deny", reason2);
+    return { decision: "deny", category, run_id: run.id, reason: reason2 };
+  }
+  const approved = db2.prepare(`
+    SELECT COUNT(*) AS n FROM tasks
+    WHERE plan_id = ? AND status = 'active' AND archived_at IS NULL AND approved_at IS NOT NULL
+      AND json_extract(state, '$.action.category') = ?
+  `).get(run.plan_id, category).n;
+  if (approved > 0) {
+    record2(db2, run, toolName, category, "allow", null);
+    return { decision: "allow", category, run_id: run.id };
+  }
+  const reason = `Quarterdeck goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`;
+  record2(db2, run, toolName, category, "deny", reason);
+  return { decision: "deny", category, run_id: run.id, reason };
+}
+var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX;
+var init_guard = __esm({
+  "../core/src/guard.ts"() {
+    "use strict";
+    init_goal_engine();
+    init_goals();
+    QUARTERDECK_TOOL_PREFIX = "mcp__quarterdeck__";
+    PLUGIN_QUARTERDECK_TOOL_PREFIX = "mcp__plugin_quarterdeck-goals_quarterdeck__";
+  }
+});
+
+// ../core/src/watches.ts
+function deserializeWatch(r) {
+  return { ...r, tool_input: JSON.parse(r.tool_input || "{}"), seen: JSON.parse(r.seen || "[]") };
+}
+function listWatches(db2, planId) {
+  return db2.prepare("SELECT * FROM goal_watches WHERE plan_id = ? ORDER BY name").all(planId).map(deserializeWatch);
+}
+function getWatch(db2, id) {
+  const r = db2.prepare("SELECT * FROM goal_watches WHERE id = ?").get(id);
+  return r ? deserializeWatch(r) : void 0;
+}
+function setWatch(db2, planId, name, spec) {
+  const goal = getGoal(db2, planId);
+  if (!goal) throw new Error(`Goal ${planId} not found`);
+  const label = name.trim();
+  if (!label) throw new Error("A watch needs a name.");
+  const every = spec.every_minutes ?? WATCH_DEFAULT_MINUTES;
+  if (!Number.isInteger(every) || every < WATCH_MIN_MINUTES) throw new Error(`The watch "${label}" must check every ${WATCH_MIN_MINUTES} minute or more.`);
+  const what = { kind: "command", command: null, tool: null, tool_input: "{}", match: null };
+  const given = spec;
+  if (given.tool !== void 0) {
+    const tool = String(given.tool).trim();
+    if (!tool) throw new Error(`The watch "${label}" needs a tool.`);
+    if (given.command) throw new Error(`The watch "${label}" has a command and a tool: give one.`);
+    if (!tool.startsWith("mcp__")) throw new Error(`The watch "${label}" can only call a connector or MCP tool (mcp__\u2026), not ${tool}.`);
+    if (canonicalToolName(tool).startsWith(QUARTERDECK_TOOL_PREFIX) || /^mcp__quarterdeck-(goals|guard)__/.test(tool)) {
+      throw new Error(`The watch "${label}" can't call Quarterdeck's own tools.`);
+    }
+    const category = matchToolCategory(goal.tool_map, tool);
+    const mode = category ? goal.autonomy[category] ?? "propose" : "auto";
+    if (mode !== "auto") {
+      throw new Error(`The watch "${label}" can't call ${tool}: this goal's rules put it under "${category}", which is ${mode}. A watch may only read.`);
+    }
+    if (given.match !== void 0) {
+      try {
+        new RegExp(given.match);
+      } catch {
+        throw new Error(`The watch "${label}" has a match that isn't a regular expression: ${given.match}`);
+      }
+    }
+    Object.assign(what, { kind: "tool", tool, tool_input: JSON.stringify(given.input ?? {}), match: given.match?.trim() || null });
+  } else {
+    const command = String(given.command ?? "").trim();
+    if (!command) throw new Error(`The watch "${label}" needs a command.`);
+    what.command = command;
+  }
+  const existing = listWatches(db2, planId).find((w) => w.name === label);
+  if (!existing) {
+    const id = newId("wch");
+    db2.prepare("INSERT INTO goal_watches (id, plan_id, name, kind, command, tool, tool_input, match, every_minutes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(id, planId, label, what.kind, what.command, what.tool, what.tool_input, what.match, every, (/* @__PURE__ */ new Date()).toISOString());
+    return getWatch(db2, id);
+  }
+  const same = existing.kind === what.kind && existing.command === what.command && existing.tool === what.tool && JSON.stringify(existing.tool_input) === what.tool_input && existing.match === what.match;
+  if (same) {
+    db2.prepare("UPDATE goal_watches SET every_minutes = ? WHERE id = ?").run(every, existing.id);
+  } else {
+    db2.prepare(`
+      UPDATE goal_watches SET kind = ?, command = ?, tool = ?, tool_input = ?, match = ?, every_minutes = ?, seen = '[]', baseline_at = NULL,
+        last_checked_at = NULL, asked_at = NULL, last_error = NULL, fail_count = 0 WHERE id = ?
+    `).run(what.kind, what.command, what.tool, what.tool_input, what.match, every, existing.id);
+    db2.prepare("DELETE FROM goal_watch_events WHERE watch_id = ? AND run_id IS NULL").run(existing.id);
+  }
+  return getWatch(db2, existing.id);
+}
+function describeWatch(w) {
+  if (w.kind === "command") return w.command ?? "";
+  const input = Object.keys(w.tool_input).length ? ` ${JSON.stringify(w.tool_input)}` : "";
+  return `${w.tool}${input}${w.match ? ` (lines: ${w.match})` : ""}`;
+}
+function removeWatch(db2, planId, name) {
+  const watch = listWatches(db2, planId).find((w) => w.name === name.trim());
+  if (!watch) return false;
+  db2.prepare("DELETE FROM goal_watch_events WHERE watch_id = ? AND run_id IS NULL").run(watch.id);
+  db2.prepare("DELETE FROM goal_watches WHERE id = ?").run(watch.id);
+  return true;
+}
+function watchDue(watch, now = /* @__PURE__ */ new Date()) {
+  if (!watch.last_checked_at) return true;
+  return now.getTime() - new Date(watch.last_checked_at).getTime() >= watch.every_minutes * 6e4;
+}
+function watchFailing(watch) {
+  return watch.fail_count >= WATCH_FAILING_AFTER;
+}
+function toLines(output) {
+  const lines = /* @__PURE__ */ new Set();
+  for (const raw of output.split(/\r?\n/)) {
+    const line = raw.trim().slice(0, WATCH_LINE_CHARS);
+    if (line) lines.add(line);
+    if (lines.size >= WATCH_MAX_LINES) break;
+  }
+  return [...lines];
+}
+function recordWatchLines(db2, watchId, result, now = /* @__PURE__ */ new Date()) {
+  const watch = getWatch(db2, watchId);
+  if (!watch) throw new Error(`Watch ${watchId} not found`);
+  const at = now.toISOString();
+  if ("error" in result) {
+    const error2 = result.error.trim().slice(-500) || "The check failed.";
+    db2.prepare("UPDATE goal_watches SET last_checked_at = ?, last_error = ?, fail_count = fail_count + 1 WHERE id = ?").run(at, error2, watchId);
+    return { baseline: false, lines: 0, fresh: [], error: error2 };
+  }
+  const known = new Set(watch.seen);
+  const baseline = watch.baseline_at === null;
+  const fresh = baseline ? [] : result.lines.filter((l) => !known.has(l));
+  const current2 = new Set(result.lines);
+  const seen = [...result.lines, ...watch.seen.filter((l) => !current2.has(l))].slice(0, WATCH_SEEN_MAX);
+  db2.transaction(() => {
+    const insert = db2.prepare("INSERT INTO goal_watch_events (id, watch_id, plan_id, line, created_at) VALUES (?, ?, ?, ?, ?)");
+    for (const line of fresh) insert.run(newId("wev"), watchId, watch.plan_id, line, at);
+    db2.prepare("UPDATE goal_watches SET seen = ?, baseline_at = COALESCE(baseline_at, ?), last_checked_at = ?, fail_count = 0 WHERE id = ?").run(JSON.stringify(seen), at, at, watchId);
+    if (watch.last_error !== null) db2.prepare("UPDATE goal_watches SET last_error = NULL WHERE id = ?").run(watchId);
+    if (fresh.length) db2.prepare("UPDATE goal_watches SET last_fired_at = ? WHERE id = ?").run(at, watchId);
+    db2.prepare("DELETE FROM goal_watch_events WHERE watch_id = ? AND run_id IS NOT NULL AND created_at < ?").run(watchId, new Date(now.getTime() - EVENT_RETENTION_MS).toISOString());
+  })();
+  return { baseline, lines: result.lines.length, fresh };
+}
+async function checkCommandWatch(db2, watchId, now = /* @__PURE__ */ new Date()) {
+  const watch = getWatch(db2, watchId);
+  if (!watch) throw new Error(`Watch ${watchId} not found`);
+  const plan = getPlan(db2, watch.plan_id);
+  if (!plan || watch.kind !== "command" || !watch.command) throw new Error(`Watch ${watchId} has no command to run`);
+  const r = await runVerifyCommand(watch.command, plan.working_dir, WATCH_TIMEOUT_S, { stdoutOnly: true, tailChars: WATCH_OUTPUT_CHARS });
+  if (r.passed) return recordWatchLines(db2, watchId, { lines: toLines(r.output) }, now);
+  const why = r.timed_out ? `Timed out after ${WATCH_TIMEOUT_S} s` : r.exit_code === null ? r.output : `Exit code ${r.exit_code}${r.stderr?.trim() ? `: ${r.stderr.trim()}` : ""}`;
+  return recordWatchLines(db2, watchId, { error: why }, now);
+}
+function matchLines(text, pattern) {
+  const re = new RegExp(pattern ?? WATCH_DEFAULT_MATCH, "g");
+  const found = [];
+  for (const m of text.matchAll(re)) {
+    if (m[0] === "") break;
+    found.push((m[1] ?? m[0]).replace(/\s+/g, " "));
+    if (found.length >= WATCH_MAX_LINES * 2) break;
+  }
+  return toLines(found.join("\n"));
+}
+function takeDueToolWatches(db2, planIds, now = /* @__PURE__ */ new Date()) {
+  const calls = [];
+  for (const planId of planIds) {
+    for (const w of listWatches(db2, planId)) {
+      if (w.kind !== "tool" || !w.tool || !watchDue(w, now)) continue;
+      if (w.asked_at && now.getTime() - new Date(w.asked_at).getTime() < WATCH_REPORT_GRACE_MS) continue;
+      db2.prepare("UPDATE goal_watches SET asked_at = ? WHERE id = ?").run(now.toISOString(), w.id);
+      calls.push({ watch_id: w.id, goal_id: planId, name: w.name, tool: w.tool, input: w.tool_input });
+    }
+  }
+  return calls;
+}
+function reportToolWatch(db2, watchId, result, now = /* @__PURE__ */ new Date()) {
+  const watch = getWatch(db2, watchId);
+  if (!watch || watch.kind !== "tool") throw new Error(`Tool watch ${watchId} not found`);
+  db2.prepare("UPDATE goal_watches SET asked_at = NULL WHERE id = ?").run(watchId);
+  if ("error" in result) return recordWatchLines(db2, watchId, { error: result.error }, now);
+  return recordWatchLines(db2, watchId, { lines: matchLines(result.text, watch.match) }, now);
+}
+function countUnqueuedWatchEvents(db2, planId) {
+  return db2.prepare("SELECT COUNT(*) n FROM goal_watch_events WHERE plan_id = ? AND run_id IS NULL AND queued_at IS NULL").get(planId).n;
+}
+function markWatchEventsQueued(db2, planId, now = /* @__PURE__ */ new Date()) {
+  db2.prepare("UPDATE goal_watch_events SET queued_at = ? WHERE plan_id = ? AND run_id IS NULL AND queued_at IS NULL").run(now.toISOString(), planId);
+}
+function takeWatchEvents(db2, planId, runId) {
+  if (runId) db2.prepare("UPDATE goal_watch_events SET run_id = ? WHERE plan_id = ? AND run_id IS NULL").run(runId, planId);
+  const rows = db2.prepare(`
+    SELECT e.line, COALESCE(w.name, 'a removed watch') AS watch
+    FROM goal_watch_events e LEFT JOIN goal_watches w ON w.id = e.watch_id
+    WHERE e.plan_id = ? AND ${runId ? "e.run_id = ?" : "e.run_id IS NULL"}
+    ORDER BY e.created_at, e.rowid
+  `).all(...runId ? [planId, runId] : [planId]);
+  const byWatch = /* @__PURE__ */ new Map();
+  for (const r of rows) byWatch.set(r.watch, [...byWatch.get(r.watch) ?? [], r.line]);
+  return [...byWatch.entries()].map(([watch, lines]) => ({
+    watch,
+    new: lines.slice(0, WATCH_BRIEF_LINES),
+    omitted: Math.max(0, lines.length - WATCH_BRIEF_LINES)
+  }));
+}
+function releaseWatchEvents(db2, runId, opts = {}) {
+  db2.prepare(`UPDATE goal_watch_events SET run_id = NULL${opts.requeue ? ", queued_at = NULL" : ""} WHERE run_id = ?`).run(runId);
+}
+var WATCH_TIMEOUT_S, WATCH_MAX_LINES, WATCH_LINE_CHARS, WATCH_SEEN_MAX, WATCH_OUTPUT_CHARS, WATCH_FAILING_AFTER, WATCH_BRIEF_LINES, WATCH_MIN_MINUTES, WATCH_DEFAULT_MINUTES, WATCH_DEFAULT_MATCH, WATCH_REPORT_GRACE_MS, EVENT_RETENTION_MS;
+var init_watches = __esm({
+  "../core/src/watches.ts"() {
+    "use strict";
+    init_gates();
+    init_goals();
+    init_guard();
+    init_queries();
+    WATCH_TIMEOUT_S = 30;
+    WATCH_MAX_LINES = 200;
+    WATCH_LINE_CHARS = 300;
+    WATCH_SEEN_MAX = 1e3;
+    WATCH_OUTPUT_CHARS = 64 * 1024;
+    WATCH_FAILING_AFTER = 3;
+    WATCH_BRIEF_LINES = 50;
+    WATCH_MIN_MINUTES = 1;
+    WATCH_DEFAULT_MINUTES = 5;
+    WATCH_DEFAULT_MATCH = String.raw`"id"\s*:\s*"([^"]+)"`;
+    WATCH_REPORT_GRACE_MS = 2 * 6e4;
+    EVENT_RETENTION_MS = 30 * 864e5;
+  }
+});
+
 // ../core/src/goal-engine.ts
 function autonomyFor(goal, category) {
   return goal.autonomy[category] ?? "propose";
@@ -8165,7 +8489,8 @@ function buildBrief(db2, planId, runId) {
     health: (() => {
       const [h] = listHealth(db2, planId, 1);
       return h ? { passed: h.passed, value: h.value, at: h.created_at, ...!h.passed && h.output && { output: h.output.slice(-500) } } : null;
-    })()
+    })(),
+    watch_events: takeWatchEvents(db2, planId, runId)
   };
 }
 function queueRun(db2, planId, trigger = "manual") {
@@ -8199,6 +8524,7 @@ function failRun(db2, runId, status, reason) {
   const run = getRun(db2, runId);
   if (!run || run.status !== "running" && run.status !== "queued") return;
   updateRun(db2, runId, { status, ended_at: (/* @__PURE__ */ new Date()).toISOString(), summary: run.summary ?? reason });
+  releaseWatchEvents(db2, runId);
 }
 function archiveResolved(db2, planId, now = /* @__PURE__ */ new Date()) {
   const goal = getGoal(db2, planId);
@@ -8254,73 +8580,10 @@ var init_goal_engine = __esm({
     init_goals();
     init_schedule();
     init_health();
+    init_watches();
     GoalError = class extends Error {
     };
     MEMORY_BRIEF_CHARS = 4e3;
-  }
-});
-
-// ../core/src/guard.ts
-function canonicalToolName(name) {
-  return name.startsWith(PLUGIN_QUARTERDECK_TOOL_PREFIX) ? QUARTERDECK_TOOL_PREFIX + name.slice(PLUGIN_QUARTERDECK_TOOL_PREFIX.length) : name;
-}
-function matchToolCategory(rawMap, rawName) {
-  const toolName = canonicalToolName(rawName);
-  const toolMap = Object.fromEntries(Object.entries(rawMap).map(([p, c]) => [canonicalToolName(p), c]));
-  if (toolMap[toolName]) return toolMap[toolName];
-  const globs = Object.entries(toolMap).filter(([p]) => p.includes("*")).sort(([a], [b]) => b.length - a.length);
-  for (const [pattern, category] of globs) {
-    const re = new RegExp("^" + pattern.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
-    if (re.test(toolName)) return category;
-  }
-  return null;
-}
-function record2(db2, run, toolName, category, decision, reason) {
-  db2.prepare(`
-    INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(newId("tc"), run.plan_id, run.id, toolName, category, decision, reason, (/* @__PURE__ */ new Date()).toISOString());
-}
-function guardToolCallForRun(db2, runId, toolName) {
-  const run = db2.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId);
-  return run ? guardRun(db2, run, toolName) : { decision: "allow" };
-}
-function guardRun(db2, run, toolName) {
-  const goal = getGoal(db2, run.plan_id);
-  if (!goal) return { decision: "allow" };
-  const category = matchToolCategory(goal.tool_map, toolName);
-  if (!category) return { decision: "allow", run_id: run.id };
-  const mode = autonomyFor(goal, category);
-  if (mode === "auto") {
-    record2(db2, run, toolName, category, "allow", null);
-    return { decision: "allow", category, run_id: run.id };
-  }
-  if (mode === "off") {
-    const reason2 = `Quarterdeck goal guard: "${category}" is off for this goal, so ${toolName} is not allowed. Don't take or propose this action.`;
-    record2(db2, run, toolName, category, "deny", reason2);
-    return { decision: "deny", category, run_id: run.id, reason: reason2 };
-  }
-  const approved = db2.prepare(`
-    SELECT COUNT(*) AS n FROM tasks
-    WHERE plan_id = ? AND status = 'active' AND archived_at IS NULL AND approved_at IS NOT NULL
-      AND json_extract(state, '$.action.category') = ?
-  `).get(run.plan_id, category).n;
-  if (approved > 0) {
-    record2(db2, run, toolName, category, "allow", null);
-    return { decision: "allow", category, run_id: run.id };
-  }
-  const reason = `Quarterdeck goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`;
-  record2(db2, run, toolName, category, "deny", reason);
-  return { decision: "deny", category, run_id: run.id, reason };
-}
-var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX;
-var init_guard = __esm({
-  "../core/src/guard.ts"() {
-    "use strict";
-    init_goal_engine();
-    init_goals();
-    QUARTERDECK_TOOL_PREFIX = "mcp__quarterdeck__";
-    PLUGIN_QUARTERDECK_TOOL_PREFIX = "mcp__plugin_quarterdeck-goals_quarterdeck__";
   }
 });
 
@@ -8376,6 +8639,17 @@ function applyGoalChanges(db2, planId, changes) {
       updateMemory(db2, id, { active: false });
       done.push(`forgot memory ${id}`);
     }
+    const watches = listWatches(db2, planId);
+    for (const [name, spec] of Object.entries(changes.watches ?? {})) {
+      if (spec === null) {
+        if (removeWatch(db2, planId, name)) done.push(`watch "${name.trim()}" removed`);
+        continue;
+      }
+      const before = watches.find((w) => w.name === name.trim());
+      const after = setWatch(db2, planId, name, spec);
+      if (before && describeWatch(before) === describeWatch(after) && before.every_minutes === after.every_minutes) continue;
+      done.push(`watch "${after.name}" ${before ? "changed" : "added"}: every ${after.every_minutes} min, ${after.kind === "tool" ? "calls" : "runs"} ${describeWatch(after)}`);
+    }
     if (changes.status && changes.status !== goal.status) {
       if (goal.status === "retired") throw new GoalError("This goal is done; run it again first.");
       updateGoal(db2, planId, { status: changes.status });
@@ -8430,6 +8704,7 @@ function reportRunEnd(db2, runId, input, now = /* @__PURE__ */ new Date()) {
     const until = (parseLimitReset(answer, now) ?? new Date(now.getTime() + DEFAULT_HOLD_MS)).toISOString();
     const hold = { until, reason: answer.split("\n")[0].slice(0, 200) };
     updateRun(db2, runId, { status: "skipped", skip_reason: `usage limit reached: ${hold.reason}`, ended_at: now.toISOString() });
+    releaseWatchEvents(db2, runId, { requeue: true });
     setRunHold(db2, hold);
     return { outcome: "held", hold };
   }
@@ -8446,6 +8721,7 @@ var init_goal_changes = __esm({
     init_queries();
     init_goals();
     init_goal_engine();
+    init_watches();
     MODES = /* @__PURE__ */ new Set(["off", "propose", "auto"]);
     LIMIT = /(hit|reached) (your|the) .{0,30}limit|usage limit|rate limit|out of (credits|usage)/i;
     DEFAULT_HOLD_MS = 30 * 6e4;
@@ -8472,7 +8748,7 @@ function leaseHolder(db2, now = /* @__PURE__ */ new Date()) {
 function goalRunPrompt(p) {
   return [
     `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
-    `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries.`,
+    `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries. Its watch_events, when there are any, are what is new since the last run (one line per new thing, such as an issue number): deal with those first.`,
     "Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal's state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category's autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.",
     "When you need something only the person can give or do (a choice, details you can't find, connecting a service, allowing a site), add_item with ask_person: true and one clear question, and carry on with what you can; don't guess. Their answer arrives as memory and the item is completed.",
     "Save anything future runs should know with remember.",
@@ -8532,6 +8808,28 @@ async function checkHealth(db2, planId) {
   }
   return { passed: result.passed, queuedRun };
 }
+async function checkWatches(db2, planIds, now = /* @__PURE__ */ new Date(), budgetMs = WATCH_BUDGET_MS) {
+  const started = Date.now();
+  let checked = 0;
+  for (const planId of planIds) {
+    for (const watch of listWatches(db2, planId)) {
+      if (watch.kind !== "command" || !watchDue(watch, now)) continue;
+      if (Date.now() - started >= budgetMs) return checked;
+      await checkCommandWatch(db2, watch.id, now).catch(() => {
+      });
+      checked++;
+    }
+  }
+  return checked;
+}
+function queueForWatchEvents(db2, planId, now = /* @__PURE__ */ new Date()) {
+  if (countUnqueuedWatchEvents(db2, planId) === 0) return null;
+  const open = getOpenRun(db2, planId);
+  if (open?.status === "running") return null;
+  const run = open ?? queueRun(db2, planId, "watch");
+  markWatchEventsQueued(db2, planId, now);
+  return run;
+}
 async function schedulerPass(db2, opts) {
   const now = opts.now ?? /* @__PURE__ */ new Date();
   if (schemaOutdated(db2)) return { leader: false, claimed: [], expired: [], outdated: true };
@@ -8543,8 +8841,12 @@ async function schedulerPass(db2, opts) {
     await checkHealth(db2, goal.plan_id).catch(() => {
     });
   }
+  await checkWatches(db2, goals.map(({ plan }) => plan.id), now);
+  for (const { plan } of goals) queueForWatchEvents(db2, plan.id, now);
+  const toolWatches = opts.toolWatches ? takeDueToolWatches(db2, goals.map(({ plan }) => plan.id), now) : [];
+  const withWatches = (r) => toolWatches.length ? { ...r, tool_watches: toolWatches } : r;
   const hold = getRunHold(db2, now);
-  if (hold) return { leader: true, claimed: [], expired, hold };
+  if (hold) return withWatches({ leader: true, claimed: [], expired, hold });
   let running = db2.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get().n;
   const max = opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
   const claimed = [];
@@ -8573,7 +8875,7 @@ async function schedulerPass(db2, opts) {
     }
     if (decision.trigger === "interval" || decision.trigger === "cron") updateGoal(db2, plan.id, { next_run_at: nextIntervalRun(db2, plan.id, now) });
   }
-  return { leader: true, claimed, expired };
+  return withWatches({ leader: true, claimed, expired });
 }
 function decideItem(db2, planId, taskId, input) {
   const task = getTask(db2, planId, taskId);
@@ -8604,7 +8906,7 @@ function reviveIfDone(db2, planId) {
   updateGoal(db2, planId, { status: "active" });
   return true;
 }
-var LEASE_NAME, LEASE_MS, STALE_GRACE_MS, DEFAULT_MAX_CONCURRENT;
+var LEASE_NAME, LEASE_MS, STALE_GRACE_MS, DEFAULT_MAX_CONCURRENT, WATCH_BUDGET_MS;
 var init_goal_tick = __esm({
   "../core/src/goal-tick.ts"() {
     "use strict";
@@ -8613,12 +8915,14 @@ var init_goal_tick = __esm({
     init_goals();
     init_goal_engine();
     init_health();
+    init_watches();
     init_goal_changes();
     init_migrate();
     LEASE_NAME = "goals";
     LEASE_MS = 9e4;
     STALE_GRACE_MS = 5 * 6e4;
     DEFAULT_MAX_CONCURRENT = 3;
+    WATCH_BUDGET_MS = 45e3;
   }
 });
 
@@ -8728,6 +9032,7 @@ function buildOverview(db2, detail = "all", standingSession = null) {
     const open = items.filter((t) => t.status === "pending" || t.status === "active");
     const openRun = getOpenRun(db2, plan.id) ?? null;
     const runs = listRuns(db2, plan.id, RUNS, { includeSkipped: false });
+    const watches = listWatches(db2, plan.id);
     return {
       id: plan.id,
       name: plan.name,
@@ -8767,7 +9072,19 @@ function buildOverview(db2, detail = "all", standingSession = null) {
       open_item_count: open.filter((t) => !t.review_requested_at).length,
       health: listHealth(db2, plan.id, HEALTH).map((h) => ({ passed: h.passed, value: h.value, created_at: h.created_at })),
       memory: listMemory(db2, plan.id, { activeOnly: true }).slice(-MEMORY).reverse().map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory), source: m.source, pinned: m.pinned, created_at: m.created_at })),
-      suggestions: getAutonomySuggestions(db2, plan.id)
+      suggestions: getAutonomySuggestions(db2, plan.id),
+      // Without when each last checked: that changes every few minutes and would redraw the pane for nothing
+      watches: watches.map((w) => ({
+        name: w.name,
+        kind: w.kind,
+        every_minutes: w.every_minutes,
+        runs: clip(describeWatch(w), CLIP.watch),
+        last_fired_at: w.last_fired_at,
+        failing: watchFailing(w),
+        error: watchFailing(w) ? clip(w.last_error, CLIP.notes) : null
+      })),
+      watch_count: watches.length,
+      watch_failing: watches.some(watchFailing)
     };
   }).map((g) => {
     const waiting = g.needs_you.length;
@@ -8788,7 +9105,8 @@ function buildOverview(db2, detail = "all", standingSession = null) {
       open_items: [],
       memory: [],
       instructions: "",
-      tool_map: {}
+      tool_map: {},
+      watches: []
     };
   });
   const standing = standingSession !== null && leaseHolder(db2) === standingSession;
@@ -8808,6 +9126,7 @@ var init_goal_overview = __esm({
     init_goal_engine();
     init_schedule();
     init_health();
+    init_watches();
     init_goal_changes();
     init_migrate();
     init_goal_tick();
@@ -8815,7 +9134,7 @@ var init_goal_overview = __esm({
     OPEN_ITEMS = 10;
     HEALTH = 20;
     MEMORY = 10;
-    CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400 };
+    CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400, watch: 300 };
     DONE = 10;
     ACTIVITY_EVENTS = 20;
     PROMOTE_AFTER = 10;
@@ -8944,6 +9263,7 @@ var init_src = __esm({
     init_goal_engine();
     init_schedule();
     init_health();
+    init_watches();
     init_guard();
     init_goal_tick();
     init_goal_overview();
@@ -21435,8 +21755,14 @@ var GoalsTickSchema = external_exports.object({
   holder: external_exports.string().min(1).describe("The Claude Code session asking (its session id)"),
   tracked_run_ids: external_exports.array(external_exports.string()).default([]).describe("Runs this holder is tracking itself; never expired by the pass"),
   max_concurrent: external_exports.number().int().min(1).max(10).optional().describe("Most runs at once across all goals (default 3)"),
-  release: external_exports.boolean().optional().describe("Give the scheduler lease up instead of running a pass (the session is ending)")
+  release: external_exports.boolean().optional().describe("Give the scheduler lease up instead of running a pass (the session is ending)"),
+  tool_watches: external_exports.boolean().optional().describe("The caller checks tool watches: the due ones come back in tool_watches, to call and answer with watch_report")
 });
+var WatchReportSchema = external_exports.object({
+  watch_id: external_exports.string(),
+  text: external_exports.string().optional().describe("The tool's answer as text"),
+  error: external_exports.string().optional().describe("Why the call failed, when it did")
+}).refine((v) => v.text !== void 0 || v.error !== void 0, { message: "Give the text the tool answered, or the error." });
 var GoalsOverviewSchema = external_exports.object({
   etag: external_exports.string().optional().describe("The etag from the last overview; an unchanged overview answers { changed: false }"),
   detail: external_exports.array(external_exports.string()).optional().describe("Goal ids to give in full (runs, memory, open items, instructions, tool rules); the rest are cards. Left out: every goal in full")
@@ -21483,6 +21809,13 @@ var GoalScheduleSchema = external_exports.union([
   external_exports.object({ kind: external_exports.literal("cron"), expr: external_exports.string().min(1).describe("5-field cron, local time") }),
   external_exports.null()
 ]);
+var WatchSchema = external_exports.object({
+  command: external_exports.string().trim().min(1).optional().describe("A shell command, run in the goal's directory, that prints one line per current item (an issue number, a feed entry's id). Lines not seen before start a run; the first check only records what is there. Must exit 0"),
+  tool: external_exports.string().trim().min(1).optional().describe("Instead of a command: a connector or MCP tool (mcp__\u2026) that only reads, called by the session that runs goals, e.g. a mail search"),
+  input: external_exports.record(external_exports.unknown()).optional().describe("The tool's arguments"),
+  match: external_exports.string().optional().describe(`A regular expression over the tool's answer; each match (its first group) is one line. Left out: every "id" in a JSON answer`),
+  every_minutes: external_exports.number().int().min(1).optional().describe("How often to check (default 5)")
+}).refine((v) => v.command === void 0 !== (v.tool === void 0), { message: "A watch has a command or a tool, one of them." });
 var CreateGoalSchema = external_exports.object({
   name: external_exports.string().trim().min(1),
   objective: external_exports.string().trim().min(1),
@@ -21491,7 +21824,8 @@ var CreateGoalSchema = external_exports.object({
   autonomy: external_exports.record(external_exports.enum(["off", "propose", "auto"])).optional().describe("Category \u2192 off | propose | auto"),
   tool_map: external_exports.record(external_exports.string()).optional().describe("Tool name pattern \u2192 category"),
   schedule: GoalScheduleSchema.optional().describe("When it runs on its own; left out or null, on demand"),
-  one_off: external_exports.boolean().optional().describe("Runs once now; done when its run leaves nothing open")
+  one_off: external_exports.boolean().optional().describe("Runs once now; done when its run leaves nothing open"),
+  watches: external_exports.record(WatchSchema).optional().describe("Watch name \u2192 what it checks: a run starts when a watch sees something new")
 });
 var SetScheduleSchema = external_exports.object({
   goal_id: external_exports.string(),
@@ -21525,6 +21859,7 @@ var UpdateGoalSchema = external_exports.object({
   tool_map: external_exports.record(external_exports.string().nullable()).optional().describe("Tool name pattern \u2192 category; null removes the rule"),
   add_memory: external_exports.array(external_exports.object({ kind: external_exports.enum(["fact", "rule", "preference"]), text: external_exports.string().trim().min(1), pinned: external_exports.boolean().optional() })).optional(),
   forget_memory: external_exports.array(external_exports.string()).optional().describe("Memory ids to forget"),
+  watches: external_exports.record(WatchSchema.nullable()).optional().describe("Watch name \u2192 what it checks; null removes the watch. A run starts when a watch sees something new"),
   status: external_exports.enum(["active", "paused"]).optional()
 });
 var ReportRunEndSchema = external_exports.object({
@@ -21656,6 +21991,11 @@ var nextScheduledRun2 = (planId) => nextScheduledRun(db, planId);
 var reviveIfDone2 = (planId) => reviveIfDone(db, planId);
 var applyGoalChanges2 = (planId, changes) => applyGoalChanges(db, planId, changes);
 var reportRunEnd2 = (runId, input) => reportRunEnd(db, runId, input);
+var listWatches2 = (planId) => listWatches(db, planId);
+var checkCommandWatch2 = (watchId) => checkCommandWatch(db, watchId);
+var getWatch2 = (watchId) => getWatch(db, watchId);
+var reportToolWatch2 = (watchId, result) => reportToolWatch(db, watchId, result);
+var queueForWatchEvents2 = (planId) => queueForWatchEvents(db, planId);
 var todoLists2 = (workingDir) => todoLists(db, workingDir);
 var addTodo2 = (input) => addTodo(db, input);
 var setTodo2 = (listId, itemId, change) => setTodo(db, listId, itemId, change);
@@ -22537,7 +22877,8 @@ async function goals_tick(args) {
   const pass = await schedulerPass2({
     holder: input.holder,
     trackedRunIds: new Set(input.tracked_run_ids),
-    maxConcurrent: input.max_concurrent
+    maxConcurrent: input.max_concurrent,
+    toolWatches: input.tool_watches
   });
   for (const run of pass.claimed) {
     record3(run.goal_id, run.goal_id, "agent_started", { run_id: run.run_id, trigger: run.trigger, holder: input.holder }, { via: "plugin" });
@@ -22618,10 +22959,12 @@ async function create_goal(args) {
     { objective: input.objective, instructions: input.instructions ?? "", autonomy: input.autonomy ?? {}, one_off: input.one_off ?? false }
   );
   if (input.tool_map && Object.keys(input.tool_map).length) applyGoalChanges2(id, { tool_map: input.tool_map });
+  if (input.watches && Object.keys(input.watches).length) applyGoalChanges2(id, { watches: input.watches });
   record3(id, id, "plan_created", { kind: "goal", one_off: input.one_off ?? false }, human);
   const applied = input.schedule ? applySchedule(id, input.schedule) : { schedule: null, next_run_at: null };
   const queued = input.one_off ? queueRun2(id) : null;
-  return { id, ...applied, one_off: input.one_off ?? false, queued_run: queued ? queued.id : null };
+  const watches = await firstChecks(id);
+  return { id, ...applied, one_off: input.one_off ?? false, queued_run: queued ? queued.id : null, ...watches.length ? { watches } : {} };
 }
 async function delete_memory(args) {
   const input = DeleteMemorySchema.parse(args);
@@ -22654,8 +22997,34 @@ async function update_goal(args) {
   if (!getGoal2(goal_id)) throw new Error(`Goal ${goal_id} not found.`);
   const changed = applyGoalChanges2(goal_id, changes);
   if (changed.length) record3(goal_id, goal_id, "goal_updated", { changes: changed }, human);
+  const watches = await firstChecks(goal_id);
   touchPlan2(goal_id);
-  return { goal_id, changed };
+  return { goal_id, changed, ...watches.length ? { watches } : {} };
+}
+async function firstChecks(goalId) {
+  const results = [];
+  for (const w of listWatches2(goalId)) {
+    if (w.last_checked_at !== null) continue;
+    if (w.kind === "tool") {
+      results.push({ name: w.name, result: `set; the session running goals calls ${w.tool} within a minute, and goal_detail says if that fails` });
+      continue;
+    }
+    const r = await checkCommandWatch2(w.id);
+    results.push({
+      name: w.name,
+      result: r.error ? `the command failed (${r.error}); it is tried again every ${w.every_minutes} min` : `works: ${r.lines} ${r.lines === 1 ? "item" : "items"} there now; a run starts when a new one appears`
+    });
+  }
+  return results;
+}
+async function watch_report(args) {
+  const input = WatchReportSchema.parse(args);
+  const watch = getWatch2(input.watch_id);
+  if (!watch) throw new Error(`Watch ${input.watch_id} not found.`);
+  const r = reportToolWatch2(watch.id, input.error !== void 0 ? { error: input.error } : { text: input.text ?? "" });
+  const goal = getGoal2(watch.plan_id);
+  const queued = r.fresh.length && goal?.status === "active" ? queueForWatchEvents2(watch.plan_id) : null;
+  return { watch_id: watch.id, baseline: r.baseline, lines: r.lines, new: r.fresh.length, ...r.error && { error: r.error }, queued_run: queued ? queued.id : null };
 }
 async function report_run_end(args) {
   const input = ReportRunEndSchema.parse(args);
@@ -22966,8 +23335,9 @@ var TOOLS = [
     ["create_goal", "Creates a goal for the human.", CreateGoalSchema, create_goal],
     ["delete_memory", "Deletes one of a goal's memories for the human.", DeleteMemorySchema, delete_memory],
     ["set_schedule", "Sets a goal's schedule (interval, cron, or none) for the human.", SetScheduleSchema, set_schedule],
-    ["update_goal", "Changes a goal's name, objective, instructions, autonomy, tool rules, memory or status, once the human has confirmed.", UpdateGoalSchema, update_goal],
-    ["report_run_end", "Reports how a goal run's agent finished a turn: a usage limit skips the run and holds goal runs until the reset.", ReportRunEndSchema, report_run_end]
+    ["update_goal", "Changes a goal's name, objective, instructions, autonomy, tool rules, memory, watches or status, once the human has confirmed.", UpdateGoalSchema, update_goal],
+    ["report_run_end", "Reports how a goal run's agent finished a turn: a usage limit skips the run and holds goal runs until the reset.", ReportRunEndSchema, report_run_end],
+    ["watch_report", "Records what a goal's tool watch answered when the plugin called its tool; something new queues a run.", WatchReportSchema, watch_report]
   ].map(([name, description, schema, handler]) => ({
     name,
     description: `${description} For the quarterdeck-goals plugin only: agents and the model must not call this.`,

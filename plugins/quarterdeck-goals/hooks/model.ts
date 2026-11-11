@@ -28,6 +28,10 @@ export type OverviewGoal = {
   health: { passed: boolean; value: number | null }[]
   memory: { id: string; kind: string; text: string; pinned: boolean }[]
   suggestions: { category: string; approved_in_a_row: number }[]
+  /** Missing from a server older than watches. */
+  watches?: { name: string; every_minutes: number; runs: string; last_fired_at: string | null; failing: boolean; error: string | null }[]
+  watch_count?: number
+  watch_failing?: boolean
 }
 
 type OverviewItem = { id: string; goal: string; action?: { category?: string; summary?: string } | null; asks_person?: boolean }
@@ -64,6 +68,9 @@ export function toCard(g: OverviewGoal): GoalCard {
     trend: g.health.map((h) => h.value).filter((v): v is number => v !== null).reverse(),
     memory: g.memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, pinned: m.pinned })),
     suggestions: g.suggestions.map((s) => ({ category: s.category, approvedInARow: s.approved_in_a_row })),
+    watches: (g.watches ?? []).map((w) => ({ name: w.name, everyMinutes: w.every_minutes, runs: w.runs, lastFiredAt: w.last_fired_at, failing: w.failing, error: w.error })),
+    watchCount: g.watch_count ?? g.watches?.length ?? 0,
+    watchFailing: g.watch_failing ?? (g.watches ?? []).some((w) => w.failing),
   }
 }
 
@@ -78,8 +85,8 @@ export function isFailed(status: string): boolean {
 
 /**
  * Nothing here needs the person: nothing waiting for them, no run going, the
- * last run didn't fail, the health check isn't failing and there is no
- * suggestion. The pane draws such a goal as one line until it is expanded.
+ * last run didn't fail, the health check and the watches aren't failing and
+ * there is no suggestion. The pane draws such a goal as one line until it is expanded.
  */
 export function isQuiet(g: GoalCard): boolean {
   const run = lastRun(g)
@@ -88,6 +95,7 @@ export function isQuiet(g: GoalCard): boolean {
     && !g.openRun
     && !(run && isFailed(run.status))
     && !(g.health && !g.health.passed)
+    && !g.watchFailing
     && g.suggestions.length === 0
 }
 
@@ -185,6 +193,9 @@ export function describe(g: GoalCard, now: number): string {
       : null,
     g.instructions.trim() ? `Instructions: ${g.instructions.trim()}` : null,
     `Schedule: ${g.oneOff ? 'one-off' : scheduleLabel(g.schedule)}`,
+    g.watches.length > 0
+      ? `Watches (a run starts when one sees a new line):\n${g.watches.map((w) => `- ${w.name}: every ${w.everyMinutes} min, runs ${w.runs}${w.failing ? ` [failing: ${w.error ?? 'no message'}]` : ''}${w.lastFiredAt ? `, last saw something new ${ago(w.lastFiredAt, now)}` : ''}`).join('\n')}`
+      : null,
     `Autonomy (unlisted categories: propose): ${Object.entries(g.autonomy).map(([c, m]) => `${c}=${m}`).join(', ') || 'none set'}`,
     Object.keys(g.toolMap).length ? `Tool rules: ${Object.entries(g.toolMap).map(([p, c]) => `${p} → ${c}`).join(', ')}` : null,
     g.memory.length > 0 ? `Memory:\n${g.memory.map((m) => `- ${m.id} [${m.kind}${m.pinned ? ', pinned' : ''}] ${m.text}`).join('\n')}` : null,
@@ -443,7 +454,20 @@ export type GoalChanges = {
   tool_map?: Record<string, string | null>
   add_memory?: { kind: string; text: string; pinned?: boolean }[]
   forget_memory?: string[]
+  /** Watch name → what it runs; null removes it. */
+  watches?: Record<string, WatchChange | null>
   status?: 'active' | 'paused'
+}
+
+/** A watch as update_goal takes it: a command to run, or a tool to call with its input. */
+export type WatchChange = { command?: string; tool?: string; input?: Record<string, unknown>; match?: string; every_minutes?: number }
+
+/** How often a watch checks when it isn't said (the server's default). */
+export const WATCH_DEFAULT_MINUTES = 5
+
+/** True for an objective about reacting to things as they happen ("when a new issue is opened…"): a watch would suit it. */
+export function soundsEventDriven(objective: string): boolean {
+  return /\b(when(ever)?|as soon as|each time|every time)\b.{0,60}\b(new|opens?|opened|arrives?|appears?|posted|published|changes?|is (created|added|merged|released))\b|\bnew (issues?|prs?|pull requests?|releases?|posts?|commits?|emails?|messages?|files?)\b/i.test(objective)
 }
 
 /** The changes as the person reads them before confirming: one line each, from what is to what will be. */
@@ -456,6 +480,13 @@ export function describeGoalChanges(g: GoalCard, c: GoalChanges): string[] {
   for (const [pat, cat] of Object.entries(c.tool_map ?? {})) lines.push(cat === null ? `Tool rule removed: ${pat}` : `Tool rule: ${pat} → ${cat}`)
   for (const m of c.add_memory ?? []) lines.push(`Remember (${m.kind}${m.pinned ? ', pinned' : ''}): ${m.text}`)
   for (const id of c.forget_memory ?? []) lines.push(`Forget: ${g.memory.find((m) => m.id === id)?.text ?? id}`)
+  // A watch's command runs unattended: the person reads all of it, never a clipped one
+  for (const [name, w] of Object.entries(c.watches ?? {})) {
+    const had = g.watches.some((x) => x.name === name.trim())
+    if (w === null) lines.push(`Watch removed: ${name}`)
+    else if (w.tool) lines.push(`${had ? 'Watch changed' : 'New watch'} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this tool is called without asking you, and a run starts when its answer has something it hasn't before: ${w.tool} ${JSON.stringify(w.input ?? {})}${w.match ? ` (read with ${w.match})` : ''}`)
+    else lines.push(`${had ? 'Watch changed' : 'New watch'} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this command runs on your computer, and a run starts when it prints a line it hasn't before: ${w.command ?? ''}`)
+  }
   if (c.status && c.status !== g.status) lines.push(c.status === 'paused' ? 'Pause the goal' : 'Resume the goal')
   return lines
 }
