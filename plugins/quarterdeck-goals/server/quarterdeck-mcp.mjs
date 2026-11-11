@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.17.1, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.17.2, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
