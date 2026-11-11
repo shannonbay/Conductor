@@ -12,9 +12,9 @@
  * - A run may use the goal tools. The person's Quarterdeck actions (approve,
  *   reject, cancel, pause...) and the plugin's tools are refused to it. Any
  *   other tool goes through the goal's guard (tool_map + autonomy): "off" and
- *   unapproved "propose" categories are refused with the reason, "auto" and
- *   approved ones are allowed, and tools outside the map follow the session's
- *   own permission rules.
+ *   unapproved "propose" categories are refused with the reason. Everything
+ *   else ("auto", approved, or outside the map) follows the session's own
+ *   permission rules: this plugin refuses, it never allows.
  * - A run's report is its end_run summary, shown in the Goals pane; it is kept
  *   out of the person's conversation.
  * - The person's Quarterdeck actions are also refused to the model and to other
@@ -22,7 +22,7 @@
  */
 import type { EngineInterface, Register } from 'claude-code'
 
-type $ = EngineInterface
+type Engine = EngineInterface
 
 const RUNNER_PLUGIN = 'quarterdeck-goals'
 /** "Goal: <name> (<run id>)", the description quarterdeck-goals starts every run's agent with. */
@@ -57,12 +57,11 @@ const HUMAN_ONLY = new Set([
   'update_goal',
   'report_run_end',
   'watch_report',
+  'run_progress',
 ])
 const isHumanOnly = (tool: string) => HUMAN_ONLY.has(serverTool(tool) ?? '')
 const HUMAN_ONLY_REASON = "This Quarterdeck action is the person's: they take it from the Goals pane (/goals)."
 
-const allow = { decision: 'allow' as const }
-const deny = (reason: string) => ({ decision: 'deny' as const, reason })
 
 // ── Which subagents are runs ──────────────────────────────────────────────────
 
@@ -70,7 +69,7 @@ const deny = (reason: string) => ({ decision: 'deny' as const, reason })
 const runIds = new Map<string, string>()
 const otherAgents = new Set<string>()
 
-async function runIdFor($: $, agentId: string | undefined): Promise<string | null> {
+async function runIdFor($: Engine, agentId: string | undefined): Promise<string | null> {
   if (!agentId || otherAgents.has(agentId)) return null
   const known = runIds.get(agentId)
   if (known) return known
@@ -87,8 +86,6 @@ async function runIdFor($: $, agentId: string | undefined): Promise<string | nul
 
 // ── The goal's guard ──────────────────────────────────────────────────────────
 
-/** Calls the goal's guard allowed ("auto" or an approved category), by tool_use_id, for the permission check. */
-const approvedCalls = new Set<string>()
 /**
  * This plugin's own guard_check calls under way. guard_check is the person's
  * tool to everyone else, so the permission check lets it through only for this
@@ -96,7 +93,7 @@ const approvedCalls = new Set<string>()
  */
 let guardCallsInFlight = 0
 /** The person-only tools this plugin itself calls, inside a run's loop. */
-const OWN_CALLS = new Set(['guard_check', 'report_run_end'])
+const OWN_CALLS = new Set(['guard_check', 'report_run_end', 'run_progress'])
 
 type Verdict = { decision: 'allow' | 'deny'; category?: string; reason?: string }
 
@@ -113,7 +110,7 @@ let serverPrefix: string | null = null
 const NO_SUCH_TOOL = /no tool named "mcp__|no such tool available: mcp__|no implementation for tool.call/i
 
 /** Calls a quarterdeck server tool under whichever prefix the session has. */
-async function callServer($: $, name: string, input: Record<string, unknown>): Promise<Awaited<ReturnType<$['tool']['call']>>> {
+async function callServer($: Engine, name: string, input: Record<string, unknown>): Promise<Awaited<ReturnType<Engine['tool']['call']>>> {
   const order = serverPrefix ? [serverPrefix, ...SERVER_PREFIXES.filter((p) => p !== serverPrefix)] : [...SERVER_PREFIXES]
   let missing: unknown
   for (const prefix of order) {
@@ -133,7 +130,7 @@ async function callServer($: $, name: string, input: Record<string, unknown>): P
   throw missing
 }
 
-async function guardCheck($: $, runId: string, tool: string): Promise<Verdict> {
+async function guardCheck($: Engine, runId: string, tool: string): Promise<Verdict> {
   guardCallsInFlight++
   try {
     const r = await callServer($, 'guard_check', { run_id: runId, tool_name: tool })
@@ -149,13 +146,48 @@ async function guardCheck($: $, runId: string, tool: string): Promise<Verdict> {
 /** A final message that may mean the run was stopped (Quarterdeck decides which, in report_run_end). */
 const STOPPED = /limit|rate|quota|credits|overloaded|api error/i
 
-async function reportRunEnd($: $, runId: string, answer: string, reason: string, usage?: unknown): Promise<void> {
+async function reportRunEnd($: Engine, runId: string, answer: string, reason: string, usage?: unknown): Promise<void> {
   guardCallsInFlight++
   try {
     await callServer($, 'report_run_end', { run_id: runId, answer, reason, ...(usage ? { usage } : {}) })
   } finally {
     guardCallsInFlight--
   }
+}
+
+// ── What a run is doing ───────────────────────────────────────────────────────
+
+const LABEL_DETAIL = 80
+const firstLine = (v: unknown) => (typeof v === 'string' ? v.trim().split(/\r?\n/)[0]!.replace(/\s+/g, ' ') : '')
+const clipText = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+
+/**
+ * A tool call as the Goals pane shows it: `Bash: npm test`, `Edit: src/a.ts`,
+ * `Gmail search_threads`. Only the start of a command, path, address or query.
+ */
+export function toolLabel(tool: string, input: unknown): string {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool)
+  if (mcp) {
+    const server = mcp[1]!.replace(/^claude_ai_/, '').replace(/^plugin_[^_]+_/, '').replace(/_/g, ' ')
+    return `${server} ${mcp[2]}`
+  }
+  const i = (input ?? {}) as Record<string, unknown>
+  const detail = firstLine(i.command) || firstLine(i.file_path) || firstLine(i.notebook_path) || firstLine(i.url) || firstLine(i.query) || firstLine(i.pattern)
+  return detail ? `${tool}: ${clipText(detail, LABEL_DETAIL)}` : tool
+}
+
+/** Progress reports, one at a time and in order; only a call's last one is waited for. */
+let progressQueue: Promise<unknown> = Promise.resolve()
+
+function reportProgress($: Engine, runId: string, event: 'tool' | 'waiting' | 'settled', label: string): Promise<unknown> {
+  return progressQueue = progressQueue.then(async () => {
+    guardCallsInFlight++
+    try {
+      await callServer($, 'run_progress', { run_id: runId, event, label })
+    } finally {
+      guardCallsInFlight--
+    }
+  }).catch(() => {})
 }
 
 /**
@@ -165,12 +197,15 @@ async function reportRunEnd($: $, runId: string, answer: string, reason: string,
 const GUARDED_QUARTERDECK = new Set(['unsubscribe_one_click'])
 const isGuardedQuarterdeck = (tool: string) => GUARDED_QUARTERDECK.has(serverTool(tool) ?? '')
 
-/** Fixed rules for a run's agent; null when the goal's guard or the session decides. */
-function fixedVerdict(tool: string) {
+/**
+ * Fixed rules for a run's agent: the reason a tool is refused, 'own' for
+ * Quarterdeck's own tools (no guard check), or null when the goal's guard decides.
+ */
+function fixedVerdict(tool: string): string | null {
   if (isGuardedQuarterdeck(tool)) return null
-  if (isHumanOnly(tool) || serverTool(tool) === 'run_goal' || tool.startsWith('mcp__quarterdeck-goals__')) return deny(HUMAN_ONLY_REASON)
-  if (tool === 'Agent') return deny('Goal runs work on their own; they do not start other agents.')
-  if (serverTool(tool) !== null || (tool as string) === 'SubagentHandback') return allow
+  if (isHumanOnly(tool) || serverTool(tool) === 'run_goal' || tool.startsWith('mcp__quarterdeck-goals__')) return HUMAN_ONLY_REASON
+  if (tool === 'Agent') return 'Goal runs work on their own; they do not start other agents.'
+  if (serverTool(tool) !== null || (tool as string) === 'SubagentHandback') return 'own'
   return null
 }
 
@@ -215,20 +250,20 @@ export const register: Register = (on) => {
     result: JSON.stringify({ guarded: true, runs: runIds.size, lastTurns }),
   })).catch(() => ({ result: JSON.stringify({ guarded: true }) }))
 
-  // Permission
+  // Permission. This hook only ever refuses or passes the check on: whether a
+  // tool may run is the person's own permission rules' to say, never this plugin's.
   on('tool.check', async ($, e, next) => {
     // This plugin's own guard check, in whichever loop the engine places it
-    if (OWN_CALLS.has(serverTool(e.tool) ?? '') && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return allow
+    if (OWN_CALLS.has(serverTool(e.tool) ?? '') && guardCallsInFlight > 0 && next.origin?.plugin === $.plugin.name) return next(e)
     const runId = await runIdFor($, e.agentId)
     if (runId) {
       const fixed = fixedVerdict(e.tool)
-      if (fixed) return fixed
-      if (e.tool_use_id && approvedCalls.delete(e.tool_use_id)) return allow
+      if (fixed !== null && fixed !== 'own') return { decision: 'deny', reason: fixed }
       return next(e)
     }
     const fromRunner = e.agentId === undefined && next.origin?.plugin === RUNNER_PLUGIN
-    if (fromRunner && isRunnerTool(e.tool)) return allow
-    if (isHumanOnly(e.tool)) return deny(HUMAN_ONLY_REASON)
+    if (fromRunner && isRunnerTool(e.tool)) return next(e)
+    if (isHumanOnly(e.tool)) return { decision: 'deny', reason: HUMAN_ONLY_REASON }
     return next(e)
   }).catch(($, e, next) => next(e))
 
@@ -238,13 +273,33 @@ export const register: Register = (on) => {
     const runId = await runIdFor($, e.agentId)
     if (!runId) return next(e)
     if ((e.tool as string) === 'SubagentHandback') return { result: { success: true, message: 'Report saved by Quarterdeck (end_run).' } } as never
-    if (serverTool(e.tool) !== null && !isGuardedQuarterdeck(e.tool)) return next({ ...e, run_scope: runId } as typeof e)
+    // A call that already carries its run goes on untouched: auto mode reviews a call
+    // before this hook, and refuses one whose input changes after its review
+    const scoped = (e as { run_scope?: unknown }).run_scope === runId
+    if (serverTool(e.tool) !== null && !isGuardedQuarterdeck(e.tool)) return scoped ? next(e) : next({ ...e, run_scope: runId } as typeof e)
     if (fixedVerdict(e.tool) === null) {
       const verdict = await guardCheck($, runId, e.tool)
       if (verdict.decision === 'deny') return { deny: verdict.reason ?? "Not allowed by the goal's autonomy." }
-      if (verdict.category) approvedCalls.add(e.tool_use_id)
     }
-    return serverTool(e.tool) !== null ? next({ ...e, run_scope: runId } as typeof e) : next(e)
+    // The pane's "Now:" line: the call starts, and once it has run or been refused,
+    // any permission wait on it is over (classic.PermissionRequest below marks one)
+    const label = toolLabel(e.tool, e)
+    void reportProgress($, runId, 'tool', label)
+    try {
+      return await (serverTool(e.tool) !== null && !scoped ? next({ ...e, run_scope: runId } as typeof e) : next(e))
+    } finally {
+      await reportProgress($, runId, 'settled', label)
+    }
+  }).catch(($, e, next) => next(e))
+
+  // A run's call is about to be put to the person (a permission prompt in the
+  // window, the Claude app or claude.ai/code): the pane says the run waits on them.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const r = await next(e)
+    const runId = await runIdFor($, e.agent_id)
+    // A settings hook that answered leaves nothing for the person to answer
+    if (runId && !(r as { decision?: unknown } | undefined)?.decision) void reportProgress($, runId, 'waiting', toolLabel(e.tool_name, e.tool_input))
+    return r
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {

@@ -1,5 +1,7 @@
-// Quarterdeck MCP server 0.18.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.19.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
+// Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
+const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
@@ -7110,7 +7112,11 @@ function runMigrations(db2) {
       output_tokens  INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
       cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-      model          TEXT
+      model          TEXT,
+      now_tool       TEXT,
+      now_tool_at    TEXT,
+      waiting_tool   TEXT,
+      waiting_since  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
 
@@ -7169,6 +7175,12 @@ function runMigrations(db2) {
   try {
     db2.exec("ALTER TABLE goal_runs ADD COLUMN model TEXT");
   } catch {
+  }
+  for (const col of ["now_tool", "now_tool_at", "waiting_tool", "waiting_since"]) {
+    try {
+      db2.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`);
+    } catch {
+    }
   }
   db2.exec(`
     CREATE TABLE IF NOT EXISTS goal_health (
@@ -7294,7 +7306,7 @@ var SCHEMA_VERSION;
 var init_migrate = __esm({
   "../core/src/migrate.ts"() {
     "use strict";
-    SCHEMA_VERSION = 2;
+    SCHEMA_VERSION = 3;
   }
 });
 
@@ -7637,7 +7649,11 @@ function insertRun(db2, planId, trigger, status = "queued", skipReason) {
     output_tokens: 0,
     cache_read_tokens: 0,
     cache_write_tokens: 0,
-    model: null
+    model: null,
+    now_tool: null,
+    now_tool_at: null,
+    waiting_tool: null,
+    waiting_since: null
   };
   db2.prepare(`
     INSERT INTO goal_runs (id, plan_id, trigger, status, session_id, summary, skip_reason, items_created, items_resolved, started_at, ended_at)
@@ -8714,6 +8730,16 @@ function reportRunEnd(db2, runId, input, now = /* @__PURE__ */ new Date()) {
   }
   return { outcome: "unchanged" };
 }
+function reportRunProgress(db2, runId, { event, tool }, now = /* @__PURE__ */ new Date()) {
+  const run = getRun(db2, runId);
+  if (!run || run.status !== "running") return { updated: false };
+  const at = now.toISOString();
+  if (event === "tool") updateRun(db2, runId, { now_tool: tool, now_tool_at: at });
+  else if (event === "waiting") updateRun(db2, runId, { now_tool: tool, now_tool_at: at, waiting_tool: tool, waiting_since: at });
+  else if (run.waiting_tool === tool) updateRun(db2, runId, { waiting_tool: null, waiting_since: null });
+  else return { updated: false };
+  return { updated: true };
+}
 var MODES, LIMIT, DEFAULT_HOLD_MS;
 var init_goal_changes = __esm({
   "../core/src/goal-changes.ts"() {
@@ -9004,14 +9030,24 @@ function describeEvent(e, itemGoal) {
 }
 function describeActivity({ goal, openRun, lastRun, events, items }) {
   if (openRun?.status === "running") {
+    if (openRun.waiting_tool && openRun.waiting_since) {
+      const tool2 = openRun.waiting_tool;
+      return { state: "running", text: `Waiting for your permission: ${tool2}`, at: openRun.waiting_since, waiting: { tool: tool2, since: openRun.waiting_since } };
+    }
     const goals = new Map(items.map((t) => [t.id, t.goal]));
+    let latest = null;
     for (const e of events) {
       if (e.created_at < openRun.started_at) break;
       if (e.actor !== "agent") continue;
       const text = describeEvent(e, (id) => goals.get(id) ?? null);
-      if (text) return { state: "running", text, at: e.created_at };
+      if (text) {
+        latest = { state: "running", text, at: e.created_at };
+        break;
+      }
     }
-    return { state: "running", text: "Starting: reading the brief", at: openRun.started_at };
+    const tool = openRun.now_tool && openRun.now_tool_at && openRun.now_tool_at >= openRun.started_at ? { state: "running", text: `Using ${openRun.now_tool}`, at: openRun.now_tool_at } : null;
+    if (tool && (!latest || tool.at > latest.at)) return tool;
+    return latest ?? { state: "running", text: "Starting: reading the brief", at: openRun.started_at };
   }
   if (openRun) return { state: "queued", text: `Queued (${openRun.trigger}) \u2014 starts within a minute while Claude Code is open`, at: openRun.started_at };
   if (goal.status === "paused") return { state: "paused", text: "Paused", at: null };
@@ -21874,6 +21910,11 @@ var ReportRunEndSchema = external_exports.object({
     model: external_exports.string().optional()
   }).optional().describe("The turn's token counts, added to the run")
 });
+var RunProgressSchema = external_exports.object({
+  run_id: external_exports.string(),
+  event: external_exports.enum(["tool", "waiting", "settled"]).describe("tool: a call starting; waiting: put to the person for a permission answer; settled: finished, allowed or refused"),
+  label: external_exports.string().trim().min(1).max(200).describe("The call, as the pane shows it (`Bash: npm test`)")
+});
 var DeleteMemorySchema = external_exports.object({
   goal_id: external_exports.string(),
   memory_id: external_exports.string()
@@ -21991,6 +22032,7 @@ var nextScheduledRun2 = (planId) => nextScheduledRun(db, planId);
 var reviveIfDone2 = (planId) => reviveIfDone(db, planId);
 var applyGoalChanges2 = (planId, changes) => applyGoalChanges(db, planId, changes);
 var reportRunEnd2 = (runId, input) => reportRunEnd(db, runId, input);
+var reportRunProgress2 = (runId, progress) => reportRunProgress(db, runId, progress);
 var listWatches2 = (planId) => listWatches(db, planId);
 var checkCommandWatch2 = (watchId) => checkCommandWatch(db, watchId);
 var getWatch2 = (watchId) => getWatch(db, watchId);
@@ -22793,7 +22835,7 @@ var RUNNER_USAGE = [
   "tmux session (Linux), which runs goals while no Claude Code window is open (the computer must be on",
   "and you logged in).",
   "",
-  "  install [--permission-mode <mode>]   Start it, and keep it running (a scheduled task; on Linux a systemd timer)",
+  "  install [--permission-mode <mode>]   Start it, and keep it running (a scheduled task; on Linux a systemd timer). The mode is auto unless given",
   "  uninstall                            Stop it and delete the scheduled task or timer",
   "  start [--permission-mode <mode>]     Start it now",
   "  stop                                 Stop it",
@@ -23034,6 +23076,10 @@ async function report_run_end(args) {
     record3(run.plan_id, run.plan_id, r.outcome === "held" ? "run_skipped" : "agent_failed", { run_id: run.id, ...r.hold && { hold_until: r.hold.until }, reason: input.answer.slice(0, 200) }, { via: "plugin" });
   }
   return r;
+}
+async function run_progress(args) {
+  const { run_id, event, label } = RunProgressSchema.parse(args);
+  return reportRunProgress2(run_id, { event, tool: label });
 }
 async function delete_goal(args) {
   const { goal_id } = DeleteGoalSchema.parse(args);
@@ -23337,7 +23383,8 @@ var TOOLS = [
     ["set_schedule", "Sets a goal's schedule (interval, cron, or none) for the human.", SetScheduleSchema, set_schedule],
     ["update_goal", "Changes a goal's name, objective, instructions, autonomy, tool rules, memory, watches or status, once the human has confirmed.", UpdateGoalSchema, update_goal],
     ["report_run_end", "Reports how a goal run's agent finished a turn: a usage limit skips the run and holds goal runs until the reset.", ReportRunEndSchema, report_run_end],
-    ["watch_report", "Records what a goal's tool watch answered when the plugin called its tool; something new queues a run.", WatchReportSchema, watch_report]
+    ["watch_report", "Records what a goal's tool watch answered when the plugin called its tool; something new queues a run.", WatchReportSchema, watch_report],
+    ["run_progress", "Records what a goal run's agent is doing: its latest tool call, or a call waiting for the person's permission answer.", RunProgressSchema, run_progress]
   ].map(([name, description, schema, handler]) => ({
     name,
     description: `${description} For the quarterdeck-goals plugin only: agents and the model must not call this.`,
@@ -23347,7 +23394,7 @@ var TOOLS = [
 ];
 var RUN_SCOPE = {
   type: "string",
-  description: "Set automatically for goal runs; leave it out."
+  description: "A goal run passes its run id here; anyone else leaves it out."
 };
 function withRunScopeProperty(schema) {
   const s = schema;

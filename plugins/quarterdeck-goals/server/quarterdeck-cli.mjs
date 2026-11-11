@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Quarterdeck MCP server 0.18.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.19.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
+// Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
+const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __esm = (fn, res) => function __init() {
@@ -319,7 +321,11 @@ function runMigrations(db) {
       output_tokens  INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
       cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-      model          TEXT
+      model          TEXT,
+      now_tool       TEXT,
+      now_tool_at    TEXT,
+      waiting_tool   TEXT,
+      waiting_since  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
 
@@ -378,6 +384,12 @@ function runMigrations(db) {
   try {
     db.exec("ALTER TABLE goal_runs ADD COLUMN model TEXT");
   } catch {
+  }
+  for (const col of ["now_tool", "now_tool_at", "waiting_tool", "waiting_since"]) {
+    try {
+      db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`);
+    } catch {
+    }
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS goal_health (
@@ -521,7 +533,7 @@ var init_migrate = __esm({
       "trg_goal_watches_update_revision",
       "trg_goal_watches_delete_revision"
     ];
-    SCHEMA_VERSION = 2;
+    SCHEMA_VERSION = 3;
   }
 });
 
@@ -879,7 +891,11 @@ function insertRun(db, planId, trigger, status2 = "queued", skipReason) {
     output_tokens: 0,
     cache_read_tokens: 0,
     cache_write_tokens: 0,
-    model: null
+    model: null,
+    now_tool: null,
+    now_tool_at: null,
+    waiting_tool: null,
+    waiting_since: null
   };
   db.prepare(`
     INSERT INTO goal_runs (id, plan_id, trigger, status, session_id, summary, skip_reason, items_created, items_resolved, started_at, ended_at)
@@ -2002,6 +2018,16 @@ function reportRunEnd(db, runId, input, now = /* @__PURE__ */ new Date()) {
   }
   return { outcome: "unchanged" };
 }
+function reportRunProgress(db, runId, { event, tool }, now = /* @__PURE__ */ new Date()) {
+  const run = getRun(db, runId);
+  if (!run || run.status !== "running") return { updated: false };
+  const at = now.toISOString();
+  if (event === "tool") updateRun(db, runId, { now_tool: tool, now_tool_at: at });
+  else if (event === "waiting") updateRun(db, runId, { now_tool: tool, now_tool_at: at, waiting_tool: tool, waiting_since: at });
+  else if (run.waiting_tool === tool) updateRun(db, runId, { waiting_tool: null, waiting_since: null });
+  else return { updated: false };
+  return { updated: true };
+}
 var MODES, LIMIT, DEFAULT_HOLD_MS;
 var init_goal_changes = __esm({
   "../core/src/goal-changes.ts"() {
@@ -2292,14 +2318,24 @@ function describeEvent(e, itemGoal) {
 }
 function describeActivity({ goal, openRun, lastRun, events, items }) {
   if (openRun?.status === "running") {
+    if (openRun.waiting_tool && openRun.waiting_since) {
+      const tool2 = openRun.waiting_tool;
+      return { state: "running", text: `Waiting for your permission: ${tool2}`, at: openRun.waiting_since, waiting: { tool: tool2, since: openRun.waiting_since } };
+    }
     const goals = new Map(items.map((t) => [t.id, t.goal]));
+    let latest = null;
     for (const e of events) {
       if (e.created_at < openRun.started_at) break;
       if (e.actor !== "agent") continue;
       const text = describeEvent(e, (id) => goals.get(id) ?? null);
-      if (text) return { state: "running", text, at: e.created_at };
+      if (text) {
+        latest = { state: "running", text, at: e.created_at };
+        break;
+      }
     }
-    return { state: "running", text: "Starting: reading the brief", at: openRun.started_at };
+    const tool = openRun.now_tool && openRun.now_tool_at && openRun.now_tool_at >= openRun.started_at ? { state: "running", text: `Using ${openRun.now_tool}`, at: openRun.now_tool_at } : null;
+    if (tool && (!latest || tool.at > latest.at)) return tool;
+    return latest ?? { state: "running", text: "Starting: reading the brief", at: openRun.started_at };
   }
   if (openRun) return { state: "queued", text: `Queued (${openRun.trigger}) \u2014 starts within a minute while Claude Code is open`, at: openRun.started_at };
   if (goal.status === "paused") return { state: "paused", text: "Paused", at: null };
@@ -2663,6 +2699,7 @@ __export(src_exports, {
   releaseWatchEvents: () => releaseWatchEvents,
   removeWatch: () => removeWatch,
   reportRunEnd: () => reportRunEnd,
+  reportRunProgress: () => reportRunProgress,
   reportToolWatch: () => reportToolWatch,
   reviveIfDone: () => reviveIfDone,
   runChecks: () => runChecks,
@@ -2757,6 +2794,14 @@ var TMUX_SOCKET = "quarterdeck";
 var TMUX_SESSION = "quarterdeck-goals";
 var ENSURE_MINUTES = 5;
 var PERMISSION_MODES = ["acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"];
+var DEFAULT_PERMISSION_MODE = "auto";
+var ASKING_MODES = ["manual", "plan"];
+var OWN_TOOL_RULES = ["mcp__plugin_quarterdeck-goals_quarterdeck", "mcp__quarterdeck"];
+function modeWarning(permissionMode) {
+  if (!permissionMode) return `it has no permission mode of its own, so it uses your default; if that one asks before a tool runs, its runs wait with nobody to answer`;
+  if (ASKING_MODES.includes(permissionMode)) return `its permission mode is "${permissionMode}", which asks before a tool runs, and nobody is there to answer (a prompt does reach the Claude app on your phone)`;
+  return null;
+}
 function liveState(deps) {
   const state = deps.readState();
   return state && state.pid > 0 && deps.pidAlive(state.pid) ? state : null;
@@ -2784,7 +2829,7 @@ function statusText(s) {
   return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? " It started with an older Quarterdeck and restarts at the next check with no run going." : ""}`;
 }
 function startArgs(sessionId, permissionMode) {
-  return ["--remote-control", SESSION_NAME, "--name", SESSION_NAME, "--session-id", sessionId, ...permissionMode ? ["--permission-mode", permissionMode] : []];
+  return ["--remote-control", SESSION_NAME, "--name", SESSION_NAME, "--session-id", sessionId, "--allowedTools", OWN_TOOL_RULES.join(","), ...permissionMode ? ["--permission-mode", permissionMode] : []];
 }
 function checkMode(permissionMode) {
   if (permissionMode && !PERMISSION_MODES.includes(permissionMode)) throw new Error(`Unknown permission mode "${permissionMode}" (one of: ${PERMISSION_MODES.join(", ")}).`);
@@ -2825,7 +2870,7 @@ const dir = dirname(fileURLToPath(import.meta.url))
 let out
 try {
   const cli = readFileSync(join(dir, 'cli-path'), 'utf8').trim()
-  out = execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', cli, 'runner', 'ensure'], { encoding: 'utf8', windowsHide: true })
+  out = execFileSync(process.execPath, [cli, 'runner', 'ensure'], { encoding: 'utf8', windowsHide: true })
 } catch (err) {
   out = 'failed: ' + (err && err.stderr ? String(err.stderr) : '') + (err && err.message ? err.message : String(err))
 }
@@ -2920,6 +2965,8 @@ function install(deps, opts = {}) {
   if (!SUPPORTED.includes(deps.platform)) throw new Error("The standing session is set up for Windows and Linux only so far.");
   if (!deps.cliPath) throw new Error("Run this from the built CLI: node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install (after `npm run build --prefix mcp`).");
   checkMode(opts.permissionMode);
+  const given = opts.permissionMode ?? deps.readState()?.permissionMode;
+  const permissionMode = given ?? DEFAULT_PERMISSION_MODE;
   const launcher = join2(deps.dir, "launch.mjs");
   deps.writeFile(launcher, LAUNCHER);
   deps.writeFile(join2(deps.dir, "cli-path"), deps.cliPath);
@@ -2937,7 +2984,15 @@ function install(deps, opts = {}) {
     deps.systemctl(["enable", "--now", `${UNIT_NAME}.timer`]);
     lines.push(`Created the systemd user timer ${UNIT_NAME}.timer: it checks at login and every ${ENSURE_MINUTES} minutes that the standing session is running.`);
   }
-  lines.push(startByTask(deps, opts).text);
+  const started = startByTask(deps, { permissionMode });
+  lines.push(started.text);
+  const state = deps.readState();
+  if (!started.started && state && state.permissionMode !== permissionMode) {
+    deps.writeState({ ...state, permissionMode });
+    lines.push(`It keeps its current permission mode until it next restarts (quarterdeck runner stop, then start).`);
+  }
+  lines.push(`Permission mode: ${permissionMode}${given ? "" : " (the default: nobody is at this session to answer a permission prompt, so Claude Code decides each tool call itself)"}. Change it with: quarterdeck runner install --permission-mode <mode>`);
+  lines.push(`Quarterdeck's own tools are allowed in that session (--allowedTools), so a run can always read its brief and report.`);
   lines.push("Goals now run while this computer is on and you are logged in, with no Claude Code window open. Remove with: quarterdeck runner uninstall");
   if (deps.platform === "linux" && deps.wsl) lines.push(WSL_WARNING);
   else if (deps.platform === "linux") lines.push("To keep it running after you log out too: loginctl enable-linger");
@@ -3199,7 +3254,7 @@ var RUNNER_USAGE = [
   "tmux session (Linux), which runs goals while no Claude Code window is open (the computer must be on",
   "and you logged in).",
   "",
-  "  install [--permission-mode <mode>]   Start it, and keep it running (a scheduled task; on Linux a systemd timer)",
+  "  install [--permission-mode <mode>]   Start it, and keep it running (a scheduled task; on Linux a systemd timer). The mode is auto unless given",
   "  uninstall                            Stop it and delete the scheduled task or timer",
   "  start [--permission-mode <mode>]     Start it now",
   "  stop                                 Stop it",
@@ -3492,6 +3547,8 @@ async function checkRunner(o, deps) {
     if (d.platform === "linux" && d.wsl) return warn(name, `${statusText(s)} But ${WSL_WARNING.replace(/^This is WSL, which/, "WSL")}`, "Run `quarterdeck runner uninstall` here and `quarterdeck runner install` in a Windows terminal.");
     if (s.waiting) return warn(name, "running but waiting to be told its folder is safe, so no goal runs in it", ATTACH_HINT);
     if (!task) return warn(name, `${statusText(s)} But ${keepAliveName(d.platform)} is missing, so nothing restarts it after a logon or an update`, "Run `quarterdeck runner install`.");
+    const mode = modeWarning(d.readState()?.permissionMode);
+    if (mode) return warn(name, `${statusText(s)} But ${mode}`, "Run `quarterdeck runner install` (it uses auto mode), or `quarterdeck runner install --permission-mode <mode>` for another.");
     return ok(name, statusText(s));
   } catch (e) {
     return warn(name, `could not be checked: ${firstLine2(e.message)}`, "Check that `claude agents --json` works in a terminal.");
