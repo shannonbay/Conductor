@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Quarterdeck MCP server 0.14.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.15.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -507,11 +507,11 @@ function setClause(fields) {
     values: entries.map(([, v]) => v)
   };
 }
-function listPlans(db, status = "active") {
-  if (status === "all") {
+function listPlans(db, status2 = "active") {
+  if (status2 === "all") {
     return db.prepare("SELECT * FROM plans ORDER BY updated_at DESC").all();
   }
-  return db.prepare("SELECT * FROM plans WHERE status = ? ORDER BY updated_at DESC").all(status);
+  return db.prepare("SELECT * FROM plans WHERE status = ? ORDER BY updated_at DESC").all(status2);
 }
 function getPlan(db, id) {
   return db.prepare("SELECT * FROM plans WHERE id = ?").get(id);
@@ -763,8 +763,8 @@ function getGoal(db, planId) {
   const row = db.prepare("SELECT * FROM goals WHERE plan_id = ?").get(planId);
   return row ? deserializeGoal(row) : void 0;
 }
-function listGoals(db, status) {
-  const rows = status ? db.prepare("SELECT * FROM goals WHERE status = ?").all(status) : db.prepare("SELECT * FROM goals").all();
+function listGoals(db, status2) {
+  const rows = status2 ? db.prepare("SELECT * FROM goals WHERE status = ?").all(status2) : db.prepare("SELECT * FROM goals").all();
   return rows.map((r) => ({ plan: getPlan(db, r.plan_id), goal: deserializeGoal(r) })).filter((g) => g.plan);
 }
 function updateGoal(db, planId, fields) {
@@ -805,13 +805,13 @@ function setIntervalTrigger(db, planId, config) {
     db.prepare("INSERT INTO goal_triggers (id, plan_id, kind, config, enabled) VALUES (?, ?, ?, ?, 1)").run(newId("trg"), planId, "interval", JSON.stringify(config));
   }
 }
-function insertRun(db, planId, trigger, status = "queued", skipReason) {
+function insertRun(db, planId, trigger, status2 = "queued", skipReason) {
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const run = {
     id: newId("run"),
     plan_id: planId,
     trigger,
-    status,
+    status: status2,
     session_id: null,
     cc_session_id: null,
     holder: null,
@@ -821,7 +821,7 @@ function insertRun(db, planId, trigger, status = "queued", skipReason) {
     items_created: 0,
     items_resolved: 0,
     started_at: now,
-    ended_at: status === "skipped" ? now : null,
+    ended_at: status2 === "skipped" ? now : null,
     input_tokens: 0,
     output_tokens: 0,
     cache_read_tokens: 0,
@@ -1471,10 +1471,10 @@ function finishIfDone(db, planId) {
   updateGoal(db, planId, { status: "retired", next_run_at: null });
   return true;
 }
-function failRun(db, runId, status, reason) {
+function failRun(db, runId, status2, reason) {
   const run = getRun(db, runId);
   if (!run || run.status !== "running" && run.status !== "queued") return;
-  updateRun(db, runId, { status, ended_at: (/* @__PURE__ */ new Date()).toISOString(), summary: run.summary ?? reason });
+  updateRun(db, runId, { status: status2, ended_at: (/* @__PURE__ */ new Date()).toISOString(), summary: run.summary ?? reason });
 }
 function archiveResolved(db, planId, now = /* @__PURE__ */ new Date()) {
   const goal = getGoal(db, planId);
@@ -1487,12 +1487,12 @@ function archiveResolved(db, planId, now = /* @__PURE__ */ new Date()) {
 }
 function withinActiveHours(activeHours, date) {
   if (!activeHours) return true;
-  const [start, end] = activeHours.split("-").map((s) => {
+  const [start2, end] = activeHours.split("-").map((s) => {
     const [h, m] = s.split(":").map(Number);
     return h * 60 + m;
   });
   const minutes = date.getHours() * 60 + date.getMinutes();
-  return start <= end ? minutes >= start && minutes < end : minutes >= start || minutes < end;
+  return start2 <= end ? minutes >= start2 && minutes < end : minutes >= start2 || minutes < end;
 }
 function decideTick(db, planId, now = /* @__PURE__ */ new Date()) {
   const goal = getGoal(db, planId);
@@ -1747,6 +1747,10 @@ function takeLease(db, holder, now = /* @__PURE__ */ new Date()) {
 function releaseLease(db, holder) {
   db.prepare("DELETE FROM scheduler_lease WHERE name = ? AND holder = ?").run(LEASE_NAME, holder);
 }
+function leaseHolder(db, now = /* @__PURE__ */ new Date()) {
+  const row = db.prepare("SELECT holder FROM scheduler_lease WHERE name = ? AND expires_at > ?").get(LEASE_NAME, now.toISOString());
+  return row?.holder ?? null;
+}
 function goalRunPrompt(p) {
   return [
     `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
@@ -1998,7 +2002,7 @@ function describeActivity({ goal, openRun, lastRun, events, items }) {
   if (summary) return { state: "idle", text: `Last run: ${summary}`, at: null };
   return { state: "idle", text: "Waiting for its first run", at: null };
 }
-function buildOverview(db, detail = "all") {
+function buildOverview(db, detail = "all", standingSession = null) {
   const all = listGoals(db);
   const done = all.filter(({ goal }) => goal.status === "retired" && goal.one_off).sort((a, b) => (b.goal.last_run_at ?? "").localeCompare(a.goal.last_run_at ?? "")).slice(0, DONE);
   const goals = [...all.filter(({ goal }) => goal.status !== "retired"), ...done].sort((a, b) => a.plan.name.localeCompare(b.plan.name)).map(({ plan, goal }) => {
@@ -2069,10 +2073,11 @@ function buildOverview(db, detail = "all") {
       tool_map: {}
     };
   });
-  return { goals, hold: getRunHold(db), ...schemaOutdated(db) ? { outdated: true } : {} };
+  const standing = standingSession !== null && leaseHolder(db) === standingSession;
+  return { goals, hold: getRunHold(db), ...schemaOutdated(db) ? { outdated: true } : {}, ...standing ? { standing: true } : {} };
 }
-function overviewWithEtag(db, detail = "all") {
-  const body = JSON.stringify(buildOverview(db, detail));
+function overviewWithEtag(db, detail = "all", standingSession = null) {
+  const body = JSON.stringify(buildOverview(db, detail, standingSession));
   return { body, etag: `"${createHash2("sha256").update(body).digest("base64url").slice(0, 27)}"` };
 }
 var RUNS, OPEN_ITEMS, HEALTH, MEMORY, CLIP, DONE, ACTIVITY_EVENTS, PROMOTE_AFTER, oneLine, str, NEEDS_YOU, CARD_TEXT;
@@ -2087,6 +2092,7 @@ var init_goal_overview = __esm({
     init_health();
     init_goal_changes();
     init_migrate();
+    init_goal_tick();
     RUNS = 5;
     OPEN_ITEMS = 10;
     HEALTH = 20;
@@ -2283,6 +2289,7 @@ __export(src_exports, {
   isProposal: () => isProposal,
   isUsageLimit: () => isUsageLimit,
   itemView: () => itemView,
+  leaseHolder: () => leaseHolder,
   listGoals: () => listGoals,
   listHealth: () => listHealth,
   listMemory: () => listMemory,
@@ -2373,24 +2380,357 @@ var init_src = __esm({
 });
 
 // src/doctor.ts
-import { existsSync as existsSync3, readFileSync, readdirSync, statSync } from "fs";
-import { homedir as homedir2 } from "os";
-import { dirname as dirname2, join as join2, resolve } from "path";
+import { existsSync as existsSync4, readFileSync as readFileSync2, readdirSync, statSync as statSync2 } from "fs";
+import { homedir as homedir3 } from "os";
+import { dirname as dirname3, join as join3, resolve } from "path";
+import { fileURLToPath as fileURLToPath2 } from "url";
+
+// src/runner-session.ts
+import { execFileSync } from "child_process";
+import { randomUUID as randomUUID4 } from "crypto";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { homedir as homedir2, userInfo } from "os";
+import { dirname as dirname2, join as join2 } from "path";
 import { fileURLToPath } from "url";
+var SESSION_NAME = "Quarterdeck goals";
+var TASK_NAME = "Quarterdeck goals runner";
+var ENSURE_MINUTES = 5;
+var PERMISSION_MODES = ["acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"];
+function liveState(deps) {
+  const state = deps.readState();
+  return state && state.pid > 0 && deps.pidAlive(state.pid) ? state : null;
+}
+function status(deps) {
+  const live = liveState(deps);
+  const holder = deps.leaseHolder();
+  return {
+    running: live !== null,
+    sessionId: live?.sessionId ?? null,
+    holdsLease: live !== null && holder === live.sessionId,
+    leaseElsewhere: holder !== null && holder !== live?.sessionId,
+    stale: live !== null && live.build !== deps.build
+  };
+}
+function statusText(s) {
+  if (!s.running) return "The standing session is not running. Start it with: quarterdeck runner start";
+  const who = s.holdsLease ? "it is the session starting goal runs" : s.leaseElsewhere ? "an open Claude Code window is starting goal runs now; it takes over when that closes" : "no session has started goal runs in the last minutes (it takes over within 90 seconds)";
+  return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? " It started with an older Quarterdeck and restarts at the next check with no run going." : ""}`;
+}
+function startArgs(sessionId, permissionMode) {
+  return ["--remote-control", SESSION_NAME, "--name", SESSION_NAME, "--session-id", sessionId, ...permissionMode ? ["--permission-mode", permissionMode] : []];
+}
+function checkMode(permissionMode) {
+  if (permissionMode && !PERMISSION_MODES.includes(permissionMode)) throw new Error(`Unknown permission mode "${permissionMode}" (one of: ${PERMISSION_MODES.join(", ")}).`);
+}
+function start(deps, opts = {}) {
+  const permissionMode = opts.permissionMode ?? deps.readState()?.permissionMode;
+  checkMode(permissionMode);
+  const live = liveState(deps);
+  if (live) return { started: false, sessionId: live.sessionId, text: `The standing session is already running (${live.sessionId}).` };
+  const sessionId = deps.newId();
+  const pid = deps.spawnSession(startArgs(sessionId, permissionMode));
+  deps.writeState({ sessionId, pid, build: deps.build, ...permissionMode ? { permissionMode } : {} });
+  return { started: true, sessionId, text: `Started the standing session (${sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` };
+}
+function stop(deps) {
+  const live = liveState(deps);
+  if (!live) return { stopped: false, text: "The standing session was not running." };
+  deps.killTree(live.pid);
+  deps.writeState({ ...live, pid: 0 });
+  return { stopped: true, text: "Stopped the standing session." };
+}
+function ensure(deps) {
+  const live = liveState(deps);
+  if (!live) return { action: "started", text: start(deps).text };
+  if (live.build === deps.build) return { action: "running", text: `The standing session is running (${live.sessionId}).` };
+  if (deps.runsRunning() > 0) return { action: "restart-waits", text: "Quarterdeck was updated; the standing session restarts once no goal run is going." };
+  stop(deps);
+  const r = start(deps);
+  return { action: "restarted", text: `Quarterdeck was updated: restarted the standing session (${r.sessionId}).` };
+}
+var LAUNCHER = `// Written by \`quarterdeck runner install\`. Runs \`quarterdeck runner ensure\` with the current Quarterdeck.
+import { execFileSync } from 'child_process'
+import { appendFileSync, readFileSync } from 'fs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
+
+const dir = dirname(fileURLToPath(import.meta.url))
+let out
+try {
+  const cli = readFileSync(join(dir, 'cli-path'), 'utf8').trim()
+  out = execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', cli, 'runner', 'ensure'], { encoding: 'utf8', windowsHide: true })
+} catch (err) {
+  out = 'failed: ' + (err && err.stderr ? String(err.stderr) : '') + (err && err.message ? err.message : String(err))
+}
+// One line a check, except the usual "is running"
+if (!/^The standing session is running/.test(out.trim())) appendFileSync(join(dir, 'ensure.log'), new Date().toISOString() + ' ' + out.trim().replace(/\\s+/g, ' ') + '\\n')
+`;
+var xml = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function taskXml(p) {
+  const start2 = new Date((p.now ?? /* @__PURE__ */ new Date()).getTime() - 864e5).toISOString().slice(0, 19);
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Keeps the Quarterdeck standing session running, so goals run with no Claude Code window open. Remove with: quarterdeck runner uninstall</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <UserId>${xml(p.user)}</UserId>
+      <Delay>PT1M</Delay>
+    </LogonTrigger>
+    <TimeTrigger>
+      <Repetition>
+        <Interval>PT${ENSURE_MINUTES}M</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>${start2}</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>${xml(p.user)}</UserId>
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <Hidden>true</Hidden>
+    <ExecutionTimeLimit>PT5M</ExecutionTimeLimit>
+    <Enabled>true</Enabled>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>conhost.exe</Command>
+      <Arguments>--headless "${xml(p.node)}" "${xml(p.launcher)}"</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+`;
+}
+function install(deps, opts = {}) {
+  if (deps.platform !== "win32") throw new Error("The standing session is set up for Windows only so far (it needs a hidden console and Task Scheduler).");
+  if (!deps.cliPath) throw new Error("Run this from the built CLI: node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install (after `npm run build --prefix mcp`).");
+  const launcher = join2(deps.dir, "launch.mjs");
+  deps.writeFile(launcher, LAUNCHER);
+  deps.writeFile(join2(deps.dir, "cli-path"), deps.cliPath);
+  const file = join2(deps.dir, "task.xml");
+  deps.writeFile(file, "\uFEFF" + taskXml({ user: deps.user, node: deps.node, launcher }), "utf16le");
+  deps.schtasks(["/create", "/tn", TASK_NAME, "/xml", file, "/f"]);
+  const lines = [
+    `Created the scheduled task "${TASK_NAME}": it checks at logon and every ${ENSURE_MINUTES} minutes that the standing session is running.`,
+    startByTask(deps, opts).text
+  ];
+  lines.push("Goals now run while this computer is on and you are logged in, with no Claude Code window open. Remove with: quarterdeck runner uninstall");
+  return lines.join("\n");
+}
+function startByTask(deps, opts = {}) {
+  checkMode(opts.permissionMode);
+  const live = liveState(deps);
+  if (live) return { started: false, sessionId: live.sessionId, text: `The standing session is already running (${live.sessionId}).` };
+  if (opts.permissionMode) deps.writeState({ sessionId: deps.readState()?.sessionId ?? "", pid: 0, build: deps.build, permissionMode: opts.permissionMode });
+  deps.schtasks(["/run", "/tn", TASK_NAME]);
+  let made = null;
+  for (let i = 0; i < 40 && !made; i++) {
+    deps.sleep(500);
+    made = liveState(deps);
+  }
+  if (!made) throw new Error(`The scheduled task ran but no session appeared. See ${join2(deps.dir, "ensure.log")}.`);
+  return { started: true, sessionId: made.sessionId, text: `Started the standing session (${made.sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` };
+}
+function uninstall(deps) {
+  const lines = [];
+  if (deps.platform === "win32") {
+    try {
+      deps.schtasks(["/delete", "/tn", TASK_NAME, "/f"]);
+      lines.push(`Deleted the scheduled task "${TASK_NAME}".`);
+    } catch {
+      lines.push(`There was no scheduled task "${TASK_NAME}".`);
+    }
+  }
+  deps.removeFile(join2(deps.dir, "launch.mjs"));
+  deps.removeFile(join2(deps.dir, "task.xml"));
+  lines.push(stop(deps).text);
+  return lines.join("\n");
+}
+function taskInstalled(deps) {
+  if (deps.platform !== "win32") return false;
+  try {
+    deps.schtasks(["/query", "/tn", TASK_NAME]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function runnerDir(home = homedir2()) {
+  return join2(home, ".quarterdeck", "runner");
+}
+function currentBuild(scriptDir = dirname2(fileURLToPath(import.meta.url))) {
+  const plugin = [join2(scriptDir, ".."), join2(scriptDir, "..", "..", "plugins", "quarterdeck-goals")].find((d) => existsSync3(join2(d, ".claude-plugin", "plugin.json")));
+  if (!plugin) return "unknown";
+  let version = "unknown";
+  try {
+    version = String(JSON.parse(readFileSync(join2(plugin, ".claude-plugin", "plugin.json"), "utf8")).version);
+  } catch {
+  }
+  const bundle = join2(plugin, "server", "quarterdeck-mcp.mjs");
+  return existsSync3(bundle) ? `${version}+${Math.round(statSync(bundle).mtimeMs)}` : version;
+}
+function sessionEnv() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (/^CLAUDE(CODE$|_CODE_|_PID$|_EFFORT$)/.test(key)) delete env[key];
+  return env;
+}
+async function realDeps() {
+  const core = await Promise.resolve().then(() => (init_src(), src_exports));
+  const dir = runnerDir();
+  mkdirSync2(dir, { recursive: true });
+  const stateFile = join2(dir, "state.json");
+  const withDb = (fn) => {
+    const db = core.openDatabase(core.defaultDbPath());
+    try {
+      return fn(db);
+    } finally {
+      db.close();
+    }
+  };
+  const script = process.argv[1] ?? "";
+  return {
+    dir,
+    build: currentBuild(),
+    // conhost --headless gives `claude` a console with no window. Started through PowerShell's
+    // Start-Process: started by Node's spawn (detached or not, any stdio) it exits within seconds (seen Nov 2026)
+    spawnSession: (args) => {
+      if (process.platform !== "win32") throw new Error("The standing session is set up for Windows only so far (it needs a hidden console).");
+      const claude = execFileSync("where.exe", ["claude"], { encoding: "utf8", windowsHide: true }).split(/\r?\n/)[0].trim();
+      const quote = (a) => /[\s"]/.test(a) ? `"${a}"` : a;
+      const ps = (s) => `'${s.replace(/'/g, "''")}'`;
+      const line = ["--headless", quote(claude), ...args.map(quote)].join(" ");
+      const out = execFileSync("powershell.exe", [
+        "-NoProfile",
+        "-NonInteractive",
+        "-Command",
+        `(Start-Process -FilePath conhost.exe -ArgumentList ${ps(line)} -WorkingDirectory ${ps(dir)} -WindowStyle Hidden -PassThru).Id`
+      ], { encoding: "utf8", windowsHide: true, env: sessionEnv(), stdio: ["ignore", "pipe", "pipe"] });
+      const pid = Number(out.trim());
+      if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Could not start the hidden console (conhost.exe): ${out.trim().slice(0, 200)}`);
+      return pid;
+    },
+    pidAlive: (pid) => {
+      try {
+        if (process.platform !== "win32") {
+          process.kill(pid, 0);
+          return true;
+        }
+        return /conhost\.exe/i.test(execFileSync("tasklist.exe", ["/fi", `PID eq ${pid}`, "/fo", "csv", "/nh"], { encoding: "utf8", windowsHide: true }));
+      } catch {
+        return false;
+      }
+    },
+    killTree: (pid) => {
+      try {
+        if (process.platform === "win32") execFileSync("taskkill.exe", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
+        else process.kill(pid);
+      } catch {
+      }
+    },
+    newId: () => randomUUID4(),
+    runsRunning: () => withDb((db) => db.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get().n),
+    leaseHolder: () => withDb((db) => core.leaseHolder(db)),
+    readState: () => {
+      try {
+        return JSON.parse(readFileSync(stateFile, "utf8"));
+      } catch {
+        return null;
+      }
+    },
+    writeState: (state) => {
+      if (state) writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\n");
+      else rmSync(stateFile, { force: true });
+    },
+    platform: process.platform,
+    insideClaudeCode: process.env.CLAUDECODE === "1",
+    cliPath: /quarterdeck-cli\.mjs$/.test(script) ? script : null,
+    user: process.platform === "win32" && process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${userInfo().username}` : userInfo().username,
+    node: process.execPath,
+    writeFile: (path, content, encoding) => writeFileSync(path, content, encoding ?? "utf8"),
+    removeFile: (path) => rmSync(path, { force: true }),
+    schtasks: (args) => execFileSync("schtasks.exe", args, { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }),
+    sleep: (ms) => {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+    }
+  };
+}
+var RUNNER_USAGE = [
+  "Usage: quarterdeck runner <command>",
+  "",
+  "The standing session: a Claude Code session in a hidden console with Remote Control on, which runs",
+  "goals while no Claude Code window is open (the computer must be on and you logged in).",
+  "",
+  "  install [--permission-mode <mode>]   Start it, and keep it running with a scheduled task",
+  "  uninstall                            Stop it and delete the scheduled task",
+  "  start [--permission-mode <mode>]     Start it now",
+  "  stop                                 Stop it",
+  "  status                               Whether it is running and starting goal runs",
+  "  ensure                               Start it if it is missing; restart it after an update"
+].join("\n");
+async function runnerCommand(args, deps) {
+  const [command2, ...rest] = args;
+  if (!command2 || command2 === "help" || command2 === "--help") return { text: RUNNER_USAGE, code: 0 };
+  const at = rest.indexOf("--permission-mode");
+  const permissionMode = at >= 0 ? rest[at + 1] : void 0;
+  try {
+    const d = deps ?? await realDeps();
+    switch (command2) {
+      case "install":
+        return { text: install(d, { permissionMode }), code: 0 };
+      case "uninstall":
+        return { text: uninstall(d), code: 0 };
+      case "start": {
+        if (d.platform === "win32" && taskInstalled(d)) return { text: startByTask(d, { permissionMode }).text, code: 0 };
+        const r = start(d, { permissionMode });
+        const warning = r.started && d.insideClaudeCode ? "\nStarted from inside Claude Code, so it may stop when this window closes. Run `quarterdeck runner install` (or start it from a terminal of its own) to keep it." : "";
+        return { text: r.text + warning, code: 0 };
+      }
+      case "stop":
+        return { text: stop(d).text, code: 0 };
+      case "status": {
+        const s = status(d);
+        return { text: statusText(s), code: s.running ? 0 : 1 };
+      }
+      case "ensure":
+        return { text: ensure(d).text, code: 0 };
+      default:
+        return { text: RUNNER_USAGE, code: 1 };
+    }
+  } catch (err) {
+    return { text: `quarterdeck runner: ${firstLine(err)}`, code: 1 };
+  }
+}
+function firstLine(err) {
+  return (err instanceof Error ? err.message : String(err)).trim().split("\n")[0];
+}
+
+// src/doctor.ts
 function defaultOptions() {
   return {
-    repoRoot: findRepoRoot(dirname2(fileURLToPath(import.meta.url))),
+    repoRoot: findRepoRoot(dirname3(fileURLToPath2(import.meta.url))),
     cwd: process.cwd(),
-    home: homedir2(),
+    home: homedir3(),
     env: process.env,
     nodeVersion: process.versions.node,
     fetchTimeoutMs: 2e3
   };
 }
 function findRepoRoot(from) {
-  for (let dir = from; ; dir = dirname2(dir)) {
-    if (existsSync3(join2(dir, "core", "src")) && existsSync3(join2(dir, "mcp", "src"))) return dir;
-    if (dirname2(dir) === dir) return resolve(from, "..", "..");
+  for (let dir = from; ; dir = dirname3(dir)) {
+    if (existsSync4(join3(dir, "core", "src")) && existsSync4(join3(dir, "mcp", "src"))) return dir;
+    if (dirname3(dir) === dir) return resolve(from, "..", "..");
   }
 }
 var PLUGIN = "quarterdeck-goals@quarterdeck";
@@ -2407,7 +2747,7 @@ async function checkDatabase(o) {
   try {
     core = await Promise.resolve().then(() => (init_src(), src_exports));
   } catch (e) {
-    return [fail("Database", `could not load @quarterdeck/core: ${firstLine(e.message)}`, "Run `npm install` and `npm run build --prefix core` from the repo root.")];
+    return [fail("Database", `could not load @quarterdeck/core: ${firstLine2(e.message)}`, "Run `npm install` and `npm run build --prefix core` from the repo root.")];
   }
   const path = core.defaultDbPath(o.env, o.home);
   try {
@@ -2440,33 +2780,33 @@ async function checkDatabase(o) {
     }
   } catch (e) {
     return [
-      fail("Database", `cannot open ${path}: ${firstLine(e.message)}`, "Check the path is writable, or set QUARTERDECK_DB to a writable file.")
+      fail("Database", `cannot open ${path}: ${firstLine2(e.message)}`, "Check the path is writable, or set QUARTERDECK_DB to a writable file.")
     ];
   }
 }
 function checkBuild(o, pkg) {
   const name = `${pkg}/ build`;
-  const srcDir = join2(o.repoRoot, pkg, "src");
-  const entry = join2(o.repoRoot, pkg, "dist", "index.js");
-  if (!existsSync3(srcDir)) return ok(name, "not a Quarterdeck checkout (installed plugin) \u2014 skipped");
-  if (!existsSync3(entry)) return fail(name, `${pkg}/dist/index.js is missing`, `Run \`npm run build --prefix ${pkg}\`.`);
+  const srcDir = join3(o.repoRoot, pkg, "src");
+  const entry = join3(o.repoRoot, pkg, "dist", "index.js");
+  if (!existsSync4(srcDir)) return ok(name, "not a Quarterdeck checkout (installed plugin) \u2014 skipped");
+  if (!existsSync4(entry)) return fail(name, `${pkg}/dist/index.js is missing`, `Run \`npm run build --prefix ${pkg}\`.`);
   const newestSrc = newestMtime(srcDir);
-  const built = statSync(entry).mtimeMs;
+  const built = statSync2(entry).mtimeMs;
   return newestSrc > built + 1e3 ? warn(name, "source files changed since the last build", `Run \`npm run build --prefix ${pkg}\`${pkg === "mcp" ? ", then reconnect the server with /mcp" : ""}.`) : ok(name, "up to date");
 }
 function checkBundle(o) {
   const name = "Plugin server bundle";
-  const srcDir = join2(o.repoRoot, "mcp", "src");
-  const bundle = join2(o.repoRoot, "plugins", "quarterdeck-goals", "server", "quarterdeck-mcp.mjs");
-  if (!existsSync3(srcDir)) return ok(name, "not a Quarterdeck checkout (installed plugin) \u2014 skipped");
-  if (!existsSync3(bundle)) return fail(name, "plugins/quarterdeck-goals/server/quarterdeck-mcp.mjs is missing, so the plugin has no server", "Run `npm run build --prefix mcp`, then /reload-plugins.");
-  const built = statSync(bundle).mtimeMs;
-  return Math.max(newestMtime(srcDir), newestMtime(join2(o.repoRoot, "core", "src"))) > built + 1e3 ? warn(name, "source files changed since the last build", "Run `npm run build --prefix mcp`, then /reload-plugins.") : ok(name, "up to date");
+  const srcDir = join3(o.repoRoot, "mcp", "src");
+  const bundle = join3(o.repoRoot, "plugins", "quarterdeck-goals", "server", "quarterdeck-mcp.mjs");
+  if (!existsSync4(srcDir)) return ok(name, "not a Quarterdeck checkout (installed plugin) \u2014 skipped");
+  if (!existsSync4(bundle)) return fail(name, "plugins/quarterdeck-goals/server/quarterdeck-mcp.mjs is missing, so the plugin has no server", "Run `npm run build --prefix mcp`, then /reload-plugins.");
+  const built = statSync2(bundle).mtimeMs;
+  return Math.max(newestMtime(srcDir), newestMtime(join3(o.repoRoot, "core", "src"))) > built + 1e3 ? warn(name, "source files changed since the last build", "Run `npm run build --prefix mcp`, then /reload-plugins.") : ok(name, "up to date");
 }
 function checkServerSetup(o) {
   const name = "quarterdeck MCP server";
-  const user = readJson(join2(o.home, ".claude.json")).mcpServers ?? {};
-  const projectFile = [join2(o.cwd, ".mcp.json"), join2(o.repoRoot, ".mcp.json")].find((f) => existsSync3(f));
+  const user = readJson(join3(o.home, ".claude.json")).mcpServers ?? {};
+  const projectFile = [join3(o.cwd, ".mcp.json"), join3(o.repoRoot, ".mcp.json")].find((f) => existsSync4(f));
   const project = projectFile ? readJson(projectFile).mcpServers ?? {} : {};
   const plugin = enabledPlugins(o)[PLUGIN] === true;
   const byHand = [user.quarterdeck && "added for your user", project.quarterdeck && `in ${projectFile}`].filter(Boolean);
@@ -2494,7 +2834,7 @@ function checkServerSetup(o) {
 }
 function checkPermissionRules(o) {
   if (enabledPlugins(o)[PLUGIN] !== true) return null;
-  const files = [join2(o.home, ".claude", "settings.json"), join2(o.cwd, ".claude", "settings.json"), join2(o.cwd, ".claude", "settings.local.json")];
+  const files = [join3(o.home, ".claude", "settings.json"), join3(o.cwd, ".claude", "settings.json"), join3(o.cwd, ".claude", "settings.local.json")];
   const stale = files.filter((f) => {
     const perms = readJson(f).permissions;
     return perms !== void 0 && JSON.stringify(perms).includes("mcp__quarterdeck__");
@@ -2507,7 +2847,7 @@ function checkPermissionRules(o) {
   );
 }
 function checkUpdates(o) {
-  const known = readJson(join2(o.home, ".claude", "plugins", "known_marketplaces.json"));
+  const known = readJson(join3(o.home, ".claude", "plugins", "known_marketplaces.json"));
   const m = known.quarterdeck;
   if (!m) return null;
   const name = "Updates";
@@ -2519,11 +2859,11 @@ function checkUpdates(o) {
   );
 }
 function checkHooks(o) {
-  const file = join2(o.home, ".claude", "settings.json");
-  if (!existsSync3(file)) return ok("Claude Code hooks", "none installed (none needed)");
+  const file = join3(o.home, ".claude", "settings.json");
+  if (!existsSync4(file)) return ok("Claude Code hooks", "none installed (none needed)");
   let text;
   try {
-    text = readFileSync(file, "utf8");
+    text = readFileSync2(file, "utf8");
     JSON.parse(text);
   } catch {
     return fail("Claude Code hooks", "~/.claude/settings.json is not valid JSON", "Fix the JSON syntax.");
@@ -2538,29 +2878,29 @@ function checkHooks(o) {
 }
 var MARKETPLACE_SOURCE = "shannonbay/Quarterdeck#release";
 function checkPlugin(o) {
-  const install = (p) => `Run \`claude plugin marketplace add ${MARKETPLACE_SOURCE}\` then \`claude plugin install ${p} --scope user\`.`;
+  const install2 = (p) => `Run \`claude plugin marketplace add ${MARKETPLACE_SOURCE}\` then \`claude plugin install ${p} --scope user\`.`;
   const enabled = enabledPlugins(o);
   const name = "Claude Code plugins";
   if (enabled[PLUGIN] === false) return warn(name, `${PLUGIN} is installed but disabled`, `Run \`claude plugin enable ${PLUGIN}\`.`);
-  if (enabled[PLUGIN] !== true) return warn(name, `${PLUGIN} not installed (it runs goals and shows the Goals pane)`, install(PLUGIN));
+  if (enabled[PLUGIN] !== true) return warn(name, `${PLUGIN} not installed (it runs goals and shows the Goals pane)`, install2(PLUGIN));
   if (enabled[GUARD_PLUGIN] === false) return warn(name, `${GUARD_PLUGIN} is disabled, so goal runs are paused`, `Run \`claude plugin enable ${GUARD_PLUGIN}\`.`);
-  if (enabled[GUARD_PLUGIN] !== true) return warn(name, `${GUARD_PLUGIN} not installed, so goal runs are paused`, install(GUARD_PLUGIN));
+  if (enabled[GUARD_PLUGIN] !== true) return warn(name, `${GUARD_PLUGIN} not installed, so goal runs are paused`, install2(GUARD_PLUGIN));
   return ok(name, `${PLUGIN} and ${GUARD_PLUGIN} enabled`);
 }
 function checkRenameLeftovers(o) {
   const read = (file) => {
     try {
-      return JSON.parse(readFileSync(file, "utf8"));
+      return JSON.parse(readFileSync2(file, "utf8"));
     } catch {
       return {};
     }
   };
-  const user = read(join2(o.home, ".claude.json"));
-  const repo = read(join2(o.repoRoot, ".mcp.json"));
-  const enabled = read(join2(o.home, ".claude", "settings.json")).enabledPlugins ?? {};
+  const user = read(join3(o.home, ".claude.json"));
+  const repo = read(join3(o.repoRoot, ".mcp.json"));
+  const enabled = read(join3(o.home, ".claude", "settings.json")).enabledPlugins ?? {};
   const found = [];
   const fixes = [];
-  if (!o.env.QUARTERDECK_DB && !o.env.CONDUCTOR_DB && existsSync3(join2(o.home, ".conductor", "tasks.db")) && !existsSync3(join2(o.home, ".quarterdeck", "tasks.db"))) {
+  if (!o.env.QUARTERDECK_DB && !o.env.CONDUCTOR_DB && existsSync4(join3(o.home, ".conductor", "tasks.db")) && !existsSync4(join3(o.home, ".quarterdeck", "tasks.db"))) {
     found.push("your goals are still in ~/.conductor");
     fixes.push("with Claude Code and the web app closed, rename ~/.conductor to ~/.quarterdeck");
   }
@@ -2606,6 +2946,20 @@ async function checkGoals(o, plugins) {
     plugins.fix ?? "Install the quarterdeck-goals and quarterdeck-guard plugins (see the Claude Code plugins check above)."
   );
 }
+async function checkRunner(o, deps) {
+  const name = "Standing session";
+  if (!existsSync4(join3(o.home, ".quarterdeck", "runner", "launch.mjs"))) return null;
+  try {
+    const d = deps ?? await realDeps();
+    const s = status(d);
+    const task = d.platform !== "win32" || taskInstalled(d);
+    if (!s.running) return warn(name, `not running${task ? " (the scheduled task starts it within 5 minutes)" : ""}, so goals run only while a Claude Code window is open`, "Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.");
+    if (!task) return warn(name, `${statusText(s)} But the scheduled task "${TASK_NAME}" is missing, so nothing restarts it after a logon or an update`, "Run `quarterdeck runner install`.");
+    return ok(name, statusText(s));
+  } catch (e) {
+    return warn(name, `could not be checked: ${firstLine2(e.message)}`, "Check that `claude agents --json` works in a terminal.");
+  }
+}
 async function runDoctor(o = defaultOptions()) {
   const node = checkNode(o);
   const plugins = checkPlugin(o);
@@ -2621,7 +2975,7 @@ async function runDoctor(o = defaultOptions()) {
     plugins,
     ...[checkUpdates(o), checkPermissionRules(o), checkRenameLeftovers(o)].filter((r) => r !== null),
     web,
-    ...[await checkGoals(o, plugins)].filter((r) => r !== null)
+    ...[await checkGoals(o, plugins), await checkRunner(o)].filter((r) => r !== null)
   ];
 }
 function formatResults(results) {
@@ -2638,23 +2992,23 @@ function formatResults(results) {
 }
 function readJson(file) {
   try {
-    return JSON.parse(readFileSync(file, "utf8"));
+    return JSON.parse(readFileSync2(file, "utf8"));
   } catch {
     return {};
   }
 }
 function enabledPlugins(o) {
-  return readJson(join2(o.home, ".claude", "settings.json")).enabledPlugins ?? {};
+  return readJson(join3(o.home, ".claude", "settings.json")).enabledPlugins ?? {};
 }
-function firstLine(s) {
+function firstLine2(s) {
   return s.split("\n")[0];
 }
 function newestMtime(dir) {
   let newest = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const p = join2(dir, entry.name);
+    const p = join3(dir, entry.name);
     if (entry.isDirectory()) newest = Math.max(newest, newestMtime(p));
-    else if (/\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name)) newest = Math.max(newest, statSync(p).mtimeMs);
+    else if (/\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name)) newest = Math.max(newest, statSync2(p).mtimeMs);
   }
   return newest;
 }
@@ -2673,12 +3027,17 @@ if (command === "doctor") {
   const results = await runDoctor();
   console.log(formatResults(results));
   process.exit(results.some((r) => r.level === "fail") ? 1 : 0);
+} else if (command === "runner") {
+  const { text, code } = await runnerCommand(process.argv.slice(3));
+  console.log(text);
+  process.exit(code);
 } else {
   console.log([
     "Usage: quarterdeck <command>",
     "",
     "Commands:",
     "  doctor    Check that Quarterdeck is installed and configured correctly",
+    "  runner    Run goals with no Claude Code window open (quarterdeck runner help)",
     "",
     "The MCP server itself is started by Claude Code from the quarterdeck-goals plugin (server/quarterdeck-mcp.mjs)."
   ].join("\n"));

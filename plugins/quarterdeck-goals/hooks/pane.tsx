@@ -121,6 +121,7 @@ export async function renderPane($: $, e: E) {
     <Box flexDirection="column">
       {guardMissing && <Text color="yellow">{GUARD_MISSING}</Text>}
       {s.outdated && <Text color="yellow">Quarterdeck was updated in another session: run /reload-plugins here to use the new version (this session won't start goal runs until then).</Text>}
+      {s.standing && <Text dimColor>The standing session is starting goal runs, so they also run with this window closed.</Text>}
       {s.hold && <Text color="yellow">Goal runs are on hold until {holdUntilText(s.hold.until, view.now)}: the usage limit is reached. Due runs start after that.</Text>}
       {phone === 'no_transport' && (
         <Box>

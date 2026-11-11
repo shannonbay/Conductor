@@ -22,6 +22,7 @@ For development, add your checkout as the marketplace instead (`claude plugin ma
 - The run reads its brief, works, and ends with `end_run`. Its summary shows in the pane; it isn't handed back into your chat.
 - A run past its time limit (`max_run_minutes`) is stopped and marked timed out. A run whose agent ends without `end_run` is marked failed. Cancelling a run in the pane stops its agent.
 - Several Claude Code sessions can be open: one at a time holds the scheduler (a lease in the database) and starts runs; the others just show the pane.
+- With no window open, the **standing session** runs them: a Claude Code session in a hidden console with Remote Control on (Windows only so far), set up with `node server/quarterdeck-cli.mjs runner install` (see the main README, "Running with Claude Code closed"). While it is the one starting runs, the pane says so.
 - At most `max_concurrent_runs` runs go at once (default 2).
 
 ## The Goals pane

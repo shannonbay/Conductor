@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.14.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.15.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -6,6 +6,9 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __esm = (fn, res) => function __init() {
+  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+};
 var __commonJS = (cb, mod) => function __require() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
@@ -6796,6 +6799,2157 @@ var require_dist = __commonJS({
     module.exports = exports = formatsPlugin;
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.default = formatsPlugin;
+  }
+});
+
+// ../core/src/sqlite.ts
+var DatabaseSync, Statement, Database;
+var init_sqlite = __esm({
+  "../core/src/sqlite.ts"() {
+    "use strict";
+    ({ DatabaseSync } = process.getBuiltinModule("node:sqlite"));
+    Statement = class {
+      constructor(stmt) {
+        this.stmt = stmt;
+        stmt.setAllowUnknownNamedParameters(true);
+      }
+      run(...params) {
+        const r = this.stmt.run(...params);
+        return { changes: Number(r.changes), lastInsertRowid: Number(r.lastInsertRowid) };
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      get(...params) {
+        const row = this.stmt.get(...params);
+        return row === void 0 ? void 0 : { ...row };
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      all(...params) {
+        return this.stmt.all(...params).map((row) => ({ ...row }));
+      }
+    };
+    Database = class {
+      db;
+      depth = 0;
+      /** Waits up to 5 s for another connection's lock, as better-sqlite3 did. */
+      constructor(path) {
+        this.db = new DatabaseSync(path, { timeout: 5e3 });
+      }
+      prepare(sql) {
+        return new Statement(this.db.prepare(sql));
+      }
+      exec(sql) {
+        this.db.exec(sql);
+      }
+      close() {
+        this.db.close();
+      }
+      /**
+       * Wraps `fn` so each call runs in a transaction: committed when it returns,
+       * rolled back when it throws. The outermost one takes the write lock at once
+       * (`BEGIN IMMEDIATE`); nested calls use savepoints.
+       */
+      transaction(fn) {
+        return (...args) => {
+          const outer = this.depth === 0;
+          const savepoint = `qd_sp_${this.depth}`;
+          this.db.exec(outer ? "BEGIN IMMEDIATE" : `SAVEPOINT ${savepoint}`);
+          this.depth++;
+          try {
+            const result = fn(...args);
+            this.depth--;
+            this.db.exec(outer ? "COMMIT" : `RELEASE ${savepoint}`);
+            return result;
+          } catch (err) {
+            this.depth--;
+            try {
+              this.db.exec(outer ? "ROLLBACK" : `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
+            } catch {
+            }
+            throw err;
+          }
+        };
+      }
+      /** `PRAGMA <sql>`: its rows, or with `simple` the first column of the first row. */
+      pragma(sql, options = {}) {
+        const rows = this.db.prepare(`PRAGMA ${sql}`).all();
+        if (!options.simple) return rows.map((row) => ({ ...row }));
+        const first = rows[0];
+        return first === void 0 ? void 0 : Object.values(first)[0];
+      }
+    };
+  }
+});
+
+// ../core/src/migrate.ts
+function dbSchemaVersion(db2) {
+  return Number(db2.pragma("user_version", { simple: true }) ?? 0);
+}
+function schemaOutdated(db2) {
+  return dbSchemaVersion(db2) > SCHEMA_VERSION;
+}
+function runMigrations(db2) {
+  try {
+    db2.exec("ALTER TABLE projects RENAME TO plans");
+  } catch {
+  }
+  try {
+    db2.exec("ALTER TABLE tasks RENAME COLUMN project_id TO plan_id");
+  } catch {
+  }
+  try {
+    db2.exec("ALTER TABLE agent_sessions RENAME COLUMN project_id TO plan_id");
+  } catch {
+  }
+  try {
+    db2.exec("ALTER TABLE events RENAME COLUMN project_id TO plan_id");
+  } catch {
+  }
+  db2.exec(`
+    DROP INDEX IF EXISTS idx_tasks_project;
+    DROP INDEX IF EXISTS idx_projects_status;
+    DROP INDEX IF EXISTS idx_projects_updated;
+    DROP INDEX IF EXISTS idx_sessions_project;
+    DROP INDEX IF EXISTS idx_events_project;
+  `);
+  db2.exec(`
+    CREATE TABLE IF NOT EXISTS plans (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL,
+      description   TEXT,
+      status        TEXT NOT NULL DEFAULT 'active',
+      working_dir   TEXT,
+      focus_task_id TEXT,
+      kind          TEXT NOT NULL DEFAULT 'plan',
+      revision      INTEGER NOT NULL DEFAULT 0,
+      created_at    TEXT NOT NULL,
+      updated_at    TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS tasks (
+      id                TEXT NOT NULL,
+      plan_id           TEXT NOT NULL REFERENCES plans(id),
+      goal              TEXT NOT NULL,
+      status            TEXT NOT NULL DEFAULT 'active',
+      result            TEXT,
+      abandon_reason    TEXT,
+      state             TEXT NOT NULL DEFAULT '{}',
+      depends_on        TEXT,
+      notes             TEXT,
+      locked_by         TEXT,
+      locked_at         TEXT,
+      requires_approval INTEGER DEFAULT 0,
+      approved_by       TEXT,
+      approved_at       TEXT,
+      created_by        TEXT DEFAULT 'human',
+      assigned_to       TEXT,
+      acceptance_criteria TEXT,
+      verify_command    TEXT,
+      verify_timeout_s  INTEGER,
+      review_requested_at TEXT,
+      run_id            TEXT,
+      external_ref      TEXT,
+      archived_at       TEXT,
+      created_at        TEXT NOT NULL,
+      updated_at        TEXT NOT NULL,
+      PRIMARY KEY (id, plan_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tasks_plan    ON tasks(plan_id);
+    CREATE INDEX IF NOT EXISTS idx_plans_status  ON plans(status);
+    CREATE INDEX IF NOT EXISTS idx_plans_updated ON plans(updated_at DESC);
+  `);
+  const addedPlanColumns = [
+    ["working_dir", "TEXT"],
+    ["focus_task_id", "TEXT"],
+    ["revision", "INTEGER NOT NULL DEFAULT 0"],
+    ["kind", "TEXT NOT NULL DEFAULT 'plan'"]
+  ];
+  for (const [col, def] of addedPlanColumns) {
+    try {
+      db2.exec(`ALTER TABLE plans ADD COLUMN ${col} ${def}`);
+    } catch {
+    }
+  }
+  db2.exec(`UPDATE plans SET working_dir = '(unknown)' WHERE working_dir IS NULL`);
+  const addedTaskColumns = [
+    ["notes", "TEXT"],
+    ["locked_by", "TEXT"],
+    ["locked_at", "TEXT"],
+    ["requires_approval", "INTEGER DEFAULT 0"],
+    ["approved_by", "TEXT"],
+    ["approved_at", "TEXT"],
+    ["created_by", "TEXT DEFAULT 'human'"],
+    ["assigned_to", "TEXT"],
+    ["acceptance_criteria", "TEXT"],
+    ["verify_command", "TEXT"],
+    ["verify_timeout_s", "INTEGER"],
+    ["review_requested_at", "TEXT"],
+    ["run_id", "TEXT"],
+    ["external_ref", "TEXT"],
+    ["archived_at", "TEXT"]
+  ];
+  for (const [col, def] of addedTaskColumns) {
+    try {
+      db2.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`);
+    } catch {
+    }
+  }
+  db2.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_external_ref ON tasks(plan_id, external_ref) WHERE external_ref IS NOT NULL`);
+  for (const col of ["plan", "step"]) {
+    try {
+      db2.exec(`ALTER TABLE tasks DROP COLUMN ${col}`);
+    } catch {
+    }
+  }
+  db2.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_tasks_insert_revision AFTER INSERT ON tasks
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_tasks_update_revision AFTER UPDATE ON tasks
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_tasks_delete_revision AFTER DELETE ON tasks
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
+
+    CREATE TRIGGER IF NOT EXISTS trg_plans_update_revision AFTER UPDATE ON plans
+    WHEN NEW.revision = OLD.revision
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.id; END;
+  `);
+  db2.exec(`
+    CREATE TABLE IF NOT EXISTS agent_sessions (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES plans(id),
+      root_task_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'running'
+        CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled')),
+      autonomy_level TEXT NOT NULL DEFAULT 'full'
+        CHECK (autonomy_level IN ('full', 'approve_decompositions', 'approve_steps', 'manual')),
+      model TEXT NOT NULL,
+      input_tokens INTEGER NOT NULL DEFAULT 0,
+      output_tokens INTEGER NOT NULL DEFAULT 0,
+      total_cost REAL NOT NULL DEFAULT 0.0,
+      error TEXT,
+      started_at TEXT NOT NULL DEFAULT (datetime('now')),
+      ended_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_plan ON agent_sessions(plan_id, status);
+  `);
+  try {
+    db2.exec(`ALTER TABLE agent_sessions ADD COLUMN nickname TEXT NOT NULL DEFAULT ''`);
+  } catch {
+  }
+  db2.exec(`
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES plans(id),
+      task_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      actor TEXT NOT NULL CHECK (actor IN ('human', 'agent')),
+      session_id TEXT REFERENCES agent_sessions(id),
+      payload TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_events_task ON events(plan_id, task_id, created_at);
+    CREATE INDEX IF NOT EXISTS idx_events_plan ON events(plan_id, created_at);
+  `);
+  db2.exec(`
+    CREATE TABLE IF NOT EXISTS verifications (
+      id          TEXT PRIMARY KEY,
+      plan_id     TEXT NOT NULL REFERENCES plans(id),
+      task_id     TEXT NOT NULL,
+      gate        TEXT NOT NULL CHECK (gate IN ('criteria', 'command', 'approval', 'override')),
+      passed      INTEGER NOT NULL,
+      actor       TEXT NOT NULL CHECK (actor IN ('human', 'agent')),
+      command     TEXT,
+      exit_code   INTEGER,
+      output      TEXT,
+      evidence    TEXT,
+      duration_ms INTEGER,
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_verifications_task ON verifications(plan_id, task_id, created_at);
+
+    CREATE TRIGGER IF NOT EXISTS trg_verifications_insert_revision AFTER INSERT ON verifications
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+  `);
+  db2.exec(`
+    CREATE TABLE IF NOT EXISTS goals (
+      plan_id             TEXT PRIMARY KEY REFERENCES plans(id),
+      objective           TEXT NOT NULL,
+      instructions        TEXT NOT NULL DEFAULT '',
+      status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'retired')),
+      autonomy            TEXT NOT NULL DEFAULT '{}',
+      limits              TEXT NOT NULL DEFAULT '{}',
+      item_retention_days INTEGER NOT NULL DEFAULT 7,
+      last_run_at         TEXT,
+      next_run_at         TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS goal_triggers (
+      id      TEXT PRIMARY KEY,
+      plan_id TEXT NOT NULL REFERENCES plans(id),
+      kind    TEXT NOT NULL CHECK (kind IN ('manual', 'interval', 'cron', 'event')),
+      config  TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_triggers_plan ON goal_triggers(plan_id);
+
+    CREATE TABLE IF NOT EXISTS goal_runs (
+      id             TEXT PRIMARY KEY,
+      plan_id        TEXT NOT NULL REFERENCES plans(id),
+      trigger        TEXT NOT NULL,
+      status         TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'timed_out', 'skipped')),
+      session_id     TEXT REFERENCES agent_sessions(id),
+      summary        TEXT,
+      skip_reason    TEXT,
+      items_created  INTEGER NOT NULL DEFAULT 0,
+      items_resolved INTEGER NOT NULL DEFAULT 0,
+      started_at     TEXT NOT NULL,
+      ended_at       TEXT,
+      input_tokens   INTEGER NOT NULL DEFAULT 0,
+      output_tokens  INTEGER NOT NULL DEFAULT 0,
+      cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
+      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+      model          TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
+
+    CREATE TABLE IF NOT EXISTS goal_memory (
+      id           TEXT PRIMARY KEY,
+      plan_id      TEXT NOT NULL REFERENCES plans(id),
+      kind         TEXT NOT NULL CHECK (kind IN ('fact', 'rule', 'preference')),
+      text         TEXT NOT NULL,
+      source       TEXT NOT NULL CHECK (source IN ('human', 'agent', 'feedback')),
+      source_ref   TEXT,
+      pinned       INTEGER NOT NULL DEFAULT 0,
+      active       INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT NOT NULL,
+      last_used_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_memory_plan ON goal_memory(plan_id, active);
+
+    CREATE TRIGGER IF NOT EXISTS trg_goals_update_revision AFTER UPDATE ON goals
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_runs_insert_revision AFTER INSERT ON goal_runs
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_runs_update_revision AFTER UPDATE ON goal_runs
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_insert_revision AFTER INSERT ON goal_memory
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_update_revision AFTER UPDATE ON goal_memory
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_delete_revision AFTER DELETE ON goal_memory
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
+  `);
+  const addedGoalColumns = [
+    ["tool_map", "TEXT NOT NULL DEFAULT '{}'"],
+    ["health_command", "TEXT"],
+    ["health_every_minutes", "INTEGER NOT NULL DEFAULT 60"],
+    ["health_triggers_run", "INTEGER NOT NULL DEFAULT 1"],
+    ["last_health_at", "TEXT"],
+    // 1: runs once; when its run ends with nothing open it is done (status 'retired')
+    ["one_off", "INTEGER NOT NULL DEFAULT 0"]
+  ];
+  for (const [col, def] of addedGoalColumns) {
+    try {
+      db2.exec(`ALTER TABLE goals ADD COLUMN ${col} ${def}`);
+    } catch {
+    }
+  }
+  try {
+    db2.exec("ALTER TABLE goal_runs ADD COLUMN cc_session_id TEXT");
+  } catch {
+  }
+  for (const col of ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"]) {
+    try {
+      db2.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`);
+    } catch {
+    }
+  }
+  try {
+    db2.exec("ALTER TABLE goal_runs ADD COLUMN model TEXT");
+  } catch {
+  }
+  db2.exec(`
+    CREATE TABLE IF NOT EXISTS goal_health (
+      id          TEXT PRIMARY KEY,
+      plan_id     TEXT NOT NULL REFERENCES plans(id),
+      passed      INTEGER NOT NULL,
+      exit_code   INTEGER,
+      value       REAL,
+      output      TEXT,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      created_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_health_plan ON goal_health(plan_id, created_at);
+
+    CREATE TABLE IF NOT EXISTS goal_tool_calls (
+      id         TEXT PRIMARY KEY,
+      plan_id    TEXT NOT NULL REFERENCES plans(id),
+      run_id     TEXT NOT NULL,
+      tool_name  TEXT NOT NULL,
+      category   TEXT NOT NULL,
+      decision   TEXT NOT NULL CHECK (decision IN ('allow', 'deny')),
+      reason     TEXT,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_tool_calls ON goal_tool_calls(plan_id, category, created_at);
+    CREATE INDEX IF NOT EXISTS idx_goal_runs_cc_session ON goal_runs(cc_session_id);
+
+    CREATE TRIGGER IF NOT EXISTS trg_goal_health_insert_revision AFTER INSERT ON goal_health
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_tool_calls_insert_revision AFTER INSERT ON goal_tool_calls
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+  `);
+  for (const col of ["holder", "agent_id"]) {
+    try {
+      db2.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`);
+    } catch {
+    }
+  }
+  db2.exec(`
+    -- One row per scheduler; only the holder whose lease hasn't expired starts runs
+    CREATE TABLE IF NOT EXISTS scheduler_lease (
+      name       TEXT PRIMARY KEY,
+      holder     TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+
+    -- At most one row: while it's in force no goal run starts (the person's usage limit is reached)
+    CREATE TABLE IF NOT EXISTS goal_run_hold (
+      id     INTEGER PRIMARY KEY CHECK (id = 1),
+      until  TEXT NOT NULL,
+      reason TEXT NOT NULL
+    );
+  `);
+  db2.exec(`
+    CREATE TABLE IF NOT EXISTS transcript_messages (
+      id          TEXT PRIMARY KEY,
+      session_id  TEXT NOT NULL REFERENCES agent_sessions(id),
+      plan_id     TEXT NOT NULL REFERENCES plans(id),
+      role        TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
+      content     TEXT NOT NULL,
+      turn_index  INTEGER NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript_messages(session_id, turn_index);
+  `);
+  db2.exec(`
+    UPDATE goals SET tool_map = replace(tool_map, '"mcp__conductor__', '"mcp__quarterdeck__')
+    WHERE instr(tool_map, '"mcp__conductor__') > 0
+  `);
+  if (dbSchemaVersion(db2) < SCHEMA_VERSION) db2.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
+}
+var SCHEMA_VERSION;
+var init_migrate = __esm({
+  "../core/src/migrate.ts"() {
+    "use strict";
+    SCHEMA_VERSION = 1;
+  }
+});
+
+// ../core/src/types.ts
+var DEFAULT_GOAL_LIMITS;
+var init_types = __esm({
+  "../core/src/types.ts"() {
+    "use strict";
+    DEFAULT_GOAL_LIMITS = { max_run_minutes: 15, max_items_per_run: 50, max_runs_per_day: 48 };
+  }
+});
+
+// ../core/src/queries.ts
+import { randomUUID } from "crypto";
+function deserializeTask(row) {
+  return {
+    ...row,
+    state: JSON.parse(row.state),
+    depends_on: row.depends_on ? JSON.parse(row.depends_on) : null,
+    notes: row.notes ?? null,
+    requires_approval: Boolean(row.requires_approval),
+    acceptance_criteria: row.acceptance_criteria ? JSON.parse(row.acceptance_criteria) : null,
+    verify_command: row.verify_command ?? null,
+    verify_timeout_s: row.verify_timeout_s ?? null,
+    review_requested_at: row.review_requested_at ?? null,
+    run_id: row.run_id ?? null,
+    external_ref: row.external_ref ?? null,
+    archived_at: row.archived_at ?? null
+  };
+}
+function setClause(fields) {
+  const entries = Object.entries(fields);
+  return {
+    sql: entries.map(([k]) => `${k} = ?`).join(", "),
+    values: entries.map(([, v]) => v)
+  };
+}
+function listPlans(db2, status = "active") {
+  if (status === "all") {
+    return db2.prepare("SELECT * FROM plans ORDER BY updated_at DESC").all();
+  }
+  return db2.prepare("SELECT * FROM plans WHERE status = ? ORDER BY updated_at DESC").all(status);
+}
+function getPlan(db2, id) {
+  return db2.prepare("SELECT * FROM plans WHERE id = ?").get(id);
+}
+function insertPlan(db2, plan) {
+  db2.prepare(`
+    INSERT INTO plans (id, name, description, status, working_dir, focus_task_id, kind, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.focus_task_id ?? null, plan.kind ?? "plan", plan.created_at, plan.updated_at);
+}
+function updatePlan(db2, id, fields) {
+  const { sql, values } = setClause(fields);
+  if (!sql) return;
+  db2.prepare(`UPDATE plans SET ${sql} WHERE id = ?`).run(...values, id);
+}
+function touchPlan(db2, id) {
+  updatePlan(db2, id, { updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+}
+function getTask(db2, planId, taskId) {
+  const row = db2.prepare("SELECT * FROM tasks WHERE id = ? AND plan_id = ?").get(taskId, planId);
+  return row ? deserializeTask(row) : void 0;
+}
+function compareTaskIds(a, b) {
+  const pa = a.split(".").map(Number);
+  const pb = b.split(".").map(Number);
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return pa.length - pb.length;
+}
+function getAllTasks(db2, planId) {
+  const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ?").all(planId);
+  return rows.map(deserializeTask).sort((a, b) => compareTaskIds(a.id, b.id));
+}
+function getRootTasks(db2, planId) {
+  const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%'").all(planId);
+  return rows.map(deserializeTask);
+}
+function getChildren(db2, planId, parentId) {
+  if (parentId === "") return getRootTasks(db2, planId);
+  const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id LIKE ? AND id NOT LIKE ?").all(planId, `${parentId}.%`, `${parentId}.%.%`);
+  return rows.map(deserializeTask);
+}
+function getSiblings(db2, planId, taskId) {
+  const parts = taskId.split(".");
+  const parentId = parts.slice(0, -1).join(".");
+  return getChildren(db2, planId, parentId).filter((t) => t.id !== taskId);
+}
+function getTreeStats(db2, planId) {
+  const rows = db2.prepare("SELECT status, COUNT(*) as count FROM tasks WHERE plan_id = ? GROUP BY status").all(planId);
+  const by = {};
+  for (const r of rows) by[r.status] = r.count;
+  return {
+    total_tasks: rows.reduce((sum, r) => sum + r.count, 0),
+    active: by.active ?? 0,
+    completed: by.completed ?? 0,
+    pending: by.pending ?? 0,
+    abandoned: by.abandoned ?? 0
+  };
+}
+function countAllTasks(db2, planId) {
+  const row = db2.prepare("SELECT COUNT(*) as count FROM tasks WHERE plan_id = ?").get(planId);
+  return row.count;
+}
+function nextChildId(db2, planId, parentId) {
+  const siblings = getChildren(db2, planId, parentId ?? "");
+  const maxIndex = siblings.reduce((max, t) => Math.max(max, Number(t.id.split(".").pop())), 0);
+  return parentId ? `${parentId}.${maxIndex + 1}` : String(maxIndex + 1);
+}
+function insertTask(db2, task) {
+  db2.prepare(`
+    INSERT INTO tasks (
+      id, plan_id, goal, status, result, abandon_reason, state, depends_on, notes,
+      locked_by, locked_at, requires_approval, approved_by, approved_at, created_by, assigned_to,
+      acceptance_criteria, verify_command, verify_timeout_s, review_requested_at,
+      run_id, external_ref, archived_at,
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    task.id,
+    task.plan_id,
+    task.goal,
+    task.status,
+    task.result ?? null,
+    task.abandon_reason ?? null,
+    JSON.stringify(task.state),
+    task.depends_on ? JSON.stringify(task.depends_on) : null,
+    task.notes ?? null,
+    task.locked_by ?? null,
+    task.locked_at ?? null,
+    task.requires_approval ? 1 : 0,
+    task.approved_by ?? null,
+    task.approved_at ?? null,
+    task.created_by ?? "human",
+    task.assigned_to ?? null,
+    task.acceptance_criteria?.length ? JSON.stringify(task.acceptance_criteria) : null,
+    task.verify_command ?? null,
+    task.verify_timeout_s ?? null,
+    task.review_requested_at ?? null,
+    task.run_id ?? null,
+    task.external_ref ?? null,
+    task.archived_at ?? null,
+    task.created_at,
+    task.updated_at
+  );
+}
+function updateTask(db2, planId, taskId, fields) {
+  const serialized = { ...fields };
+  if ("state" in fields) serialized.state = JSON.stringify(fields.state);
+  if ("depends_on" in fields) serialized.depends_on = fields.depends_on ? JSON.stringify(fields.depends_on) : null;
+  if ("requires_approval" in fields) serialized.requires_approval = fields.requires_approval ? 1 : 0;
+  if ("acceptance_criteria" in fields) {
+    serialized.acceptance_criteria = fields.acceptance_criteria?.length ? JSON.stringify(fields.acceptance_criteria) : null;
+  }
+  const { sql, values } = setClause(serialized);
+  if (!sql) return;
+  db2.prepare(`UPDATE tasks SET ${sql} WHERE id = ? AND plan_id = ?`).run(...values, taskId, planId);
+}
+function insertEvent(db2, event) {
+  db2.prepare(`
+    INSERT INTO events (id, plan_id, task_id, event_type, actor, session_id, payload, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    event.id,
+    event.plan_id,
+    event.task_id,
+    event.event_type,
+    event.actor,
+    event.session_id ?? null,
+    JSON.stringify(event.payload),
+    event.created_at ?? (/* @__PURE__ */ new Date()).toISOString()
+  );
+}
+function getEvents(db2, planId, query = {}) {
+  const where = ["plan_id = ?"];
+  const params = [planId];
+  if (query.taskId) {
+    if (query.subtree) {
+      where.push("(task_id = ? OR task_id LIKE ?)");
+      params.push(query.taskId, `${query.taskId}.%`);
+    } else {
+      where.push("task_id = ?");
+      params.push(query.taskId);
+    }
+  }
+  const limit = query.limit && query.limit > 0 ? ` LIMIT ${Math.floor(query.limit)}` : "";
+  const rows = db2.prepare(`SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY created_at DESC, rowid DESC${limit}`).all(...params);
+  return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload) }));
+}
+function insertVerification(db2, v) {
+  const row = {
+    id: randomUUID(),
+    command: null,
+    exit_code: null,
+    output: null,
+    evidence: null,
+    duration_ms: null,
+    created_at: (/* @__PURE__ */ new Date()).toISOString(),
+    ...v
+  };
+  db2.prepare(`
+    INSERT INTO verifications (id, plan_id, task_id, gate, passed, actor, command, exit_code, output, evidence, duration_ms, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    row.id,
+    row.plan_id,
+    row.task_id,
+    row.gate,
+    row.passed ? 1 : 0,
+    row.actor,
+    row.command,
+    row.exit_code,
+    row.output,
+    row.evidence ? JSON.stringify(row.evidence) : null,
+    row.duration_ms,
+    row.created_at
+  );
+  return row;
+}
+function deserializeVerification(r) {
+  return {
+    ...r,
+    passed: Boolean(r.passed),
+    evidence: r.evidence ? JSON.parse(r.evidence) : null
+  };
+}
+function getLatestVerification(db2, planId, taskId, gate) {
+  const row = db2.prepare("SELECT * FROM verifications WHERE plan_id = ? AND task_id = ? AND gate = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(planId, taskId, gate);
+  return row ? deserializeVerification(row) : void 0;
+}
+var init_queries = __esm({
+  "../core/src/queries.ts"() {
+    "use strict";
+  }
+});
+
+// ../core/src/goals.ts
+import { randomUUID as randomUUID2 } from "crypto";
+function deserializeGoal(r) {
+  return {
+    ...r,
+    autonomy: JSON.parse(r.autonomy || "{}"),
+    limits: { ...DEFAULT_GOAL_LIMITS, ...JSON.parse(r.limits || "{}") },
+    tool_map: JSON.parse(r.tool_map || "{}"),
+    health_command: r.health_command ?? null,
+    health_every_minutes: r.health_every_minutes ?? 60,
+    health_triggers_run: r.health_triggers_run === void 0 ? true : Boolean(r.health_triggers_run),
+    last_health_at: r.last_health_at ?? null,
+    one_off: Boolean(r.one_off)
+  };
+}
+function createGoal(db2, plan, goal, interval) {
+  db2.transaction(() => {
+    insertPlan(db2, { ...plan, kind: "goal" });
+    db2.prepare(`
+      INSERT INTO goals (plan_id, objective, instructions, status, autonomy, limits, item_retention_days, last_run_at, next_run_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      plan.id,
+      goal.objective,
+      goal.instructions ?? "",
+      goal.status ?? "active",
+      JSON.stringify(goal.autonomy ?? {}),
+      JSON.stringify({ ...DEFAULT_GOAL_LIMITS, ...goal.limits }),
+      goal.item_retention_days ?? 7,
+      null,
+      interval ? (/* @__PURE__ */ new Date()).toISOString() : null
+    );
+    if (interval) setIntervalTrigger(db2, plan.id, interval);
+    if (goal.one_off) db2.prepare("UPDATE goals SET one_off = 1 WHERE plan_id = ?").run(plan.id);
+  })();
+  return getGoal(db2, plan.id);
+}
+function getGoal(db2, planId) {
+  const row = db2.prepare("SELECT * FROM goals WHERE plan_id = ?").get(planId);
+  return row ? deserializeGoal(row) : void 0;
+}
+function listGoals(db2, status) {
+  const rows = status ? db2.prepare("SELECT * FROM goals WHERE status = ?").all(status) : db2.prepare("SELECT * FROM goals").all();
+  return rows.map((r) => ({ plan: getPlan(db2, r.plan_id), goal: deserializeGoal(r) })).filter((g) => g.plan);
+}
+function updateGoal(db2, planId, fields) {
+  const current2 = getGoal(db2, planId);
+  if (!current2) throw new Error(`Goal ${planId} not found`);
+  const serialized = { ...fields };
+  if (fields.autonomy) serialized.autonomy = JSON.stringify(fields.autonomy);
+  if (fields.tool_map) serialized.tool_map = JSON.stringify(fields.tool_map);
+  if ("health_triggers_run" in fields) serialized.health_triggers_run = fields.health_triggers_run ? 1 : 0;
+  if ("one_off" in fields) serialized.one_off = fields.one_off ? 1 : 0;
+  if (fields.limits) serialized.limits = JSON.stringify({ ...current2.limits, ...fields.limits });
+  const entries = Object.entries(serialized);
+  if (!entries.length) return;
+  db2.prepare(`UPDATE goals SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE plan_id = ?`).run(...entries.map(([, v]) => v), planId);
+}
+function deserializeTrigger(r) {
+  return { ...r, config: JSON.parse(r.config), enabled: Boolean(r.enabled) };
+}
+function listTriggers(db2, planId) {
+  return db2.prepare("SELECT * FROM goal_triggers WHERE plan_id = ?").all(planId).map(deserializeTrigger);
+}
+function getIntervalTrigger(db2, planId) {
+  return listTriggers(db2, planId).find((t) => t.kind === "interval");
+}
+function setIntervalTrigger(db2, planId, config2) {
+  const existing = getIntervalTrigger(db2, planId);
+  if (!config2) {
+    if (existing) db2.prepare("DELETE FROM goal_triggers WHERE id = ?").run(existing.id);
+    return;
+  }
+  if (!(config2.minutes >= 1)) throw new Error("Interval must be at least 1 minute.");
+  if (config2.active_hours && !/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(config2.active_hours)) {
+    throw new Error('active_hours must look like "08:00-20:00".');
+  }
+  if (existing) {
+    db2.prepare("UPDATE goal_triggers SET config = ?, enabled = 1 WHERE id = ?").run(JSON.stringify(config2), existing.id);
+  } else {
+    db2.prepare("INSERT INTO goal_triggers (id, plan_id, kind, config, enabled) VALUES (?, ?, ?, ?, 1)").run(newId("trg"), planId, "interval", JSON.stringify(config2));
+  }
+}
+function insertRun(db2, planId, trigger, status = "queued", skipReason) {
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const run = {
+    id: newId("run"),
+    plan_id: planId,
+    trigger,
+    status,
+    session_id: null,
+    cc_session_id: null,
+    holder: null,
+    agent_id: null,
+    summary: null,
+    skip_reason: skipReason ?? null,
+    items_created: 0,
+    items_resolved: 0,
+    started_at: now,
+    ended_at: status === "skipped" ? now : null,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+    model: null
+  };
+  db2.prepare(`
+    INSERT INTO goal_runs (id, plan_id, trigger, status, session_id, summary, skip_reason, items_created, items_resolved, started_at, ended_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(run.id, run.plan_id, run.trigger, run.status, null, null, run.skip_reason, 0, 0, run.started_at, run.ended_at);
+  return run;
+}
+function getRun(db2, runId) {
+  return db2.prepare("SELECT * FROM goal_runs WHERE id = ?").get(runId);
+}
+function updateRun(db2, runId, fields) {
+  const entries = Object.entries(fields);
+  if (!entries.length) return;
+  db2.prepare(`UPDATE goal_runs SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...entries.map(([, v]) => v), runId);
+}
+function listRuns(db2, planId, limit = 20, opts = {}) {
+  const where = opts.includeSkipped === false ? "AND status != 'skipped'" : "";
+  return db2.prepare(`SELECT * FROM goal_runs WHERE plan_id = ? ${where} ORDER BY started_at DESC, rowid DESC LIMIT ?`).all(planId, limit);
+}
+function getOpenRun(db2, planId) {
+  return db2.prepare("SELECT * FROM goal_runs WHERE plan_id = ? AND status IN ('queued', 'running') ORDER BY started_at LIMIT 1").get(planId);
+}
+function countRunsSince(db2, planId, sinceIso) {
+  return db2.prepare("SELECT COUNT(*) n FROM goal_runs WHERE plan_id = ? AND status != 'skipped' AND started_at >= ?").get(planId, sinceIso).n;
+}
+function deserializeMemory(r) {
+  return { ...r, pinned: Boolean(r.pinned), active: Boolean(r.active) };
+}
+function insertMemory(db2, m) {
+  const text = m.text.trim();
+  if (!text) throw new Error("Memory text is required.");
+  const row = {
+    id: newId("mem"),
+    plan_id: m.plan_id,
+    kind: m.kind,
+    text,
+    source: m.source,
+    source_ref: m.source_ref ?? null,
+    pinned: m.pinned ? 1 : 0,
+    active: 1,
+    created_at: (/* @__PURE__ */ new Date()).toISOString(),
+    last_used_at: null
+  };
+  db2.prepare(`
+    INSERT INTO goal_memory (id, plan_id, kind, text, source, source_ref, pinned, active, created_at, last_used_at)
+    VALUES (@id, @plan_id, @kind, @text, @source, @source_ref, @pinned, @active, @created_at, @last_used_at)
+  `).run(row);
+  return deserializeMemory(row);
+}
+function getMemory(db2, id) {
+  const r = db2.prepare("SELECT * FROM goal_memory WHERE id = ?").get(id);
+  return r ? deserializeMemory(r) : void 0;
+}
+function listMemory(db2, planId, opts = {}) {
+  const rows = db2.prepare(`SELECT * FROM goal_memory WHERE plan_id = ? ${opts.activeOnly ? "AND active = 1" : ""} ORDER BY created_at, rowid`).all(planId);
+  return rows.map(deserializeMemory);
+}
+function updateMemory(db2, id, fields) {
+  const serialized = { ...fields };
+  if ("pinned" in fields) serialized.pinned = fields.pinned ? 1 : 0;
+  if ("active" in fields) serialized.active = fields.active ? 1 : 0;
+  if (typeof fields.text === "string") {
+    if (!fields.text.trim()) throw new Error("Memory text is required.");
+    serialized.text = fields.text.trim();
+  }
+  const entries = Object.entries(serialized);
+  if (!entries.length) return;
+  db2.prepare(`UPDATE goal_memory SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...entries.map(([, v]) => v), id);
+}
+function deleteMemory(db2, id) {
+  db2.prepare("DELETE FROM goal_memory WHERE id = ?").run(id);
+}
+function deleteGoal(db2, planId) {
+  const plan = db2.prepare("SELECT name, kind FROM plans WHERE id = ?").get(planId);
+  if (!plan || plan.kind !== "goal") throw new Error(`Goal ${planId} not found.`);
+  const running = db2.prepare("SELECT 1 FROM goal_runs WHERE plan_id = ? AND status IN ('queued', 'running')").get(planId);
+  if (running) throw new Error("This goal has a run in progress: cancel it first, then delete the goal.");
+  db2.transaction(() => {
+    for (const table of GOAL_TABLES) db2.prepare(`DELETE FROM ${table} WHERE plan_id = ?`).run(planId);
+    db2.prepare("DELETE FROM plans WHERE id = ?").run(planId);
+  })();
+  return { name: plan.name };
+}
+var newId, GOAL_TABLES;
+var init_goals = __esm({
+  "../core/src/goals.ts"() {
+    "use strict";
+    init_queries();
+    init_types();
+    newId = (prefix) => `${prefix}_${randomUUID2().replace(/-/g, "").slice(0, 12)}`;
+    GOAL_TABLES = [
+      "goal_tool_calls",
+      "goal_health",
+      "goal_memory",
+      "goal_runs",
+      "goal_triggers",
+      "verifications",
+      "events",
+      "transcript_messages",
+      "agent_sessions",
+      "tasks",
+      "goals"
+    ];
+  }
+});
+
+// ../core/src/gates.ts
+import { spawn, spawnSync } from "child_process";
+import { existsSync } from "fs";
+function runVerifyCommand(command, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S) {
+  const started = Date.now();
+  const done = (r) => ({ ...r, duration_ms: Date.now() - started });
+  if (!existsSync(cwd)) {
+    return Promise.resolve(done({ passed: false, exit_code: null, output: `Working directory not found: ${cwd}`, timed_out: false }));
+  }
+  return new Promise((resolve) => {
+    let output = "";
+    let timedOut = false;
+    const append = (chunk) => {
+      output = (output + chunk.toString()).slice(-OUTPUT_TAIL_CHARS);
+    };
+    const child = spawn(command, {
+      cwd,
+      shell: true,
+      windowsHide: true,
+      // Own process group on POSIX so a timeout can kill the whole tree
+      detached: process.platform !== "win32"
+    });
+    child.stdout?.on("data", append);
+    child.stderr?.on("data", append);
+    const timer = setTimeout(() => {
+      timedOut = true;
+      killTree(child.pid);
+    }, timeoutS * 1e3);
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      resolve(done({ passed: false, exit_code: null, output: `Could not run command: ${e.message}`, timed_out: false }));
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (timedOut) output = `${output}
+[timed out after ${timeoutS}s]`.slice(-OUTPUT_TAIL_CHARS);
+      resolve(done({ passed: !timedOut && code === 0, exit_code: code, output, timed_out: timedOut }));
+    });
+  });
+}
+function killTree(pid) {
+  if (!pid) return;
+  try {
+    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
+    else process.kill(-pid, "SIGKILL");
+  } catch {
+  }
+}
+function hasGates(task) {
+  return Boolean(task.acceptance_criteria?.length || task.verify_command || task.requires_approval);
+}
+function getGateStatus(db2, task) {
+  if (!hasGates(task)) return null;
+  const last = task.verify_command ? getLatestVerification(db2, task.plan_id, task.id, "command") : void 0;
+  return {
+    acceptance_criteria: task.acceptance_criteria ?? [],
+    verify_command: task.verify_command,
+    requires_approval: task.requires_approval,
+    awaiting_review: task.review_requested_at !== null,
+    approved: task.approved_at ? { by: task.approved_by, at: task.approved_at } : null,
+    last_command: last ? { passed: last.passed, exit_code: last.exit_code, at: last.created_at, output: last.passed ? null : last.output } : null
+  };
+}
+async function checkCompletion(db2, plan, task, input) {
+  const { actor } = input;
+  if (!hasGates(task)) return { outcome: "pass" };
+  if (actor === "agent" && task.review_requested_at) return { outcome: "awaiting_review" };
+  const criteria = task.acceptance_criteria ?? [];
+  if (actor === "agent" && criteria.length > 0) {
+    const evidence = input.evidence ?? [];
+    const missing = criteria.filter((_, i) => !evidence[i]?.trim());
+    if (missing.length > 0 || evidence.length > criteria.length) {
+      return {
+        outcome: "blocked",
+        blockers: [{
+          gate: "criteria",
+          message: evidence.length > criteria.length ? `Got ${evidence.length} evidence entries for ${criteria.length} criteria. Give exactly one per criterion, in order.` : `Missing evidence for ${missing.length} of ${criteria.length} acceptance criteria: ${missing.map((c) => `"${c}"`).join("; ")}. Pass \`evidence\` with one entry per criterion, in order, saying how it is met.`
+        }]
+      };
+    }
+  }
+  if (task.verify_command) {
+    const r = await runVerifyCommand(task.verify_command, plan.working_dir, task.verify_timeout_s ?? DEFAULT_VERIFY_TIMEOUT_S);
+    insertVerification(db2, {
+      plan_id: plan.id,
+      task_id: task.id,
+      gate: "command",
+      passed: r.passed,
+      actor,
+      command: task.verify_command,
+      exit_code: r.exit_code,
+      output: r.output,
+      duration_ms: r.duration_ms
+    });
+    if (!r.passed) {
+      return {
+        outcome: "blocked",
+        blockers: [{
+          gate: "command",
+          message: r.timed_out ? `Verify command timed out: ${task.verify_command}` : `Verify command failed (exit ${r.exit_code ?? "none"}): ${task.verify_command}`,
+          exit_code: r.exit_code,
+          output: r.output
+        }]
+      };
+    }
+  }
+  if (actor === "agent" && criteria.length > 0) {
+    insertVerification(db2, { plan_id: plan.id, task_id: task.id, gate: "criteria", passed: true, actor, evidence: input.evidence });
+  }
+  if (task.requires_approval && !task.approved_at) {
+    const now = (/* @__PURE__ */ new Date()).toISOString();
+    if (actor === "agent") {
+      updateTask(db2, plan.id, task.id, { review_requested_at: now, updated_at: now });
+      return { outcome: "awaiting_review" };
+    }
+    insertVerification(db2, { plan_id: plan.id, task_id: task.id, gate: "approval", passed: true, actor });
+    updateTask(db2, plan.id, task.id, { approved_by: "human", approved_at: now, review_requested_at: null, updated_at: now });
+  }
+  return { outcome: "pass" };
+}
+async function runChecks(db2, plan, task, actor) {
+  let result = null;
+  if (task.verify_command) {
+    result = await runVerifyCommand(task.verify_command, plan.working_dir, task.verify_timeout_s ?? DEFAULT_VERIFY_TIMEOUT_S);
+    insertVerification(db2, {
+      plan_id: plan.id,
+      task_id: task.id,
+      gate: "command",
+      passed: result.passed,
+      actor,
+      command: task.verify_command,
+      exit_code: result.exit_code,
+      output: result.output,
+      duration_ms: result.duration_ms
+    });
+  }
+  return { result, gates: getGateStatus(db2, getTask(db2, plan.id, task.id)) };
+}
+function requireAwaitingReview(task) {
+  if (!task.review_requested_at) throw new GateError(`Task ${task.id} is not waiting for review.`);
+}
+function isProposal(task) {
+  return typeof task.state?.action === "object" && task.state.action !== null;
+}
+function asksPerson(task) {
+  return task.state?.asks_person === true;
+}
+function approveTask(db2, planId, taskId) {
+  const task = mustGet(db2, planId, taskId);
+  requireAwaitingReview(task);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const v = insertVerification(db2, { plan_id: planId, task_id: taskId, gate: "approval", passed: true, actor: "human" });
+  updateTask(db2, planId, taskId, {
+    ...isProposal(task) ? {} : { status: "completed" },
+    approved_by: "human",
+    approved_at: now,
+    review_requested_at: null,
+    updated_at: now
+  });
+  return v;
+}
+function rejectTask(db2, planId, taskId, feedback) {
+  if (!feedback.trim()) throw new GateError("Feedback is required when rejecting.");
+  const task = mustGet(db2, planId, taskId);
+  requireAwaitingReview(task);
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const v = insertVerification(db2, { plan_id: planId, task_id: taskId, gate: "approval", passed: false, actor: "human", output: feedback });
+  const note = `Review rejected (${now}): ${feedback}`;
+  updateTask(db2, planId, taskId, {
+    review_requested_at: null,
+    approved_by: null,
+    approved_at: null,
+    notes: task.notes ? `${task.notes}
+
+${note}` : note,
+    updated_at: now
+  });
+  if (getPlan(db2, planId)?.kind === "goal") {
+    insertMemory(db2, { plan_id: planId, kind: "preference", text: `Feedback on "${task.goal}": ${feedback.trim()}`, source: "feedback", source_ref: taskId });
+  }
+  return v;
+}
+function mustGet(db2, planId, taskId) {
+  const task = getTask(db2, planId, taskId);
+  if (!task) throw new GateError(`Task ${taskId} not found.`);
+  return task;
+}
+function describeBlockers(blockers) {
+  return blockers.map((b) => b.output ? `${b.message}
+--- output (last ${OUTPUT_TAIL_CHARS} chars) ---
+${b.output.trim()}` : b.message).join("\n\n");
+}
+var DEFAULT_VERIFY_TIMEOUT_S, OUTPUT_TAIL_CHARS, GateError;
+var init_gates = __esm({
+  "../core/src/gates.ts"() {
+    "use strict";
+    init_queries();
+    init_goals();
+    DEFAULT_VERIFY_TIMEOUT_S = 300;
+    OUTPUT_TAIL_CHARS = 4096;
+    GateError = class extends Error {
+    };
+  }
+});
+
+// ../core/src/schedule.ts
+function parseField(text, index) {
+  const [lo, hi] = RANGES[index];
+  const out = /* @__PURE__ */ new Set();
+  for (const part of text.split(",")) {
+    const m = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(part);
+    if (!m) throw new Error(`Invalid cron ${FIELD_NAMES[index]}: "${part}"`);
+    const step = m[4] ? Number(m[4]) : 1;
+    let from = lo;
+    let to = hi;
+    if (m[1] !== "*") {
+      from = Number(m[2]);
+      to = m[3] !== void 0 ? Number(m[3]) : m[4] ? hi : from;
+    }
+    if (step < 1 || from < lo || to > hi || from > to) throw new Error(`Invalid cron ${FIELD_NAMES[index]}: "${part}" (allowed ${lo}-${hi})`);
+    for (let v = from; v <= to; v += step) out.add(index === 4 && v === 7 ? 0 : v);
+  }
+  return out;
+}
+function parseCron(expr) {
+  const parts = expr.trim().split(/\s+/);
+  if (parts.length !== 5) throw new Error('A cron expression has 5 fields: minute hour day-of-month month day-of-week, e.g. "0 9 * * 1-5"');
+  const [minute, hour, dom, month, dow] = parts.map(parseField);
+  return { minute, hour, dom, month, dow, domAny: parts[2] === "*", dowAny: parts[4] === "*" };
+}
+function dayMatches(f, d) {
+  const dom = f.dom.has(d.getDate());
+  const dow = f.dow.has(d.getDay());
+  if (!f.domAny && !f.dowAny) return dom || dow;
+  return dom && dow;
+}
+function cronNext(expr, from) {
+  const f = parseCron(expr);
+  const d = new Date(from.getTime());
+  d.setSeconds(0, 0);
+  d.setMinutes(d.getMinutes() + 1);
+  const limit = from.getTime() + 4 * 366 * 864e5;
+  while (d.getTime() <= limit) {
+    if (!f.month.has(d.getMonth() + 1)) {
+      d.setMonth(d.getMonth() + 1, 1);
+      d.setHours(0, 0, 0, 0);
+      continue;
+    }
+    if (!dayMatches(f, d)) {
+      d.setDate(d.getDate() + 1);
+      d.setHours(0, 0, 0, 0);
+      continue;
+    }
+    if (!f.hour.has(d.getHours())) {
+      d.setHours(d.getHours() + 1, 0, 0, 0);
+      continue;
+    }
+    if (!f.minute.has(d.getMinutes())) {
+      d.setMinutes(d.getMinutes() + 1, 0, 0);
+      continue;
+    }
+    return d;
+  }
+  throw new Error(`Cron expression "${expr}" never matches`);
+}
+function getSchedule(db2, planId) {
+  const interval = getIntervalTrigger(db2, planId);
+  if (interval?.enabled) return { kind: "interval", ...interval.config };
+  const cron = listTriggers(db2, planId).find((t) => t.kind === "cron" && t.enabled);
+  return cron ? { kind: "cron", ...cron.config } : null;
+}
+function setSchedule(db2, planId, schedule) {
+  db2.prepare("DELETE FROM goal_triggers WHERE plan_id = ? AND kind = 'cron'").run(planId);
+  if (schedule?.kind === "cron") {
+    cronNext(schedule.expr, /* @__PURE__ */ new Date());
+    setIntervalTrigger(db2, planId, null);
+    db2.prepare("INSERT INTO goal_triggers (id, plan_id, kind, config, enabled) VALUES (?, ?, 'cron', ?, 1)").run(newId("trg"), planId, JSON.stringify({ expr: schedule.expr.trim() }));
+    return;
+  }
+  setIntervalTrigger(db2, planId, schedule ? { minutes: schedule.minutes, ...schedule.active_hours && { active_hours: schedule.active_hours } } : null);
+}
+function nextScheduledRun(db2, planId, from = /* @__PURE__ */ new Date()) {
+  const s = getSchedule(db2, planId);
+  if (!s) return null;
+  return s.kind === "interval" ? new Date(from.getTime() + s.minutes * 6e4).toISOString() : cronNext(s.expr, from).toISOString();
+}
+var RANGES, FIELD_NAMES;
+var init_schedule = __esm({
+  "../core/src/schedule.ts"() {
+    "use strict";
+    init_goals();
+    RANGES = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
+    FIELD_NAMES = ["minute", "hour", "day of month", "month", "day of week"];
+  }
+});
+
+// ../core/src/health.ts
+function parseHealthValue(output) {
+  const matches = output.match(/-?\d+(?:\.\d+)?/g);
+  return matches ? Number(matches[matches.length - 1]) : null;
+}
+async function runHealthCheck(db2, planId) {
+  const goal = getGoal(db2, planId);
+  const plan = getPlan(db2, planId);
+  if (!goal || !plan) throw new Error(`Goal ${planId} not found`);
+  if (!goal.health_command) throw new Error("This goal has no health check command.");
+  const r = await runVerifyCommand(goal.health_command, plan.working_dir, HEALTH_TIMEOUT_S);
+  const row = {
+    id: newId("hc"),
+    plan_id: planId,
+    passed: r.passed,
+    exit_code: r.exit_code,
+    value: parseHealthValue(r.output),
+    output: r.output.slice(-2e3),
+    duration_ms: r.duration_ms,
+    created_at: (/* @__PURE__ */ new Date()).toISOString()
+  };
+  db2.prepare(`
+    INSERT INTO goal_health (id, plan_id, passed, exit_code, value, output, duration_ms, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(row.id, row.plan_id, row.passed ? 1 : 0, row.exit_code, row.value, row.output, row.duration_ms, row.created_at);
+  updateGoal(db2, planId, { last_health_at: row.created_at });
+  return row;
+}
+function listHealth(db2, planId, limit = 50) {
+  return db2.prepare("SELECT * FROM goal_health WHERE plan_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?").all(planId, limit).map((r) => ({ ...r, passed: Boolean(r.passed) }));
+}
+function healthDue(goal, now = /* @__PURE__ */ new Date()) {
+  if (!goal.health_command || goal.status !== "active") return false;
+  if (!goal.last_health_at) return true;
+  return now.getTime() - new Date(goal.last_health_at).getTime() >= goal.health_every_minutes * 6e4;
+}
+var HEALTH_TIMEOUT_S;
+var init_health = __esm({
+  "../core/src/health.ts"() {
+    "use strict";
+    init_gates();
+    init_goals();
+    init_queries();
+    HEALTH_TIMEOUT_S = 120;
+  }
+});
+
+// ../core/src/goal-engine.ts
+function autonomyFor(goal, category) {
+  return goal.autonomy[category] ?? "propose";
+}
+function mustGetGoal(db2, planId) {
+  const goal = getGoal(db2, planId);
+  if (!goal) throw new GoalError(`Plan ${planId} is not a persistent goal.`);
+  return goal;
+}
+function addItem(db2, planId, runId, input) {
+  const goal = mustGetGoal(db2, planId);
+  if (goal.status === "retired") throw new GoalError("This goal is retired.");
+  if (input.external_ref) {
+    const row = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND external_ref = ?").get(planId, input.external_ref);
+    if (row) return { task: deserializeTask(row), existing: true };
+  }
+  if (runId) {
+    const created = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND run_id = ?").get(planId, runId).n;
+    if (created >= goal.limits.max_items_per_run) {
+      throw new GoalError(`This run already created ${created} items (limit ${goal.limits.max_items_per_run}). Finish with end_run; the rest can wait for the next run.`);
+    }
+  }
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const id = nextChildId(db2, planId, null);
+  const base = {
+    id,
+    plan_id: planId,
+    goal: input.goal,
+    result: input.result ?? null,
+    abandon_reason: null,
+    depends_on: null,
+    notes: input.notes ?? null,
+    run_id: runId,
+    external_ref: input.external_ref ?? null,
+    created_by: "agent",
+    created_at: now,
+    updated_at: now
+  };
+  if (!input.action) {
+    if (input.ask_person) {
+      insertTask(db2, { ...base, status: "active", state: { asks_person: true }, requires_approval: true, review_requested_at: now });
+    } else {
+      insertTask(db2, { ...base, status: input.status ?? "pending", state: {} });
+    }
+    return { task: getTask(db2, planId, id), existing: false };
+  }
+  const mode = autonomyFor(goal, input.action.category);
+  if (mode === "off") {
+    throw new GoalError(`Action category "${input.action.category}" is off for this goal: don't take or propose this action.`);
+  }
+  const state = { action: { ...input.action, params: input.action.params ?? {} } };
+  if (mode === "propose") {
+    insertTask(db2, { ...base, status: "active", state, requires_approval: true, review_requested_at: now });
+  } else {
+    insertTask(db2, { ...base, status: "completed", state, result: input.result ?? `Done automatically: ${input.action.summary}` });
+  }
+  return { task: getTask(db2, planId, id), existing: false, mode };
+}
+function summarizeItem(t) {
+  const action = isProposal(t) ? t.state.action : void 0;
+  return {
+    id: t.id,
+    goal: t.goal,
+    status: t.status,
+    external_ref: t.external_ref,
+    awaiting_review: t.review_requested_at !== null,
+    approved_to_execute: action !== void 0 && t.approved_at !== null && t.status === "active",
+    ...action && { action }
+  };
+}
+function buildBrief(db2, planId, runId) {
+  const goal = mustGetGoal(db2, planId);
+  const plan = getPlan(db2, planId);
+  const run = runId ? getRun(db2, runId) : void 0;
+  if (runId && (!run || run.plan_id !== planId)) throw new GoalError(`Run ${runId} not found for this goal.`);
+  const previous = listRuns(db2, planId, 10, { includeSkipped: false }).find((r) => r.id !== runId && r.status !== "queued" && r.status !== "running");
+  const since = previous?.started_at ?? "1970-01-01T00:00:00.000Z";
+  const decisions = db2.prepare(`
+    SELECT v.task_id, v.gate, v.passed, v.output, v.created_at, t.goal, t.state
+    FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
+    WHERE v.plan_id = ? AND v.gate IN ('approval', 'override') AND v.actor = 'human' AND v.created_at > ?
+    ORDER BY v.created_at
+  `).all(planId, since).map((d) => {
+    const action = JSON.parse(d.state).action;
+    return {
+      item: d.task_id,
+      goal: d.goal,
+      decision: d.gate === "override" ? "completed_by_human" : d.passed ? "approved" : "rejected",
+      ...d.output && { feedback: d.output },
+      ...action && { action },
+      at: d.created_at
+    };
+  });
+  const active = listMemory(db2, planId, { activeOnly: true });
+  const ordered = [
+    ...active.filter((m) => m.pinned),
+    ...active.filter((m) => !m.pinned).sort((a, b) => (b.last_used_at ?? b.created_at).localeCompare(a.last_used_at ?? a.created_at))
+  ];
+  const memory = [];
+  let chars = 0;
+  for (const m of ordered) {
+    if (!m.pinned && chars + m.text.length > MEMORY_BRIEF_CHARS) continue;
+    memory.push(m);
+    chars += m.text.length;
+  }
+  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
+  for (const m of memory) updateMemory(db2, m.id, { last_used_at: nowIso });
+  const items = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL AND status IN ('pending', 'active')").all(planId).map(deserializeTask).map(summarizeItem).sort((a, b) => Number(b.approved_to_execute) - Number(a.approved_to_execute) || compareTaskIds(a.id, b.id));
+  const dayAgo = new Date(Date.now() - 864e5).toISOString();
+  const resolved24h = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(planId, dayAgo).n;
+  return {
+    goal: { id: planId, name: plan.name, objective: goal.objective, instructions: goal.instructions, status: goal.status },
+    run: run ? { id: run.id, trigger: run.trigger, started_at: run.started_at, limits: goal.limits } : null,
+    autonomy: { default: "propose", categories: goal.autonomy },
+    memory: memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned })),
+    memory_omitted: active.length - memory.length,
+    decisions_since_last_run: decisions,
+    open_items: items,
+    recent_runs: listRuns(db2, planId, 10, { includeSkipped: false }).filter((r) => r.id !== runId && r.summary).slice(0, 3).map((r) => ({ at: r.started_at, summary: r.summary })),
+    counts: {
+      open: items.length,
+      awaiting_review: items.filter((i) => i.awaiting_review).length,
+      approved_to_execute: items.filter((i) => i.approved_to_execute).length,
+      resolved_last_24h: resolved24h
+    },
+    health: (() => {
+      const [h] = listHealth(db2, planId, 1);
+      return h ? { passed: h.passed, value: h.value, at: h.created_at, ...!h.passed && h.output && { output: h.output.slice(-500) } } : null;
+    })()
+  };
+}
+function queueRun(db2, planId, trigger = "manual") {
+  const goal = mustGetGoal(db2, planId);
+  if (goal.status !== "active") throw new GoalError(`Goal is ${goal.status}; resume it before running.`);
+  return getOpenRun(db2, planId) ?? insertRun(db2, planId, trigger, "queued");
+}
+function endRun(db2, runId, summary) {
+  const run = getRun(db2, runId);
+  if (!run) throw new GoalError(`Run ${runId} not found.`);
+  if (run.status !== "running" && run.status !== "queued") throw new GoalError(`Run ${runId} already ended (${run.status}).`);
+  if (!summary.trim()) throw new GoalError("A summary is required: what you did, what is waiting, what you learned.");
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  const created = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND run_id = ?").get(run.plan_id, runId).n;
+  const resolved = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(run.plan_id, run.started_at).n;
+  updateRun(db2, runId, { status: "completed", summary: summary.trim(), ended_at: now, items_created: created, items_resolved: resolved });
+  archiveResolved(db2, run.plan_id);
+  finishIfDone(db2, run.plan_id);
+  return getRun(db2, runId);
+}
+function countOpenItems(db2, planId) {
+  return db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND archived_at IS NULL AND status IN ('pending', 'active')").get(planId).n;
+}
+function finishIfDone(db2, planId) {
+  const goal = getGoal(db2, planId);
+  if (!goal?.one_off || goal.status !== "active" || countOpenItems(db2, planId) > 0) return false;
+  updateGoal(db2, planId, { status: "retired", next_run_at: null });
+  return true;
+}
+function failRun(db2, runId, status, reason) {
+  const run = getRun(db2, runId);
+  if (!run || run.status !== "running" && run.status !== "queued") return;
+  updateRun(db2, runId, { status, ended_at: (/* @__PURE__ */ new Date()).toISOString(), summary: run.summary ?? reason });
+}
+function archiveResolved(db2, planId, now = /* @__PURE__ */ new Date()) {
+  const goal = getGoal(db2, planId);
+  if (!goal) return 0;
+  const cutoff = new Date(now.getTime() - goal.item_retention_days * 864e5).toISOString();
+  return db2.prepare(`
+    UPDATE tasks SET archived_at = ?
+    WHERE plan_id = ? AND archived_at IS NULL AND status IN ('completed', 'abandoned') AND updated_at < ?
+  `).run(now.toISOString(), planId, cutoff).changes;
+}
+function withinActiveHours(activeHours, date3) {
+  if (!activeHours) return true;
+  const [start, end] = activeHours.split("-").map((s) => {
+    const [h, m] = s.split(":").map(Number);
+    return h * 60 + m;
+  });
+  const minutes = date3.getHours() * 60 + date3.getMinutes();
+  return start <= end ? minutes >= start && minutes < end : minutes >= start || minutes < end;
+}
+function decideTick(db2, planId, now = /* @__PURE__ */ new Date()) {
+  const goal = getGoal(db2, planId);
+  if (!goal || goal.status !== "active") return { action: "none" };
+  const open = getOpenRun(db2, planId);
+  if (open?.status === "running") return { action: "none" };
+  const schedule = getSchedule(db2, planId);
+  const queued = open?.status === "queued" ? open : void 0;
+  const scheduleDue = Boolean(schedule && goal.next_run_at && goal.next_run_at <= now.toISOString());
+  if (!queued && !scheduleDue) return { action: "none" };
+  if (!queued && schedule?.kind === "interval" && !withinActiveHours(schedule.active_hours, now)) {
+    return { action: "defer", next_run_at: new Date(now.getTime() + schedule.minutes * 6e4).toISOString() };
+  }
+  const kind = queued ? queued.trigger : schedule.kind;
+  const runsToday = countRunsSince(db2, planId, new Date(now.getTime() - 864e5).toISOString()) - (queued ? 1 : 0);
+  if (runsToday >= goal.limits.max_runs_per_day) {
+    return { action: "skip", trigger: kind, reason: `daily run limit reached (${goal.limits.max_runs_per_day})`, queuedRunId: queued?.id };
+  }
+  return { action: "start", trigger: kind, queuedRunId: queued?.id };
+}
+function nextIntervalRun(db2, planId, from = /* @__PURE__ */ new Date()) {
+  return nextScheduledRun(db2, planId, from);
+}
+function recordSkip(db2, planId, trigger, reason, now = /* @__PURE__ */ new Date()) {
+  const hourAgo = new Date(now.getTime() - 36e5).toISOString();
+  const recent = db2.prepare("SELECT 1 FROM goal_runs WHERE plan_id = ? AND status = 'skipped' AND skip_reason = ? AND started_at >= ?").get(planId, reason, hourAgo);
+  return recent ? null : insertRun(db2, planId, trigger, "skipped", reason);
+}
+var GoalError, MEMORY_BRIEF_CHARS;
+var init_goal_engine = __esm({
+  "../core/src/goal-engine.ts"() {
+    "use strict";
+    init_queries();
+    init_gates();
+    init_goals();
+    init_schedule();
+    init_health();
+    GoalError = class extends Error {
+    };
+    MEMORY_BRIEF_CHARS = 4e3;
+  }
+});
+
+// ../core/src/guard.ts
+function canonicalToolName(name) {
+  return name.startsWith(PLUGIN_QUARTERDECK_TOOL_PREFIX) ? QUARTERDECK_TOOL_PREFIX + name.slice(PLUGIN_QUARTERDECK_TOOL_PREFIX.length) : name;
+}
+function matchToolCategory(rawMap, rawName) {
+  const toolName = canonicalToolName(rawName);
+  const toolMap = Object.fromEntries(Object.entries(rawMap).map(([p, c]) => [canonicalToolName(p), c]));
+  if (toolMap[toolName]) return toolMap[toolName];
+  const globs = Object.entries(toolMap).filter(([p]) => p.includes("*")).sort(([a], [b]) => b.length - a.length);
+  for (const [pattern, category] of globs) {
+    const re = new RegExp("^" + pattern.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
+    if (re.test(toolName)) return category;
+  }
+  return null;
+}
+function record2(db2, run, toolName, category, decision, reason) {
+  db2.prepare(`
+    INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(newId("tc"), run.plan_id, run.id, toolName, category, decision, reason, (/* @__PURE__ */ new Date()).toISOString());
+}
+function guardToolCallForRun(db2, runId, toolName) {
+  const run = db2.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId);
+  return run ? guardRun(db2, run, toolName) : { decision: "allow" };
+}
+function guardRun(db2, run, toolName) {
+  const goal = getGoal(db2, run.plan_id);
+  if (!goal) return { decision: "allow" };
+  const category = matchToolCategory(goal.tool_map, toolName);
+  if (!category) return { decision: "allow", run_id: run.id };
+  const mode = autonomyFor(goal, category);
+  if (mode === "auto") {
+    record2(db2, run, toolName, category, "allow", null);
+    return { decision: "allow", category, run_id: run.id };
+  }
+  if (mode === "off") {
+    const reason2 = `Quarterdeck goal guard: "${category}" is off for this goal, so ${toolName} is not allowed. Don't take or propose this action.`;
+    record2(db2, run, toolName, category, "deny", reason2);
+    return { decision: "deny", category, run_id: run.id, reason: reason2 };
+  }
+  const approved = db2.prepare(`
+    SELECT COUNT(*) AS n FROM tasks
+    WHERE plan_id = ? AND status = 'active' AND archived_at IS NULL AND approved_at IS NOT NULL
+      AND json_extract(state, '$.action.category') = ?
+  `).get(run.plan_id, category).n;
+  if (approved > 0) {
+    record2(db2, run, toolName, category, "allow", null);
+    return { decision: "allow", category, run_id: run.id };
+  }
+  const reason = `Quarterdeck goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`;
+  record2(db2, run, toolName, category, "deny", reason);
+  return { decision: "deny", category, run_id: run.id, reason };
+}
+var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX;
+var init_guard = __esm({
+  "../core/src/guard.ts"() {
+    "use strict";
+    init_goal_engine();
+    init_goals();
+    QUARTERDECK_TOOL_PREFIX = "mcp__quarterdeck__";
+    PLUGIN_QUARTERDECK_TOOL_PREFIX = "mcp__plugin_quarterdeck-goals_quarterdeck__";
+  }
+});
+
+// ../core/src/goal-changes.ts
+function applyGoalChanges(db2, planId, changes) {
+  const goal = getGoal(db2, planId);
+  const plan = getPlan(db2, planId);
+  if (!goal || !plan) throw new GoalError(`Goal ${planId} not found.`);
+  for (const [category, mode] of Object.entries(changes.autonomy ?? {})) {
+    if (mode !== null && !MODES.has(mode)) throw new GoalError(`"${mode}" isn't a mode for ${category}: use off, propose or auto.`);
+  }
+  for (const id of changes.forget_memory ?? []) {
+    if (getMemory(db2, id)?.plan_id !== planId) throw new GoalError(`Memory ${id} isn't this goal's.`);
+  }
+  const done = [];
+  db2.transaction(() => {
+    if (changes.name?.trim() && changes.name.trim() !== plan.name) {
+      updatePlan(db2, planId, { name: changes.name.trim(), updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+      done.push(`renamed to "${changes.name.trim()}"`);
+    }
+    if (changes.objective?.trim() && changes.objective.trim() !== goal.objective) {
+      updateGoal(db2, planId, { objective: changes.objective.trim() });
+      updatePlan(db2, planId, { description: changes.objective.trim() });
+      done.push("objective changed");
+    }
+    if (changes.instructions !== void 0 && changes.instructions !== goal.instructions) {
+      updateGoal(db2, planId, { instructions: changes.instructions });
+      done.push(changes.instructions.trim() ? "instructions changed" : "instructions cleared");
+    }
+    if (changes.autonomy && Object.keys(changes.autonomy).length) {
+      const autonomy = { ...goal.autonomy };
+      for (const [category, mode] of Object.entries(changes.autonomy)) {
+        if (mode === null) delete autonomy[category];
+        else autonomy[category] = mode;
+        done.push(mode === null ? `${category}: back to propose` : `${category}: ${mode}`);
+      }
+      updateGoal(db2, planId, { autonomy });
+    }
+    if (changes.tool_map && Object.keys(changes.tool_map).length) {
+      const toolMap = { ...goal.tool_map };
+      for (const [pattern, category] of Object.entries(changes.tool_map)) {
+        if (category === null) delete toolMap[pattern];
+        else toolMap[pattern] = category;
+        done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} \u2192 ${category}`);
+      }
+      updateGoal(db2, planId, { tool_map: toolMap });
+    }
+    for (const m of changes.add_memory ?? []) {
+      insertMemory(db2, { plan_id: planId, kind: m.kind, text: m.text, source: "human", pinned: m.pinned ?? false });
+      done.push(`remembered (${m.kind}): ${m.text}`);
+    }
+    for (const id of changes.forget_memory ?? []) {
+      updateMemory(db2, id, { active: false });
+      done.push(`forgot memory ${id}`);
+    }
+    if (changes.status && changes.status !== goal.status) {
+      if (goal.status === "retired") throw new GoalError("This goal is done; run it again first.");
+      updateGoal(db2, planId, { status: changes.status });
+      done.push(changes.status === "paused" ? "paused" : "resumed");
+    }
+  })();
+  return done;
+}
+function getRunHold(db2, now = /* @__PURE__ */ new Date()) {
+  const row = db2.prepare("SELECT until, reason FROM goal_run_hold WHERE id = 1").get();
+  if (!row) return null;
+  if (row.until <= now.toISOString()) {
+    db2.prepare("DELETE FROM goal_run_hold WHERE id = 1").run();
+    return null;
+  }
+  return row;
+}
+function setRunHold(db2, hold) {
+  db2.prepare("INSERT INTO goal_run_hold (id, until, reason) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET until = excluded.until, reason = excluded.reason").run(hold.until, hold.reason);
+}
+function isUsageLimit(text) {
+  return LIMIT.test(text);
+}
+function parseLimitReset(text, now = /* @__PURE__ */ new Date()) {
+  const m = /resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(text);
+  if (!m) return null;
+  let hour = Number(m[1]);
+  const minute = Number(m[2] ?? 0);
+  const meridiem = m[3]?.toLowerCase();
+  if (hour > 23 || minute > 59 || meridiem && hour > 12) return null;
+  if (meridiem === "pm" && hour < 12) hour += 12;
+  if (meridiem === "am" && hour === 12) hour = 0;
+  const at = new Date(now);
+  at.setHours(hour, minute, 0, 0);
+  if (at <= now) at.setDate(at.getDate() + 1);
+  return at;
+}
+function addRunUsage(db2, runId, usage) {
+  db2.prepare(`
+    UPDATE goal_runs SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?,
+      cache_read_tokens = cache_read_tokens + ?, cache_write_tokens = cache_write_tokens + ?, model = COALESCE(?, model)
+    WHERE id = ?
+  `).run(usage.input_tokens || 0, usage.output_tokens || 0, usage.cache_read_input_tokens || 0, usage.cache_creation_input_tokens || 0, usage.model ?? null, runId);
+}
+function reportRunEnd(db2, runId, input, now = /* @__PURE__ */ new Date()) {
+  const run = getRun(db2, runId);
+  if (!run) return { outcome: "unchanged" };
+  if (input.usage) addRunUsage(db2, runId, input.usage);
+  if (run.status !== "running") return { outcome: "unchanged" };
+  const answer = input.answer.trim();
+  if (isUsageLimit(answer)) {
+    const until = (parseLimitReset(answer, now) ?? new Date(now.getTime() + DEFAULT_HOLD_MS)).toISOString();
+    const hold = { until, reason: answer.split("\n")[0].slice(0, 200) };
+    updateRun(db2, runId, { status: "skipped", skip_reason: `usage limit reached: ${hold.reason}`, ended_at: now.toISOString() });
+    setRunHold(db2, hold);
+    return { outcome: "held", hold };
+  }
+  if (input.reason === "error") {
+    failRun(db2, runId, "failed", `The agent stopped on an error: ${answer.slice(0, 300) || "no message"}`);
+    return { outcome: "failed" };
+  }
+  return { outcome: "unchanged" };
+}
+var MODES, LIMIT, DEFAULT_HOLD_MS;
+var init_goal_changes = __esm({
+  "../core/src/goal-changes.ts"() {
+    "use strict";
+    init_queries();
+    init_goals();
+    init_goal_engine();
+    MODES = /* @__PURE__ */ new Set(["off", "propose", "auto"]);
+    LIMIT = /(hit|reached) (your|the) .{0,30}limit|usage limit|rate limit|out of (credits|usage)/i;
+    DEFAULT_HOLD_MS = 30 * 6e4;
+  }
+});
+
+// ../core/src/goal-tick.ts
+function takeLease(db2, holder, now = /* @__PURE__ */ new Date()) {
+  db2.prepare(`
+    INSERT INTO scheduler_lease (name, holder, expires_at) VALUES (?, ?, ?)
+    ON CONFLICT(name) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at
+    WHERE scheduler_lease.holder = excluded.holder OR scheduler_lease.expires_at <= ?
+  `).run(LEASE_NAME, holder, new Date(now.getTime() + LEASE_MS).toISOString(), now.toISOString());
+  const row = db2.prepare("SELECT holder FROM scheduler_lease WHERE name = ?").get(LEASE_NAME);
+  return row.holder === holder;
+}
+function releaseLease(db2, holder) {
+  db2.prepare("DELETE FROM scheduler_lease WHERE name = ? AND holder = ?").run(LEASE_NAME, holder);
+}
+function leaseHolder(db2, now = /* @__PURE__ */ new Date()) {
+  const row = db2.prepare("SELECT holder FROM scheduler_lease WHERE name = ? AND expires_at > ?").get(LEASE_NAME, now.toISOString());
+  return row?.holder ?? null;
+}
+function goalRunPrompt(p) {
+  return [
+    `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
+    `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries.`,
+    "Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal's state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category's autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.",
+    "When you need something only the person can give or do (a choice, details you can't find, connecting a service, allowing a site), add_item with ask_person: true and one clear question, and carry on with what you can; don't guess. Their answer arrives as memory and the item is completed.",
+    "Save anything future runs should know with remember.",
+    'Your summary, items and memory are read by the person who owns this goal: write to them as "you", and never guess their gender or pronouns.',
+    `You have about ${p.maxRunMinutes} minutes; leave the rest for the next run. Don't wait on long background commands. Finish with end_run and a short summary: that summary is your report, so your final message can be one line.`
+  ].join("\n\n");
+}
+function claimRun(db2, planId, opts) {
+  const now = (opts.now ?? /* @__PURE__ */ new Date()).toISOString();
+  const claim = db2.transaction(() => {
+    const run2 = opts.queuedRunId ? getRun(db2, opts.queuedRunId) : insertRun(db2, planId, opts.trigger ?? "manual", "queued");
+    if (!run2) return null;
+    const changed = db2.prepare("UPDATE goal_runs SET status = 'running', holder = ?, started_at = ? WHERE id = ? AND status = 'queued'").run(opts.holder, now, run2.id).changes;
+    if (!changed) return null;
+    updateGoal(db2, planId, { last_run_at: now });
+    return getRun(db2, run2.id);
+  });
+  const run = claim();
+  if (!run) return null;
+  const goal = getGoal(db2, planId);
+  const plan = listGoals(db2).find((g) => g.plan.id === planId).plan;
+  return {
+    run_id: run.id,
+    goal_id: planId,
+    name: plan.name,
+    working_dir: plan.working_dir,
+    trigger: run.trigger,
+    max_run_minutes: goal.limits.max_run_minutes,
+    prompt: goalRunPrompt({ goalId: planId, runId: run.id, name: plan.name, workingDir: plan.working_dir, maxRunMinutes: goal.limits.max_run_minutes })
+  };
+}
+function attachAgent(db2, runId, agentId) {
+  updateRun(db2, runId, { agent_id: agentId });
+}
+function expireStaleRuns(db2, now = /* @__PURE__ */ new Date(), opts = {}) {
+  const rows = db2.prepare(`
+    SELECT r.id, r.started_at, g.limits FROM goal_runs r JOIN goals g ON g.plan_id = r.plan_id WHERE r.status = 'running'
+  `).all();
+  const expired = [];
+  for (const r of rows) {
+    if (opts.skipRunIds?.has(r.id)) continue;
+    const maxMinutes = JSON.parse(r.limits || "{}").max_run_minutes ?? 15;
+    if (now.getTime() - new Date(r.started_at).getTime() > maxMinutes * 6e4 + STALE_GRACE_MS) {
+      failRun(db2, r.id, "timed_out", "Run did not finish (Claude Code closed or the agent stopped responding)");
+      expired.push(r.id);
+    }
+  }
+  return expired;
+}
+async function checkHealth(db2, planId) {
+  const result = await runHealthCheck(db2, planId);
+  const goal = getGoal(db2, planId);
+  let queuedRun = false;
+  if (!result.passed && goal?.health_triggers_run && goal.status === "active" && !getOpenRun(db2, planId)) {
+    queueRun(db2, planId, "health");
+    queuedRun = true;
+  }
+  return { passed: result.passed, queuedRun };
+}
+async function schedulerPass(db2, opts) {
+  const now = opts.now ?? /* @__PURE__ */ new Date();
+  if (schemaOutdated(db2)) return { leader: false, claimed: [], expired: [], outdated: true };
+  if (!opts.ignoreLease && !takeLease(db2, opts.holder, now)) return { leader: false, claimed: [], expired: [] };
+  const expired = expireStaleRuns(db2, now, { skipRunIds: opts.trackedRunIds });
+  const goals = listGoals(db2, "active");
+  for (const { goal } of goals) {
+    if (!healthDue(goal, now)) continue;
+    await checkHealth(db2, goal.plan_id).catch(() => {
+    });
+  }
+  const hold = getRunHold(db2, now);
+  if (hold) return { leader: true, claimed: [], expired, hold };
+  let running = db2.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get().n;
+  const max = opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
+  const claimed = [];
+  for (const { plan } of goals) {
+    archiveResolved(db2, plan.id, now);
+    const decision = decideTick(db2, plan.id, now);
+    if (decision.action === "none") continue;
+    if (decision.action === "defer") {
+      updateGoal(db2, plan.id, { next_run_at: decision.next_run_at });
+      continue;
+    }
+    if (decision.action === "skip") {
+      if (decision.queuedRunId) {
+        updateRun(db2, decision.queuedRunId, { status: "skipped", skip_reason: decision.reason, ended_at: now.toISOString() });
+      } else {
+        recordSkip(db2, plan.id, decision.trigger, decision.reason, now);
+      }
+      updateGoal(db2, plan.id, { next_run_at: nextIntervalRun(db2, plan.id, now) });
+      continue;
+    }
+    if (running >= max) continue;
+    const run = claimRun(db2, plan.id, { holder: opts.holder, queuedRunId: decision.queuedRunId, trigger: decision.trigger, now });
+    if (run) {
+      claimed.push(run);
+      running++;
+    }
+    if (decision.trigger === "interval" || decision.trigger === "cron") updateGoal(db2, plan.id, { next_run_at: nextIntervalRun(db2, plan.id, now) });
+  }
+  return { leader: true, claimed, expired };
+}
+function decideItem(db2, planId, taskId, input) {
+  const task = getTask(db2, planId, taskId);
+  if (!task) throw new GoalError(`Item ${taskId} not found.`);
+  let queuedRun = null;
+  const active = () => getGoal(db2, planId)?.status === "active";
+  if (input.decision === "answer") {
+    const answer = (input.feedback ?? "").trim();
+    if (!answer) throw new GoalError("An answer is needed.");
+    if (!asksPerson(task)) throw new GoalError(`Item ${taskId} isn't a question for you; approve or reject it instead.`);
+    approveTask(db2, planId, taskId);
+    updateTask(db2, planId, taskId, { result: `Your answer: ${answer}`, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+    insertMemory(db2, { plan_id: planId, kind: "fact", text: `You answered "${task.goal}": ${answer}`, source: "human", source_ref: taskId });
+    if (active()) queuedRun = queueRun(db2, planId);
+  } else if (input.decision === "approve") {
+    approveTask(db2, planId, taskId);
+    if ((isProposal(task) || asksPerson(task)) && active()) queuedRun = queueRun(db2, planId);
+  } else {
+    rejectTask(db2, planId, taskId, input.feedback ?? "");
+    const goal = getGoal(db2, planId);
+    if (isProposal(task) && goal?.one_off && goal.status === "active") queuedRun = queueRun(db2, planId);
+  }
+  return { task: getTask(db2, planId, taskId), queuedRun };
+}
+function reviveIfDone(db2, planId) {
+  const goal = getGoal(db2, planId);
+  if (!goal?.one_off || goal.status !== "retired") return false;
+  updateGoal(db2, planId, { status: "active" });
+  return true;
+}
+var LEASE_NAME, LEASE_MS, STALE_GRACE_MS, DEFAULT_MAX_CONCURRENT;
+var init_goal_tick = __esm({
+  "../core/src/goal-tick.ts"() {
+    "use strict";
+    init_queries();
+    init_gates();
+    init_goals();
+    init_goal_engine();
+    init_health();
+    init_goal_changes();
+    init_migrate();
+    LEASE_NAME = "goals";
+    LEASE_MS = 9e4;
+    STALE_GRACE_MS = 5 * 6e4;
+    DEFAULT_MAX_CONCURRENT = 3;
+  }
+});
+
+// ../core/src/goal-overview.ts
+import { createHash } from "crypto";
+function clip(text, max) {
+  if (text === null || text.length <= max) return text;
+  return `${text.slice(0, max - 1).trimEnd()}\u2026`;
+}
+function getGoalItems(db2, planId) {
+  const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL").all(planId);
+  return rows.map(deserializeTask).sort((a, b) => compareTaskIds(a.id, b.id));
+}
+function itemView(t) {
+  return {
+    id: t.id,
+    goal: t.goal,
+    status: t.status,
+    result: t.result,
+    notes: t.notes,
+    external_ref: t.external_ref,
+    run_id: t.run_id,
+    action: isProposal(t) ? t.state.action : null,
+    asks_person: asksPerson(t),
+    awaiting_review: t.review_requested_at !== null,
+    approved_to_execute: isProposal(t) && t.approved_at !== null && t.status === "active",
+    updated_at: t.updated_at
+  };
+}
+function overviewItem(t) {
+  const v = itemView(t);
+  const action = v.action;
+  const short = { ...v, goal: clip(v.goal, CLIP.title), notes: clip(v.notes, CLIP.notes), result: clip(v.result, CLIP.result) };
+  return action ? { ...short, action: { category: action.category, summary: clip(action.summary, CLIP.title) } } : short;
+}
+function getAutonomySuggestions(db2, planId) {
+  const goal = getGoal(db2, planId);
+  if (!goal) return [];
+  const rows = db2.prepare(`
+    SELECT json_extract(t.state, '$.action.category') AS category, v.passed
+    FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
+    WHERE v.plan_id = ? AND v.gate = 'approval' AND json_extract(t.state, '$.action.category') IS NOT NULL
+    ORDER BY v.created_at DESC, v.rowid DESC
+  `).all(planId);
+  const streak = /* @__PURE__ */ new Map();
+  for (const r of rows) {
+    const s = streak.get(r.category) ?? { n: 0, broken: false };
+    if (!s.broken) {
+      if (r.passed) s.n++;
+      else s.broken = true;
+    }
+    streak.set(r.category, s);
+  }
+  return [...streak.entries()].filter(([c, s]) => s.n >= PROMOTE_AFTER && autonomyFor(goal, c) === "propose").map(([category, s]) => ({ category, approved_in_a_row: s.n }));
+}
+function describeEvent(e, itemGoal) {
+  const p = e.payload;
+  switch (e.event_type) {
+    case "agent_message":
+      return str(p.message);
+    case "tool_call":
+      return str(p.tool) ? `Using ${str(p.tool)}` : null;
+    case "task_created": {
+      const goal = str(p.goal);
+      return goal ? `Added "${goal}"${p.mode === "propose" ? " for approval" : ""}` : null;
+    }
+    case "status_changed": {
+      const goal = itemGoal(e.task_id);
+      if (!goal) return null;
+      if (p.to === "completed") return `Completed "${goal}"`;
+      if (p.to === "abandoned") return `Dropped "${goal}"`;
+      return null;
+    }
+    case "memory_added":
+      return str(p.text) ? `Noted: ${str(p.text)}` : null;
+    default:
+      return null;
+  }
+}
+function describeActivity({ goal, openRun, lastRun, events, items }) {
+  if (openRun?.status === "running") {
+    const goals = new Map(items.map((t) => [t.id, t.goal]));
+    for (const e of events) {
+      if (e.created_at < openRun.started_at) break;
+      if (e.actor !== "agent") continue;
+      const text = describeEvent(e, (id) => goals.get(id) ?? null);
+      if (text) return { state: "running", text, at: e.created_at };
+    }
+    return { state: "running", text: "Starting: reading the brief", at: openRun.started_at };
+  }
+  if (openRun) return { state: "queued", text: `Queued (${openRun.trigger}) \u2014 starts within a minute while Claude Code is open`, at: openRun.started_at };
+  if (goal.status === "paused") return { state: "paused", text: "Paused", at: null };
+  const approved = items.filter((t) => isProposal(t) && t.approved_at !== null && t.status === "active");
+  if (approved.length > 0) {
+    const more = approved.length > 1 ? ` and ${approved.length - 1} more` : "";
+    return { state: "idle", text: `Next run carries out "${oneLine(approved[0].goal)}"${more}`, at: null };
+  }
+  const summary = str(lastRun?.summary);
+  if (summary) return { state: "idle", text: `Last run: ${summary}`, at: null };
+  return { state: "idle", text: "Waiting for its first run", at: null };
+}
+function buildOverview(db2, detail = "all", standingSession = null) {
+  const all = listGoals(db2);
+  const done = all.filter(({ goal }) => goal.status === "retired" && goal.one_off).sort((a, b) => (b.goal.last_run_at ?? "").localeCompare(a.goal.last_run_at ?? "")).slice(0, DONE);
+  const goals = [...all.filter(({ goal }) => goal.status !== "retired"), ...done].sort((a, b) => a.plan.name.localeCompare(b.plan.name)).map(({ plan, goal }) => {
+    const items = getGoalItems(db2, plan.id);
+    const open = items.filter((t) => t.status === "pending" || t.status === "active");
+    const openRun = getOpenRun(db2, plan.id) ?? null;
+    const runs = listRuns(db2, plan.id, RUNS, { includeSkipped: false });
+    return {
+      id: plan.id,
+      name: plan.name,
+      objective: clip(goal.objective, CLIP.objective),
+      status: goal.status,
+      one_off: goal.one_off,
+      instructions: clip(goal.instructions, CLIP.instructions),
+      autonomy: goal.autonomy,
+      tool_map: goal.tool_map,
+      next_run_at: goal.next_run_at,
+      schedule: getSchedule(db2, plan.id),
+      open_run: openRun,
+      activity: (() => {
+        const a = describeActivity({
+          goal,
+          openRun,
+          lastRun: runs.find((r) => r.status !== "queued" && r.status !== "running") ?? null,
+          events: openRun?.status === "running" ? getEvents(db2, plan.id, { limit: ACTIVITY_EVENTS }) : [],
+          items
+        });
+        return { ...a, text: clip(a.text, CLIP.activity) };
+      })(),
+      runs: runs.map((r) => ({
+        id: r.id,
+        status: r.status,
+        trigger: r.trigger,
+        summary: clip(r.summary, CLIP.summary),
+        started_at: r.started_at,
+        ended_at: r.ended_at,
+        agent_id: r.agent_id,
+        // New tokens only: every model call re-reads the cached prompt, so cache reads would swamp the total
+        tokens: r.input_tokens + r.output_tokens + r.cache_write_tokens,
+        model: r.model
+      })),
+      needs_you: open.filter((t) => t.review_requested_at).map(overviewItem),
+      open_items: open.filter((t) => !t.review_requested_at).slice(0, OPEN_ITEMS).map(overviewItem),
+      open_item_count: open.filter((t) => !t.review_requested_at).length,
+      health: listHealth(db2, plan.id, HEALTH).map((h) => ({ passed: h.passed, value: h.value, created_at: h.created_at })),
+      memory: listMemory(db2, plan.id, { activeOnly: true }).slice(-MEMORY).reverse().map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory), source: m.source, pinned: m.pinned, created_at: m.created_at })),
+      suggestions: getAutonomySuggestions(db2, plan.id)
+    };
+  }).map((g) => {
+    const waiting = g.needs_you.length;
+    if (detail === "all" || detail.includes(g.id)) return { ...g, detail: true, needs_you_count: waiting };
+    return {
+      ...g,
+      detail: false,
+      needs_you_count: waiting,
+      objective: clip(g.objective, CARD_TEXT),
+      // On a card, each waiting item carries only what its row shows
+      needs_you: g.needs_you.slice(0, NEEDS_YOU).map((i) => ({
+        id: i.id,
+        goal: clip(i.goal, CARD_TEXT),
+        asks_person: i.asks_person,
+        action: i.action ? { category: i.action.category, summary: clip(i.action.summary, CARD_TEXT) } : null
+      })),
+      runs: g.runs.slice(0, 1),
+      open_items: [],
+      memory: [],
+      instructions: "",
+      tool_map: {}
+    };
+  });
+  const standing = standingSession !== null && leaseHolder(db2) === standingSession;
+  return { goals, hold: getRunHold(db2), ...schemaOutdated(db2) ? { outdated: true } : {}, ...standing ? { standing: true } : {} };
+}
+function overviewWithEtag(db2, detail = "all", standingSession = null) {
+  const body = JSON.stringify(buildOverview(db2, detail, standingSession));
+  return { body, etag: `"${createHash("sha256").update(body).digest("base64url").slice(0, 27)}"` };
+}
+var RUNS, OPEN_ITEMS, HEALTH, MEMORY, CLIP, DONE, ACTIVITY_EVENTS, PROMOTE_AFTER, oneLine, str, NEEDS_YOU, CARD_TEXT;
+var init_goal_overview = __esm({
+  "../core/src/goal-overview.ts"() {
+    "use strict";
+    init_queries();
+    init_gates();
+    init_goals();
+    init_goal_engine();
+    init_schedule();
+    init_health();
+    init_goal_changes();
+    init_migrate();
+    init_goal_tick();
+    RUNS = 5;
+    OPEN_ITEMS = 10;
+    HEALTH = 20;
+    MEMORY = 10;
+    CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400 };
+    DONE = 10;
+    ACTIVITY_EVENTS = 20;
+    PROMOTE_AFTER = 10;
+    oneLine = (s) => s.replace(/\s+/g, " ").trim();
+    str = (v) => typeof v === "string" && v.trim() ? oneLine(v) : null;
+    NEEDS_YOU = 5;
+    CARD_TEXT = 160;
+  }
+});
+
+// ../core/src/todos.ts
+import { randomUUID as randomUUID3 } from "crypto";
+function listPlans2(db2, workingDir) {
+  const plans = db2.prepare("SELECT * FROM plans WHERE status = 'active' AND kind != 'goal' ORDER BY updated_at DESC").all();
+  return plans.filter((p) => samePath(p.working_dir, workingDir));
+}
+function headingOf(tasks) {
+  const roots = tasks.filter((t) => !t.id.includes("."));
+  if (roots.length !== 1) return null;
+  return tasks.some((t) => t.id.startsWith(`${roots[0].id}.`)) ? roots[0].id : null;
+}
+function toList(db2, plan) {
+  const tasks = getAllTasks(db2, plan.id).filter((t) => !t.archived_at);
+  const heading = headingOf(tasks);
+  const shown = heading ? tasks.filter((t) => t.id !== heading) : tasks;
+  const base = heading ? 2 : 1;
+  const items = shown.map((t) => ({ id: t.id, text: t.goal, status: t.status, depth: t.id.split(".").length - base, notes: t.notes }));
+  const done = items.filter((i) => i.status === "completed" || i.status === "abandoned").length;
+  return { id: plan.id, name: plan.name, items, open: items.length - done, done };
+}
+function todoLists(db2, workingDir) {
+  const plans = listPlans2(db2, workingDir);
+  plans.sort((a, b) => Number(b.name === DEFAULT_LIST) - Number(a.name === DEFAULT_LIST));
+  return plans.map((p) => toList(db2, p));
+}
+function addTodo(db2, input) {
+  const text = input.text.trim();
+  if (!text) throw new Error("A to-do needs some text.");
+  const now = (/* @__PURE__ */ new Date()).toISOString();
+  let plan = input.listId ? getPlan(db2, input.listId) : listPlans2(db2, input.workingDir).find((p) => p.name === DEFAULT_LIST);
+  if (input.listId && (!plan || plan.kind === "goal")) throw new Error(`List ${input.listId} not found.`);
+  let created = false;
+  if (!plan) {
+    const id = `plan_${randomUUID3().replace(/-/g, "").slice(0, 10)}`;
+    insertPlan(db2, { id, name: DEFAULT_LIST, description: "Your to-do list for this project", status: "active", working_dir: input.workingDir, created_at: now, updated_at: now });
+    plan = getPlan(db2, id);
+    created = true;
+  }
+  const parent = headingOf(getAllTasks(db2, plan.id).filter((t) => !t.archived_at));
+  const itemId = nextChildId(db2, plan.id, parent);
+  insertTask(db2, {
+    id: itemId,
+    plan_id: plan.id,
+    goal: text,
+    status: "pending",
+    result: null,
+    abandon_reason: null,
+    state: {},
+    depends_on: null,
+    notes: null,
+    created_by: input.by ?? "human",
+    created_at: now,
+    updated_at: now
+  });
+  touchPlan(db2, plan.id);
+  return { listId: plan.id, itemId, created };
+}
+function setTodo(db2, listId, itemId, change) {
+  const task = getTask(db2, listId, itemId);
+  if (!task) throw new Error(`To-do ${itemId} not found in list ${listId}.`);
+  const text = change.text?.trim();
+  if (change.text !== void 0 && !text) throw new Error("A to-do needs some text.");
+  updateTask(db2, listId, itemId, {
+    updated_at: (/* @__PURE__ */ new Date()).toISOString(),
+    ...change.status !== void 0 && { status: change.status },
+    ...change.notes !== void 0 && { notes: change.notes },
+    ...text !== void 0 && { goal: text }
+  });
+  touchPlan(db2, listId);
+  const t = getTask(db2, listId, itemId);
+  return { id: t.id, text: t.goal, status: t.status, depth: 0, notes: t.notes };
+}
+var DEFAULT_LIST, samePath, norm;
+var init_todos = __esm({
+  "../core/src/todos.ts"() {
+    "use strict";
+    init_queries();
+    DEFAULT_LIST = "To do";
+    samePath = (a, b) => norm(a) === norm(b);
+    norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+  }
+});
+
+// ../core/src/index.ts
+import { existsSync as existsSync2, mkdirSync } from "fs";
+import { homedir } from "os";
+import { dirname, join } from "path";
+function envVar(name, env = process.env) {
+  return env[`QUARTERDECK_${name}`] ?? env[`CONDUCTOR_${name}`];
+}
+function defaultDbPath(env = process.env, home = homedir()) {
+  const set = envVar("DB", env);
+  if (set) return set;
+  const path = join(home, ".quarterdeck", "tasks.db");
+  const old = join(home, ".conductor", "tasks.db");
+  return !existsSync2(path) && existsSync2(old) ? old : path;
+}
+function openDatabase(path = defaultDbPath()) {
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+  const db2 = new Database(path);
+  db2.pragma("journal_mode = WAL");
+  db2.pragma("foreign_keys = ON");
+  runMigrations(db2);
+  return db2;
+}
+var init_src = __esm({
+  "../core/src/index.ts"() {
+    "use strict";
+    init_sqlite();
+    init_migrate();
+    init_sqlite();
+    init_types();
+    init_queries();
+    init_gates();
+    init_goals();
+    init_goal_engine();
+    init_schedule();
+    init_health();
+    init_guard();
+    init_goal_tick();
+    init_goal_overview();
+    init_todos();
+    init_goal_changes();
+    init_migrate();
   }
 });
 
@@ -19446,2018 +21600,8 @@ function nanoid2(size = 21) {
   return id;
 }
 
-// ../core/src/sqlite.ts
-var { DatabaseSync } = process.getBuiltinModule("node:sqlite");
-var Statement = class {
-  constructor(stmt) {
-    this.stmt = stmt;
-    stmt.setAllowUnknownNamedParameters(true);
-  }
-  run(...params) {
-    const r = this.stmt.run(...params);
-    return { changes: Number(r.changes), lastInsertRowid: Number(r.lastInsertRowid) };
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  get(...params) {
-    const row = this.stmt.get(...params);
-    return row === void 0 ? void 0 : { ...row };
-  }
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  all(...params) {
-    return this.stmt.all(...params).map((row) => ({ ...row }));
-  }
-};
-var Database = class {
-  db;
-  depth = 0;
-  /** Waits up to 5 s for another connection's lock, as better-sqlite3 did. */
-  constructor(path) {
-    this.db = new DatabaseSync(path, { timeout: 5e3 });
-  }
-  prepare(sql) {
-    return new Statement(this.db.prepare(sql));
-  }
-  exec(sql) {
-    this.db.exec(sql);
-  }
-  close() {
-    this.db.close();
-  }
-  /**
-   * Wraps `fn` so each call runs in a transaction: committed when it returns,
-   * rolled back when it throws. The outermost one takes the write lock at once
-   * (`BEGIN IMMEDIATE`); nested calls use savepoints.
-   */
-  transaction(fn) {
-    return (...args) => {
-      const outer = this.depth === 0;
-      const savepoint = `qd_sp_${this.depth}`;
-      this.db.exec(outer ? "BEGIN IMMEDIATE" : `SAVEPOINT ${savepoint}`);
-      this.depth++;
-      try {
-        const result = fn(...args);
-        this.depth--;
-        this.db.exec(outer ? "COMMIT" : `RELEASE ${savepoint}`);
-        return result;
-      } catch (err) {
-        this.depth--;
-        try {
-          this.db.exec(outer ? "ROLLBACK" : `ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
-        } catch {
-        }
-        throw err;
-      }
-    };
-  }
-  /** `PRAGMA <sql>`: its rows, or with `simple` the first column of the first row. */
-  pragma(sql, options = {}) {
-    const rows = this.db.prepare(`PRAGMA ${sql}`).all();
-    if (!options.simple) return rows.map((row) => ({ ...row }));
-    const first = rows[0];
-    return first === void 0 ? void 0 : Object.values(first)[0];
-  }
-};
-
-// ../core/src/index.ts
-import { existsSync as existsSync2, mkdirSync } from "fs";
-import { homedir } from "os";
-import { dirname, join } from "path";
-
-// ../core/src/migrate.ts
-var SCHEMA_VERSION = 1;
-function dbSchemaVersion(db2) {
-  return Number(db2.pragma("user_version", { simple: true }) ?? 0);
-}
-function schemaOutdated(db2) {
-  return dbSchemaVersion(db2) > SCHEMA_VERSION;
-}
-function runMigrations(db2) {
-  try {
-    db2.exec("ALTER TABLE projects RENAME TO plans");
-  } catch {
-  }
-  try {
-    db2.exec("ALTER TABLE tasks RENAME COLUMN project_id TO plan_id");
-  } catch {
-  }
-  try {
-    db2.exec("ALTER TABLE agent_sessions RENAME COLUMN project_id TO plan_id");
-  } catch {
-  }
-  try {
-    db2.exec("ALTER TABLE events RENAME COLUMN project_id TO plan_id");
-  } catch {
-  }
-  db2.exec(`
-    DROP INDEX IF EXISTS idx_tasks_project;
-    DROP INDEX IF EXISTS idx_projects_status;
-    DROP INDEX IF EXISTS idx_projects_updated;
-    DROP INDEX IF EXISTS idx_sessions_project;
-    DROP INDEX IF EXISTS idx_events_project;
-  `);
-  db2.exec(`
-    CREATE TABLE IF NOT EXISTS plans (
-      id            TEXT PRIMARY KEY,
-      name          TEXT NOT NULL,
-      description   TEXT,
-      status        TEXT NOT NULL DEFAULT 'active',
-      working_dir   TEXT,
-      focus_task_id TEXT,
-      kind          TEXT NOT NULL DEFAULT 'plan',
-      revision      INTEGER NOT NULL DEFAULT 0,
-      created_at    TEXT NOT NULL,
-      updated_at    TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS tasks (
-      id                TEXT NOT NULL,
-      plan_id           TEXT NOT NULL REFERENCES plans(id),
-      goal              TEXT NOT NULL,
-      status            TEXT NOT NULL DEFAULT 'active',
-      result            TEXT,
-      abandon_reason    TEXT,
-      state             TEXT NOT NULL DEFAULT '{}',
-      depends_on        TEXT,
-      notes             TEXT,
-      locked_by         TEXT,
-      locked_at         TEXT,
-      requires_approval INTEGER DEFAULT 0,
-      approved_by       TEXT,
-      approved_at       TEXT,
-      created_by        TEXT DEFAULT 'human',
-      assigned_to       TEXT,
-      acceptance_criteria TEXT,
-      verify_command    TEXT,
-      verify_timeout_s  INTEGER,
-      review_requested_at TEXT,
-      run_id            TEXT,
-      external_ref      TEXT,
-      archived_at       TEXT,
-      created_at        TEXT NOT NULL,
-      updated_at        TEXT NOT NULL,
-      PRIMARY KEY (id, plan_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_tasks_plan    ON tasks(plan_id);
-    CREATE INDEX IF NOT EXISTS idx_plans_status  ON plans(status);
-    CREATE INDEX IF NOT EXISTS idx_plans_updated ON plans(updated_at DESC);
-  `);
-  const addedPlanColumns = [
-    ["working_dir", "TEXT"],
-    ["focus_task_id", "TEXT"],
-    ["revision", "INTEGER NOT NULL DEFAULT 0"],
-    ["kind", "TEXT NOT NULL DEFAULT 'plan'"]
-  ];
-  for (const [col, def] of addedPlanColumns) {
-    try {
-      db2.exec(`ALTER TABLE plans ADD COLUMN ${col} ${def}`);
-    } catch {
-    }
-  }
-  db2.exec(`UPDATE plans SET working_dir = '(unknown)' WHERE working_dir IS NULL`);
-  const addedTaskColumns = [
-    ["notes", "TEXT"],
-    ["locked_by", "TEXT"],
-    ["locked_at", "TEXT"],
-    ["requires_approval", "INTEGER DEFAULT 0"],
-    ["approved_by", "TEXT"],
-    ["approved_at", "TEXT"],
-    ["created_by", "TEXT DEFAULT 'human'"],
-    ["assigned_to", "TEXT"],
-    ["acceptance_criteria", "TEXT"],
-    ["verify_command", "TEXT"],
-    ["verify_timeout_s", "INTEGER"],
-    ["review_requested_at", "TEXT"],
-    ["run_id", "TEXT"],
-    ["external_ref", "TEXT"],
-    ["archived_at", "TEXT"]
-  ];
-  for (const [col, def] of addedTaskColumns) {
-    try {
-      db2.exec(`ALTER TABLE tasks ADD COLUMN ${col} ${def}`);
-    } catch {
-    }
-  }
-  db2.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_external_ref ON tasks(plan_id, external_ref) WHERE external_ref IS NOT NULL`);
-  for (const col of ["plan", "step"]) {
-    try {
-      db2.exec(`ALTER TABLE tasks DROP COLUMN ${col}`);
-    } catch {
-    }
-  }
-  db2.exec(`
-    CREATE TRIGGER IF NOT EXISTS trg_tasks_insert_revision AFTER INSERT ON tasks
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-
-    CREATE TRIGGER IF NOT EXISTS trg_tasks_update_revision AFTER UPDATE ON tasks
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-
-    CREATE TRIGGER IF NOT EXISTS trg_tasks_delete_revision AFTER DELETE ON tasks
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
-
-    CREATE TRIGGER IF NOT EXISTS trg_plans_update_revision AFTER UPDATE ON plans
-    WHEN NEW.revision = OLD.revision
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.id; END;
-  `);
-  db2.exec(`
-    CREATE TABLE IF NOT EXISTS agent_sessions (
-      id TEXT PRIMARY KEY,
-      plan_id TEXT NOT NULL REFERENCES plans(id),
-      root_task_id TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'running'
-        CHECK (status IN ('running', 'paused', 'completed', 'failed', 'cancelled')),
-      autonomy_level TEXT NOT NULL DEFAULT 'full'
-        CHECK (autonomy_level IN ('full', 'approve_decompositions', 'approve_steps', 'manual')),
-      model TEXT NOT NULL,
-      input_tokens INTEGER NOT NULL DEFAULT 0,
-      output_tokens INTEGER NOT NULL DEFAULT 0,
-      total_cost REAL NOT NULL DEFAULT 0.0,
-      error TEXT,
-      started_at TEXT NOT NULL DEFAULT (datetime('now')),
-      ended_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_sessions_plan ON agent_sessions(plan_id, status);
-  `);
-  try {
-    db2.exec(`ALTER TABLE agent_sessions ADD COLUMN nickname TEXT NOT NULL DEFAULT ''`);
-  } catch {
-  }
-  db2.exec(`
-    CREATE TABLE IF NOT EXISTS events (
-      id TEXT PRIMARY KEY,
-      plan_id TEXT NOT NULL REFERENCES plans(id),
-      task_id TEXT NOT NULL,
-      event_type TEXT NOT NULL,
-      actor TEXT NOT NULL CHECK (actor IN ('human', 'agent')),
-      session_id TEXT REFERENCES agent_sessions(id),
-      payload TEXT NOT NULL DEFAULT '{}',
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_events_task ON events(plan_id, task_id, created_at);
-    CREATE INDEX IF NOT EXISTS idx_events_plan ON events(plan_id, created_at);
-  `);
-  db2.exec(`
-    CREATE TABLE IF NOT EXISTS verifications (
-      id          TEXT PRIMARY KEY,
-      plan_id     TEXT NOT NULL REFERENCES plans(id),
-      task_id     TEXT NOT NULL,
-      gate        TEXT NOT NULL CHECK (gate IN ('criteria', 'command', 'approval', 'override')),
-      passed      INTEGER NOT NULL,
-      actor       TEXT NOT NULL CHECK (actor IN ('human', 'agent')),
-      command     TEXT,
-      exit_code   INTEGER,
-      output      TEXT,
-      evidence    TEXT,
-      duration_ms INTEGER,
-      created_at  TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_verifications_task ON verifications(plan_id, task_id, created_at);
-
-    CREATE TRIGGER IF NOT EXISTS trg_verifications_insert_revision AFTER INSERT ON verifications
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-  `);
-  db2.exec(`
-    CREATE TABLE IF NOT EXISTS goals (
-      plan_id             TEXT PRIMARY KEY REFERENCES plans(id),
-      objective           TEXT NOT NULL,
-      instructions        TEXT NOT NULL DEFAULT '',
-      status              TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'paused', 'retired')),
-      autonomy            TEXT NOT NULL DEFAULT '{}',
-      limits              TEXT NOT NULL DEFAULT '{}',
-      item_retention_days INTEGER NOT NULL DEFAULT 7,
-      last_run_at         TEXT,
-      next_run_at         TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS goal_triggers (
-      id      TEXT PRIMARY KEY,
-      plan_id TEXT NOT NULL REFERENCES plans(id),
-      kind    TEXT NOT NULL CHECK (kind IN ('manual', 'interval', 'cron', 'event')),
-      config  TEXT NOT NULL DEFAULT '{}',
-      enabled INTEGER NOT NULL DEFAULT 1
-    );
-    CREATE INDEX IF NOT EXISTS idx_goal_triggers_plan ON goal_triggers(plan_id);
-
-    CREATE TABLE IF NOT EXISTS goal_runs (
-      id             TEXT PRIMARY KEY,
-      plan_id        TEXT NOT NULL REFERENCES plans(id),
-      trigger        TEXT NOT NULL,
-      status         TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'timed_out', 'skipped')),
-      session_id     TEXT REFERENCES agent_sessions(id),
-      summary        TEXT,
-      skip_reason    TEXT,
-      items_created  INTEGER NOT NULL DEFAULT 0,
-      items_resolved INTEGER NOT NULL DEFAULT 0,
-      started_at     TEXT NOT NULL,
-      ended_at       TEXT,
-      input_tokens   INTEGER NOT NULL DEFAULT 0,
-      output_tokens  INTEGER NOT NULL DEFAULT 0,
-      cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
-      cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-      model          TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
-
-    CREATE TABLE IF NOT EXISTS goal_memory (
-      id           TEXT PRIMARY KEY,
-      plan_id      TEXT NOT NULL REFERENCES plans(id),
-      kind         TEXT NOT NULL CHECK (kind IN ('fact', 'rule', 'preference')),
-      text         TEXT NOT NULL,
-      source       TEXT NOT NULL CHECK (source IN ('human', 'agent', 'feedback')),
-      source_ref   TEXT,
-      pinned       INTEGER NOT NULL DEFAULT 0,
-      active       INTEGER NOT NULL DEFAULT 1,
-      created_at   TEXT NOT NULL,
-      last_used_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_goal_memory_plan ON goal_memory(plan_id, active);
-
-    CREATE TRIGGER IF NOT EXISTS trg_goals_update_revision AFTER UPDATE ON goals
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-    CREATE TRIGGER IF NOT EXISTS trg_goal_runs_insert_revision AFTER INSERT ON goal_runs
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-    CREATE TRIGGER IF NOT EXISTS trg_goal_runs_update_revision AFTER UPDATE ON goal_runs
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_insert_revision AFTER INSERT ON goal_memory
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_update_revision AFTER UPDATE ON goal_memory
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-    CREATE TRIGGER IF NOT EXISTS trg_goal_memory_delete_revision AFTER DELETE ON goal_memory
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
-  `);
-  const addedGoalColumns = [
-    ["tool_map", "TEXT NOT NULL DEFAULT '{}'"],
-    ["health_command", "TEXT"],
-    ["health_every_minutes", "INTEGER NOT NULL DEFAULT 60"],
-    ["health_triggers_run", "INTEGER NOT NULL DEFAULT 1"],
-    ["last_health_at", "TEXT"],
-    // 1: runs once; when its run ends with nothing open it is done (status 'retired')
-    ["one_off", "INTEGER NOT NULL DEFAULT 0"]
-  ];
-  for (const [col, def] of addedGoalColumns) {
-    try {
-      db2.exec(`ALTER TABLE goals ADD COLUMN ${col} ${def}`);
-    } catch {
-    }
-  }
-  try {
-    db2.exec("ALTER TABLE goal_runs ADD COLUMN cc_session_id TEXT");
-  } catch {
-  }
-  for (const col of ["input_tokens", "output_tokens", "cache_read_tokens", "cache_write_tokens"]) {
-    try {
-      db2.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`);
-    } catch {
-    }
-  }
-  try {
-    db2.exec("ALTER TABLE goal_runs ADD COLUMN model TEXT");
-  } catch {
-  }
-  db2.exec(`
-    CREATE TABLE IF NOT EXISTS goal_health (
-      id          TEXT PRIMARY KEY,
-      plan_id     TEXT NOT NULL REFERENCES plans(id),
-      passed      INTEGER NOT NULL,
-      exit_code   INTEGER,
-      value       REAL,
-      output      TEXT,
-      duration_ms INTEGER NOT NULL DEFAULT 0,
-      created_at  TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_goal_health_plan ON goal_health(plan_id, created_at);
-
-    CREATE TABLE IF NOT EXISTS goal_tool_calls (
-      id         TEXT PRIMARY KEY,
-      plan_id    TEXT NOT NULL REFERENCES plans(id),
-      run_id     TEXT NOT NULL,
-      tool_name  TEXT NOT NULL,
-      category   TEXT NOT NULL,
-      decision   TEXT NOT NULL CHECK (decision IN ('allow', 'deny')),
-      reason     TEXT,
-      created_at TEXT NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_goal_tool_calls ON goal_tool_calls(plan_id, category, created_at);
-    CREATE INDEX IF NOT EXISTS idx_goal_runs_cc_session ON goal_runs(cc_session_id);
-
-    CREATE TRIGGER IF NOT EXISTS trg_goal_health_insert_revision AFTER INSERT ON goal_health
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-    CREATE TRIGGER IF NOT EXISTS trg_goal_tool_calls_insert_revision AFTER INSERT ON goal_tool_calls
-    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
-  `);
-  for (const col of ["holder", "agent_id"]) {
-    try {
-      db2.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`);
-    } catch {
-    }
-  }
-  db2.exec(`
-    -- One row per scheduler; only the holder whose lease hasn't expired starts runs
-    CREATE TABLE IF NOT EXISTS scheduler_lease (
-      name       TEXT PRIMARY KEY,
-      holder     TEXT NOT NULL,
-      expires_at TEXT NOT NULL
-    );
-
-    -- At most one row: while it's in force no goal run starts (the person's usage limit is reached)
-    CREATE TABLE IF NOT EXISTS goal_run_hold (
-      id     INTEGER PRIMARY KEY CHECK (id = 1),
-      until  TEXT NOT NULL,
-      reason TEXT NOT NULL
-    );
-  `);
-  db2.exec(`
-    CREATE TABLE IF NOT EXISTS transcript_messages (
-      id          TEXT PRIMARY KEY,
-      session_id  TEXT NOT NULL REFERENCES agent_sessions(id),
-      plan_id     TEXT NOT NULL REFERENCES plans(id),
-      role        TEXT NOT NULL CHECK (role IN ('user', 'assistant')),
-      content     TEXT NOT NULL,
-      turn_index  INTEGER NOT NULL,
-      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_transcript_session ON transcript_messages(session_id, turn_index);
-  `);
-  db2.exec(`
-    UPDATE goals SET tool_map = replace(tool_map, '"mcp__conductor__', '"mcp__quarterdeck__')
-    WHERE instr(tool_map, '"mcp__conductor__') > 0
-  `);
-  if (dbSchemaVersion(db2) < SCHEMA_VERSION) db2.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
-}
-
-// ../core/src/types.ts
-var DEFAULT_GOAL_LIMITS = { max_run_minutes: 15, max_items_per_run: 50, max_runs_per_day: 48 };
-
-// ../core/src/queries.ts
-import { randomUUID } from "crypto";
-function deserializeTask(row) {
-  return {
-    ...row,
-    state: JSON.parse(row.state),
-    depends_on: row.depends_on ? JSON.parse(row.depends_on) : null,
-    notes: row.notes ?? null,
-    requires_approval: Boolean(row.requires_approval),
-    acceptance_criteria: row.acceptance_criteria ? JSON.parse(row.acceptance_criteria) : null,
-    verify_command: row.verify_command ?? null,
-    verify_timeout_s: row.verify_timeout_s ?? null,
-    review_requested_at: row.review_requested_at ?? null,
-    run_id: row.run_id ?? null,
-    external_ref: row.external_ref ?? null,
-    archived_at: row.archived_at ?? null
-  };
-}
-function setClause(fields) {
-  const entries = Object.entries(fields);
-  return {
-    sql: entries.map(([k]) => `${k} = ?`).join(", "),
-    values: entries.map(([, v]) => v)
-  };
-}
-function listPlans(db2, status = "active") {
-  if (status === "all") {
-    return db2.prepare("SELECT * FROM plans ORDER BY updated_at DESC").all();
-  }
-  return db2.prepare("SELECT * FROM plans WHERE status = ? ORDER BY updated_at DESC").all(status);
-}
-function getPlan(db2, id) {
-  return db2.prepare("SELECT * FROM plans WHERE id = ?").get(id);
-}
-function insertPlan(db2, plan) {
-  db2.prepare(`
-    INSERT INTO plans (id, name, description, status, working_dir, focus_task_id, kind, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(plan.id, plan.name, plan.description, plan.status, plan.working_dir, plan.focus_task_id ?? null, plan.kind ?? "plan", plan.created_at, plan.updated_at);
-}
-function updatePlan(db2, id, fields) {
-  const { sql, values } = setClause(fields);
-  if (!sql) return;
-  db2.prepare(`UPDATE plans SET ${sql} WHERE id = ?`).run(...values, id);
-}
-function touchPlan(db2, id) {
-  updatePlan(db2, id, { updated_at: (/* @__PURE__ */ new Date()).toISOString() });
-}
-function getTask(db2, planId, taskId) {
-  const row = db2.prepare("SELECT * FROM tasks WHERE id = ? AND plan_id = ?").get(taskId, planId);
-  return row ? deserializeTask(row) : void 0;
-}
-function compareTaskIds(a, b) {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
-    if (pa[i] !== pb[i]) return pa[i] - pb[i];
-  }
-  return pa.length - pb.length;
-}
-function getAllTasks(db2, planId) {
-  const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ?").all(planId);
-  return rows.map(deserializeTask).sort((a, b) => compareTaskIds(a.id, b.id));
-}
-function getRootTasks(db2, planId) {
-  const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id NOT LIKE '%.%'").all(planId);
-  return rows.map(deserializeTask);
-}
-function getChildren(db2, planId, parentId) {
-  if (parentId === "") return getRootTasks(db2, planId);
-  const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND id LIKE ? AND id NOT LIKE ?").all(planId, `${parentId}.%`, `${parentId}.%.%`);
-  return rows.map(deserializeTask);
-}
-function getSiblings(db2, planId, taskId) {
-  const parts = taskId.split(".");
-  const parentId = parts.slice(0, -1).join(".");
-  return getChildren(db2, planId, parentId).filter((t) => t.id !== taskId);
-}
-function getTreeStats(db2, planId) {
-  const rows = db2.prepare("SELECT status, COUNT(*) as count FROM tasks WHERE plan_id = ? GROUP BY status").all(planId);
-  const by = {};
-  for (const r of rows) by[r.status] = r.count;
-  return {
-    total_tasks: rows.reduce((sum, r) => sum + r.count, 0),
-    active: by.active ?? 0,
-    completed: by.completed ?? 0,
-    pending: by.pending ?? 0,
-    abandoned: by.abandoned ?? 0
-  };
-}
-function countAllTasks(db2, planId) {
-  const row = db2.prepare("SELECT COUNT(*) as count FROM tasks WHERE plan_id = ?").get(planId);
-  return row.count;
-}
-function nextChildId(db2, planId, parentId) {
-  const siblings = getChildren(db2, planId, parentId ?? "");
-  const maxIndex = siblings.reduce((max, t) => Math.max(max, Number(t.id.split(".").pop())), 0);
-  return parentId ? `${parentId}.${maxIndex + 1}` : String(maxIndex + 1);
-}
-function insertTask(db2, task) {
-  db2.prepare(`
-    INSERT INTO tasks (
-      id, plan_id, goal, status, result, abandon_reason, state, depends_on, notes,
-      locked_by, locked_at, requires_approval, approved_by, approved_at, created_by, assigned_to,
-      acceptance_criteria, verify_command, verify_timeout_s, review_requested_at,
-      run_id, external_ref, archived_at,
-      created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    task.id,
-    task.plan_id,
-    task.goal,
-    task.status,
-    task.result ?? null,
-    task.abandon_reason ?? null,
-    JSON.stringify(task.state),
-    task.depends_on ? JSON.stringify(task.depends_on) : null,
-    task.notes ?? null,
-    task.locked_by ?? null,
-    task.locked_at ?? null,
-    task.requires_approval ? 1 : 0,
-    task.approved_by ?? null,
-    task.approved_at ?? null,
-    task.created_by ?? "human",
-    task.assigned_to ?? null,
-    task.acceptance_criteria?.length ? JSON.stringify(task.acceptance_criteria) : null,
-    task.verify_command ?? null,
-    task.verify_timeout_s ?? null,
-    task.review_requested_at ?? null,
-    task.run_id ?? null,
-    task.external_ref ?? null,
-    task.archived_at ?? null,
-    task.created_at,
-    task.updated_at
-  );
-}
-function updateTask(db2, planId, taskId, fields) {
-  const serialized = { ...fields };
-  if ("state" in fields) serialized.state = JSON.stringify(fields.state);
-  if ("depends_on" in fields) serialized.depends_on = fields.depends_on ? JSON.stringify(fields.depends_on) : null;
-  if ("requires_approval" in fields) serialized.requires_approval = fields.requires_approval ? 1 : 0;
-  if ("acceptance_criteria" in fields) {
-    serialized.acceptance_criteria = fields.acceptance_criteria?.length ? JSON.stringify(fields.acceptance_criteria) : null;
-  }
-  const { sql, values } = setClause(serialized);
-  if (!sql) return;
-  db2.prepare(`UPDATE tasks SET ${sql} WHERE id = ? AND plan_id = ?`).run(...values, taskId, planId);
-}
-function insertEvent(db2, event) {
-  db2.prepare(`
-    INSERT INTO events (id, plan_id, task_id, event_type, actor, session_id, payload, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    event.id,
-    event.plan_id,
-    event.task_id,
-    event.event_type,
-    event.actor,
-    event.session_id ?? null,
-    JSON.stringify(event.payload),
-    event.created_at ?? (/* @__PURE__ */ new Date()).toISOString()
-  );
-}
-function getEvents(db2, planId, query = {}) {
-  const where = ["plan_id = ?"];
-  const params = [planId];
-  if (query.taskId) {
-    if (query.subtree) {
-      where.push("(task_id = ? OR task_id LIKE ?)");
-      params.push(query.taskId, `${query.taskId}.%`);
-    } else {
-      where.push("task_id = ?");
-      params.push(query.taskId);
-    }
-  }
-  const limit = query.limit && query.limit > 0 ? ` LIMIT ${Math.floor(query.limit)}` : "";
-  const rows = db2.prepare(`SELECT * FROM events WHERE ${where.join(" AND ")} ORDER BY created_at DESC, rowid DESC${limit}`).all(...params);
-  return rows.map((r) => ({ ...r, payload: JSON.parse(r.payload) }));
-}
-function insertVerification(db2, v) {
-  const row = {
-    id: randomUUID(),
-    command: null,
-    exit_code: null,
-    output: null,
-    evidence: null,
-    duration_ms: null,
-    created_at: (/* @__PURE__ */ new Date()).toISOString(),
-    ...v
-  };
-  db2.prepare(`
-    INSERT INTO verifications (id, plan_id, task_id, gate, passed, actor, command, exit_code, output, evidence, duration_ms, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    row.id,
-    row.plan_id,
-    row.task_id,
-    row.gate,
-    row.passed ? 1 : 0,
-    row.actor,
-    row.command,
-    row.exit_code,
-    row.output,
-    row.evidence ? JSON.stringify(row.evidence) : null,
-    row.duration_ms,
-    row.created_at
-  );
-  return row;
-}
-function deserializeVerification(r) {
-  return {
-    ...r,
-    passed: Boolean(r.passed),
-    evidence: r.evidence ? JSON.parse(r.evidence) : null
-  };
-}
-function getLatestVerification(db2, planId, taskId, gate) {
-  const row = db2.prepare("SELECT * FROM verifications WHERE plan_id = ? AND task_id = ? AND gate = ? ORDER BY created_at DESC, rowid DESC LIMIT 1").get(planId, taskId, gate);
-  return row ? deserializeVerification(row) : void 0;
-}
-
-// ../core/src/gates.ts
-import { spawn, spawnSync } from "child_process";
-import { existsSync } from "fs";
-
-// ../core/src/goals.ts
-import { randomUUID as randomUUID2 } from "crypto";
-var newId = (prefix) => `${prefix}_${randomUUID2().replace(/-/g, "").slice(0, 12)}`;
-function deserializeGoal(r) {
-  return {
-    ...r,
-    autonomy: JSON.parse(r.autonomy || "{}"),
-    limits: { ...DEFAULT_GOAL_LIMITS, ...JSON.parse(r.limits || "{}") },
-    tool_map: JSON.parse(r.tool_map || "{}"),
-    health_command: r.health_command ?? null,
-    health_every_minutes: r.health_every_minutes ?? 60,
-    health_triggers_run: r.health_triggers_run === void 0 ? true : Boolean(r.health_triggers_run),
-    last_health_at: r.last_health_at ?? null,
-    one_off: Boolean(r.one_off)
-  };
-}
-function createGoal(db2, plan, goal, interval) {
-  db2.transaction(() => {
-    insertPlan(db2, { ...plan, kind: "goal" });
-    db2.prepare(`
-      INSERT INTO goals (plan_id, objective, instructions, status, autonomy, limits, item_retention_days, last_run_at, next_run_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      plan.id,
-      goal.objective,
-      goal.instructions ?? "",
-      goal.status ?? "active",
-      JSON.stringify(goal.autonomy ?? {}),
-      JSON.stringify({ ...DEFAULT_GOAL_LIMITS, ...goal.limits }),
-      goal.item_retention_days ?? 7,
-      null,
-      interval ? (/* @__PURE__ */ new Date()).toISOString() : null
-    );
-    if (interval) setIntervalTrigger(db2, plan.id, interval);
-    if (goal.one_off) db2.prepare("UPDATE goals SET one_off = 1 WHERE plan_id = ?").run(plan.id);
-  })();
-  return getGoal(db2, plan.id);
-}
-function getGoal(db2, planId) {
-  const row = db2.prepare("SELECT * FROM goals WHERE plan_id = ?").get(planId);
-  return row ? deserializeGoal(row) : void 0;
-}
-function listGoals(db2, status) {
-  const rows = status ? db2.prepare("SELECT * FROM goals WHERE status = ?").all(status) : db2.prepare("SELECT * FROM goals").all();
-  return rows.map((r) => ({ plan: getPlan(db2, r.plan_id), goal: deserializeGoal(r) })).filter((g) => g.plan);
-}
-function updateGoal(db2, planId, fields) {
-  const current2 = getGoal(db2, planId);
-  if (!current2) throw new Error(`Goal ${planId} not found`);
-  const serialized = { ...fields };
-  if (fields.autonomy) serialized.autonomy = JSON.stringify(fields.autonomy);
-  if (fields.tool_map) serialized.tool_map = JSON.stringify(fields.tool_map);
-  if ("health_triggers_run" in fields) serialized.health_triggers_run = fields.health_triggers_run ? 1 : 0;
-  if ("one_off" in fields) serialized.one_off = fields.one_off ? 1 : 0;
-  if (fields.limits) serialized.limits = JSON.stringify({ ...current2.limits, ...fields.limits });
-  const entries = Object.entries(serialized);
-  if (!entries.length) return;
-  db2.prepare(`UPDATE goals SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE plan_id = ?`).run(...entries.map(([, v]) => v), planId);
-}
-function deserializeTrigger(r) {
-  return { ...r, config: JSON.parse(r.config), enabled: Boolean(r.enabled) };
-}
-function listTriggers(db2, planId) {
-  return db2.prepare("SELECT * FROM goal_triggers WHERE plan_id = ?").all(planId).map(deserializeTrigger);
-}
-function getIntervalTrigger(db2, planId) {
-  return listTriggers(db2, planId).find((t) => t.kind === "interval");
-}
-function setIntervalTrigger(db2, planId, config2) {
-  const existing = getIntervalTrigger(db2, planId);
-  if (!config2) {
-    if (existing) db2.prepare("DELETE FROM goal_triggers WHERE id = ?").run(existing.id);
-    return;
-  }
-  if (!(config2.minutes >= 1)) throw new Error("Interval must be at least 1 minute.");
-  if (config2.active_hours && !/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(config2.active_hours)) {
-    throw new Error('active_hours must look like "08:00-20:00".');
-  }
-  if (existing) {
-    db2.prepare("UPDATE goal_triggers SET config = ?, enabled = 1 WHERE id = ?").run(JSON.stringify(config2), existing.id);
-  } else {
-    db2.prepare("INSERT INTO goal_triggers (id, plan_id, kind, config, enabled) VALUES (?, ?, ?, ?, 1)").run(newId("trg"), planId, "interval", JSON.stringify(config2));
-  }
-}
-function insertRun(db2, planId, trigger, status = "queued", skipReason) {
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const run = {
-    id: newId("run"),
-    plan_id: planId,
-    trigger,
-    status,
-    session_id: null,
-    cc_session_id: null,
-    holder: null,
-    agent_id: null,
-    summary: null,
-    skip_reason: skipReason ?? null,
-    items_created: 0,
-    items_resolved: 0,
-    started_at: now,
-    ended_at: status === "skipped" ? now : null,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    model: null
-  };
-  db2.prepare(`
-    INSERT INTO goal_runs (id, plan_id, trigger, status, session_id, summary, skip_reason, items_created, items_resolved, started_at, ended_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(run.id, run.plan_id, run.trigger, run.status, null, null, run.skip_reason, 0, 0, run.started_at, run.ended_at);
-  return run;
-}
-function getRun(db2, runId) {
-  return db2.prepare("SELECT * FROM goal_runs WHERE id = ?").get(runId);
-}
-function updateRun(db2, runId, fields) {
-  const entries = Object.entries(fields);
-  if (!entries.length) return;
-  db2.prepare(`UPDATE goal_runs SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...entries.map(([, v]) => v), runId);
-}
-function listRuns(db2, planId, limit = 20, opts = {}) {
-  const where = opts.includeSkipped === false ? "AND status != 'skipped'" : "";
-  return db2.prepare(`SELECT * FROM goal_runs WHERE plan_id = ? ${where} ORDER BY started_at DESC, rowid DESC LIMIT ?`).all(planId, limit);
-}
-function getOpenRun(db2, planId) {
-  return db2.prepare("SELECT * FROM goal_runs WHERE plan_id = ? AND status IN ('queued', 'running') ORDER BY started_at LIMIT 1").get(planId);
-}
-function countRunsSince(db2, planId, sinceIso) {
-  return db2.prepare("SELECT COUNT(*) n FROM goal_runs WHERE plan_id = ? AND status != 'skipped' AND started_at >= ?").get(planId, sinceIso).n;
-}
-function deserializeMemory(r) {
-  return { ...r, pinned: Boolean(r.pinned), active: Boolean(r.active) };
-}
-function insertMemory(db2, m) {
-  const text = m.text.trim();
-  if (!text) throw new Error("Memory text is required.");
-  const row = {
-    id: newId("mem"),
-    plan_id: m.plan_id,
-    kind: m.kind,
-    text,
-    source: m.source,
-    source_ref: m.source_ref ?? null,
-    pinned: m.pinned ? 1 : 0,
-    active: 1,
-    created_at: (/* @__PURE__ */ new Date()).toISOString(),
-    last_used_at: null
-  };
-  db2.prepare(`
-    INSERT INTO goal_memory (id, plan_id, kind, text, source, source_ref, pinned, active, created_at, last_used_at)
-    VALUES (@id, @plan_id, @kind, @text, @source, @source_ref, @pinned, @active, @created_at, @last_used_at)
-  `).run(row);
-  return deserializeMemory(row);
-}
-function getMemory(db2, id) {
-  const r = db2.prepare("SELECT * FROM goal_memory WHERE id = ?").get(id);
-  return r ? deserializeMemory(r) : void 0;
-}
-function listMemory(db2, planId, opts = {}) {
-  const rows = db2.prepare(`SELECT * FROM goal_memory WHERE plan_id = ? ${opts.activeOnly ? "AND active = 1" : ""} ORDER BY created_at, rowid`).all(planId);
-  return rows.map(deserializeMemory);
-}
-function updateMemory(db2, id, fields) {
-  const serialized = { ...fields };
-  if ("pinned" in fields) serialized.pinned = fields.pinned ? 1 : 0;
-  if ("active" in fields) serialized.active = fields.active ? 1 : 0;
-  if (typeof fields.text === "string") {
-    if (!fields.text.trim()) throw new Error("Memory text is required.");
-    serialized.text = fields.text.trim();
-  }
-  const entries = Object.entries(serialized);
-  if (!entries.length) return;
-  db2.prepare(`UPDATE goal_memory SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...entries.map(([, v]) => v), id);
-}
-function deleteMemory(db2, id) {
-  db2.prepare("DELETE FROM goal_memory WHERE id = ?").run(id);
-}
-var GOAL_TABLES = [
-  "goal_tool_calls",
-  "goal_health",
-  "goal_memory",
-  "goal_runs",
-  "goal_triggers",
-  "verifications",
-  "events",
-  "transcript_messages",
-  "agent_sessions",
-  "tasks",
-  "goals"
-];
-function deleteGoal(db2, planId) {
-  const plan = db2.prepare("SELECT name, kind FROM plans WHERE id = ?").get(planId);
-  if (!plan || plan.kind !== "goal") throw new Error(`Goal ${planId} not found.`);
-  const running = db2.prepare("SELECT 1 FROM goal_runs WHERE plan_id = ? AND status IN ('queued', 'running')").get(planId);
-  if (running) throw new Error("This goal has a run in progress: cancel it first, then delete the goal.");
-  db2.transaction(() => {
-    for (const table of GOAL_TABLES) db2.prepare(`DELETE FROM ${table} WHERE plan_id = ?`).run(planId);
-    db2.prepare("DELETE FROM plans WHERE id = ?").run(planId);
-  })();
-  return { name: plan.name };
-}
-
-// ../core/src/gates.ts
-var DEFAULT_VERIFY_TIMEOUT_S = 300;
-var OUTPUT_TAIL_CHARS = 4096;
-function runVerifyCommand(command, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S) {
-  const started = Date.now();
-  const done = (r) => ({ ...r, duration_ms: Date.now() - started });
-  if (!existsSync(cwd)) {
-    return Promise.resolve(done({ passed: false, exit_code: null, output: `Working directory not found: ${cwd}`, timed_out: false }));
-  }
-  return new Promise((resolve) => {
-    let output = "";
-    let timedOut = false;
-    const append = (chunk) => {
-      output = (output + chunk.toString()).slice(-OUTPUT_TAIL_CHARS);
-    };
-    const child = spawn(command, {
-      cwd,
-      shell: true,
-      windowsHide: true,
-      // Own process group on POSIX so a timeout can kill the whole tree
-      detached: process.platform !== "win32"
-    });
-    child.stdout?.on("data", append);
-    child.stderr?.on("data", append);
-    const timer = setTimeout(() => {
-      timedOut = true;
-      killTree(child.pid);
-    }, timeoutS * 1e3);
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      resolve(done({ passed: false, exit_code: null, output: `Could not run command: ${e.message}`, timed_out: false }));
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (timedOut) output = `${output}
-[timed out after ${timeoutS}s]`.slice(-OUTPUT_TAIL_CHARS);
-      resolve(done({ passed: !timedOut && code === 0, exit_code: code, output, timed_out: timedOut }));
-    });
-  });
-}
-function killTree(pid) {
-  if (!pid) return;
-  try {
-    if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true });
-    else process.kill(-pid, "SIGKILL");
-  } catch {
-  }
-}
-function hasGates(task) {
-  return Boolean(task.acceptance_criteria?.length || task.verify_command || task.requires_approval);
-}
-function getGateStatus(db2, task) {
-  if (!hasGates(task)) return null;
-  const last = task.verify_command ? getLatestVerification(db2, task.plan_id, task.id, "command") : void 0;
-  return {
-    acceptance_criteria: task.acceptance_criteria ?? [],
-    verify_command: task.verify_command,
-    requires_approval: task.requires_approval,
-    awaiting_review: task.review_requested_at !== null,
-    approved: task.approved_at ? { by: task.approved_by, at: task.approved_at } : null,
-    last_command: last ? { passed: last.passed, exit_code: last.exit_code, at: last.created_at, output: last.passed ? null : last.output } : null
-  };
-}
-async function checkCompletion(db2, plan, task, input) {
-  const { actor } = input;
-  if (!hasGates(task)) return { outcome: "pass" };
-  if (actor === "agent" && task.review_requested_at) return { outcome: "awaiting_review" };
-  const criteria = task.acceptance_criteria ?? [];
-  if (actor === "agent" && criteria.length > 0) {
-    const evidence = input.evidence ?? [];
-    const missing = criteria.filter((_, i) => !evidence[i]?.trim());
-    if (missing.length > 0 || evidence.length > criteria.length) {
-      return {
-        outcome: "blocked",
-        blockers: [{
-          gate: "criteria",
-          message: evidence.length > criteria.length ? `Got ${evidence.length} evidence entries for ${criteria.length} criteria. Give exactly one per criterion, in order.` : `Missing evidence for ${missing.length} of ${criteria.length} acceptance criteria: ${missing.map((c) => `"${c}"`).join("; ")}. Pass \`evidence\` with one entry per criterion, in order, saying how it is met.`
-        }]
-      };
-    }
-  }
-  if (task.verify_command) {
-    const r = await runVerifyCommand(task.verify_command, plan.working_dir, task.verify_timeout_s ?? DEFAULT_VERIFY_TIMEOUT_S);
-    insertVerification(db2, {
-      plan_id: plan.id,
-      task_id: task.id,
-      gate: "command",
-      passed: r.passed,
-      actor,
-      command: task.verify_command,
-      exit_code: r.exit_code,
-      output: r.output,
-      duration_ms: r.duration_ms
-    });
-    if (!r.passed) {
-      return {
-        outcome: "blocked",
-        blockers: [{
-          gate: "command",
-          message: r.timed_out ? `Verify command timed out: ${task.verify_command}` : `Verify command failed (exit ${r.exit_code ?? "none"}): ${task.verify_command}`,
-          exit_code: r.exit_code,
-          output: r.output
-        }]
-      };
-    }
-  }
-  if (actor === "agent" && criteria.length > 0) {
-    insertVerification(db2, { plan_id: plan.id, task_id: task.id, gate: "criteria", passed: true, actor, evidence: input.evidence });
-  }
-  if (task.requires_approval && !task.approved_at) {
-    const now = (/* @__PURE__ */ new Date()).toISOString();
-    if (actor === "agent") {
-      updateTask(db2, plan.id, task.id, { review_requested_at: now, updated_at: now });
-      return { outcome: "awaiting_review" };
-    }
-    insertVerification(db2, { plan_id: plan.id, task_id: task.id, gate: "approval", passed: true, actor });
-    updateTask(db2, plan.id, task.id, { approved_by: "human", approved_at: now, review_requested_at: null, updated_at: now });
-  }
-  return { outcome: "pass" };
-}
-async function runChecks(db2, plan, task, actor) {
-  let result = null;
-  if (task.verify_command) {
-    result = await runVerifyCommand(task.verify_command, plan.working_dir, task.verify_timeout_s ?? DEFAULT_VERIFY_TIMEOUT_S);
-    insertVerification(db2, {
-      plan_id: plan.id,
-      task_id: task.id,
-      gate: "command",
-      passed: result.passed,
-      actor,
-      command: task.verify_command,
-      exit_code: result.exit_code,
-      output: result.output,
-      duration_ms: result.duration_ms
-    });
-  }
-  return { result, gates: getGateStatus(db2, getTask(db2, plan.id, task.id)) };
-}
-function requireAwaitingReview(task) {
-  if (!task.review_requested_at) throw new GateError(`Task ${task.id} is not waiting for review.`);
-}
-var GateError = class extends Error {
-};
-function isProposal(task) {
-  return typeof task.state?.action === "object" && task.state.action !== null;
-}
-function asksPerson(task) {
-  return task.state?.asks_person === true;
-}
-function approveTask(db2, planId, taskId) {
-  const task = mustGet(db2, planId, taskId);
-  requireAwaitingReview(task);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const v = insertVerification(db2, { plan_id: planId, task_id: taskId, gate: "approval", passed: true, actor: "human" });
-  updateTask(db2, planId, taskId, {
-    ...isProposal(task) ? {} : { status: "completed" },
-    approved_by: "human",
-    approved_at: now,
-    review_requested_at: null,
-    updated_at: now
-  });
-  return v;
-}
-function rejectTask(db2, planId, taskId, feedback) {
-  if (!feedback.trim()) throw new GateError("Feedback is required when rejecting.");
-  const task = mustGet(db2, planId, taskId);
-  requireAwaitingReview(task);
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const v = insertVerification(db2, { plan_id: planId, task_id: taskId, gate: "approval", passed: false, actor: "human", output: feedback });
-  const note = `Review rejected (${now}): ${feedback}`;
-  updateTask(db2, planId, taskId, {
-    review_requested_at: null,
-    approved_by: null,
-    approved_at: null,
-    notes: task.notes ? `${task.notes}
-
-${note}` : note,
-    updated_at: now
-  });
-  if (getPlan(db2, planId)?.kind === "goal") {
-    insertMemory(db2, { plan_id: planId, kind: "preference", text: `Feedback on "${task.goal}": ${feedback.trim()}`, source: "feedback", source_ref: taskId });
-  }
-  return v;
-}
-function mustGet(db2, planId, taskId) {
-  const task = getTask(db2, planId, taskId);
-  if (!task) throw new GateError(`Task ${taskId} not found.`);
-  return task;
-}
-function describeBlockers(blockers) {
-  return blockers.map((b) => b.output ? `${b.message}
---- output (last ${OUTPUT_TAIL_CHARS} chars) ---
-${b.output.trim()}` : b.message).join("\n\n");
-}
-
-// ../core/src/schedule.ts
-var RANGES = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
-var FIELD_NAMES = ["minute", "hour", "day of month", "month", "day of week"];
-function parseField(text, index) {
-  const [lo, hi] = RANGES[index];
-  const out = /* @__PURE__ */ new Set();
-  for (const part of text.split(",")) {
-    const m = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(part);
-    if (!m) throw new Error(`Invalid cron ${FIELD_NAMES[index]}: "${part}"`);
-    const step = m[4] ? Number(m[4]) : 1;
-    let from = lo;
-    let to = hi;
-    if (m[1] !== "*") {
-      from = Number(m[2]);
-      to = m[3] !== void 0 ? Number(m[3]) : m[4] ? hi : from;
-    }
-    if (step < 1 || from < lo || to > hi || from > to) throw new Error(`Invalid cron ${FIELD_NAMES[index]}: "${part}" (allowed ${lo}-${hi})`);
-    for (let v = from; v <= to; v += step) out.add(index === 4 && v === 7 ? 0 : v);
-  }
-  return out;
-}
-function parseCron(expr) {
-  const parts = expr.trim().split(/\s+/);
-  if (parts.length !== 5) throw new Error('A cron expression has 5 fields: minute hour day-of-month month day-of-week, e.g. "0 9 * * 1-5"');
-  const [minute, hour, dom, month, dow] = parts.map(parseField);
-  return { minute, hour, dom, month, dow, domAny: parts[2] === "*", dowAny: parts[4] === "*" };
-}
-function dayMatches(f, d) {
-  const dom = f.dom.has(d.getDate());
-  const dow = f.dow.has(d.getDay());
-  if (!f.domAny && !f.dowAny) return dom || dow;
-  return dom && dow;
-}
-function cronNext(expr, from) {
-  const f = parseCron(expr);
-  const d = new Date(from.getTime());
-  d.setSeconds(0, 0);
-  d.setMinutes(d.getMinutes() + 1);
-  const limit = from.getTime() + 4 * 366 * 864e5;
-  while (d.getTime() <= limit) {
-    if (!f.month.has(d.getMonth() + 1)) {
-      d.setMonth(d.getMonth() + 1, 1);
-      d.setHours(0, 0, 0, 0);
-      continue;
-    }
-    if (!dayMatches(f, d)) {
-      d.setDate(d.getDate() + 1);
-      d.setHours(0, 0, 0, 0);
-      continue;
-    }
-    if (!f.hour.has(d.getHours())) {
-      d.setHours(d.getHours() + 1, 0, 0, 0);
-      continue;
-    }
-    if (!f.minute.has(d.getMinutes())) {
-      d.setMinutes(d.getMinutes() + 1, 0, 0);
-      continue;
-    }
-    return d;
-  }
-  throw new Error(`Cron expression "${expr}" never matches`);
-}
-function getSchedule(db2, planId) {
-  const interval = getIntervalTrigger(db2, planId);
-  if (interval?.enabled) return { kind: "interval", ...interval.config };
-  const cron = listTriggers(db2, planId).find((t) => t.kind === "cron" && t.enabled);
-  return cron ? { kind: "cron", ...cron.config } : null;
-}
-function setSchedule(db2, planId, schedule) {
-  db2.prepare("DELETE FROM goal_triggers WHERE plan_id = ? AND kind = 'cron'").run(planId);
-  if (schedule?.kind === "cron") {
-    cronNext(schedule.expr, /* @__PURE__ */ new Date());
-    setIntervalTrigger(db2, planId, null);
-    db2.prepare("INSERT INTO goal_triggers (id, plan_id, kind, config, enabled) VALUES (?, ?, 'cron', ?, 1)").run(newId("trg"), planId, JSON.stringify({ expr: schedule.expr.trim() }));
-    return;
-  }
-  setIntervalTrigger(db2, planId, schedule ? { minutes: schedule.minutes, ...schedule.active_hours && { active_hours: schedule.active_hours } } : null);
-}
-function nextScheduledRun(db2, planId, from = /* @__PURE__ */ new Date()) {
-  const s = getSchedule(db2, planId);
-  if (!s) return null;
-  return s.kind === "interval" ? new Date(from.getTime() + s.minutes * 6e4).toISOString() : cronNext(s.expr, from).toISOString();
-}
-
-// ../core/src/health.ts
-var HEALTH_TIMEOUT_S = 120;
-function parseHealthValue(output) {
-  const matches = output.match(/-?\d+(?:\.\d+)?/g);
-  return matches ? Number(matches[matches.length - 1]) : null;
-}
-async function runHealthCheck(db2, planId) {
-  const goal = getGoal(db2, planId);
-  const plan = getPlan(db2, planId);
-  if (!goal || !plan) throw new Error(`Goal ${planId} not found`);
-  if (!goal.health_command) throw new Error("This goal has no health check command.");
-  const r = await runVerifyCommand(goal.health_command, plan.working_dir, HEALTH_TIMEOUT_S);
-  const row = {
-    id: newId("hc"),
-    plan_id: planId,
-    passed: r.passed,
-    exit_code: r.exit_code,
-    value: parseHealthValue(r.output),
-    output: r.output.slice(-2e3),
-    duration_ms: r.duration_ms,
-    created_at: (/* @__PURE__ */ new Date()).toISOString()
-  };
-  db2.prepare(`
-    INSERT INTO goal_health (id, plan_id, passed, exit_code, value, output, duration_ms, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(row.id, row.plan_id, row.passed ? 1 : 0, row.exit_code, row.value, row.output, row.duration_ms, row.created_at);
-  updateGoal(db2, planId, { last_health_at: row.created_at });
-  return row;
-}
-function listHealth(db2, planId, limit = 50) {
-  return db2.prepare("SELECT * FROM goal_health WHERE plan_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?").all(planId, limit).map((r) => ({ ...r, passed: Boolean(r.passed) }));
-}
-function healthDue(goal, now = /* @__PURE__ */ new Date()) {
-  if (!goal.health_command || goal.status !== "active") return false;
-  if (!goal.last_health_at) return true;
-  return now.getTime() - new Date(goal.last_health_at).getTime() >= goal.health_every_minutes * 6e4;
-}
-
-// ../core/src/goal-engine.ts
-var GoalError = class extends Error {
-};
-var MEMORY_BRIEF_CHARS = 4e3;
-function autonomyFor(goal, category) {
-  return goal.autonomy[category] ?? "propose";
-}
-function mustGetGoal(db2, planId) {
-  const goal = getGoal(db2, planId);
-  if (!goal) throw new GoalError(`Plan ${planId} is not a persistent goal.`);
-  return goal;
-}
-function addItem(db2, planId, runId, input) {
-  const goal = mustGetGoal(db2, planId);
-  if (goal.status === "retired") throw new GoalError("This goal is retired.");
-  if (input.external_ref) {
-    const row = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND external_ref = ?").get(planId, input.external_ref);
-    if (row) return { task: deserializeTask(row), existing: true };
-  }
-  if (runId) {
-    const created = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND run_id = ?").get(planId, runId).n;
-    if (created >= goal.limits.max_items_per_run) {
-      throw new GoalError(`This run already created ${created} items (limit ${goal.limits.max_items_per_run}). Finish with end_run; the rest can wait for the next run.`);
-    }
-  }
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const id = nextChildId(db2, planId, null);
-  const base = {
-    id,
-    plan_id: planId,
-    goal: input.goal,
-    result: input.result ?? null,
-    abandon_reason: null,
-    depends_on: null,
-    notes: input.notes ?? null,
-    run_id: runId,
-    external_ref: input.external_ref ?? null,
-    created_by: "agent",
-    created_at: now,
-    updated_at: now
-  };
-  if (!input.action) {
-    if (input.ask_person) {
-      insertTask(db2, { ...base, status: "active", state: { asks_person: true }, requires_approval: true, review_requested_at: now });
-    } else {
-      insertTask(db2, { ...base, status: input.status ?? "pending", state: {} });
-    }
-    return { task: getTask(db2, planId, id), existing: false };
-  }
-  const mode = autonomyFor(goal, input.action.category);
-  if (mode === "off") {
-    throw new GoalError(`Action category "${input.action.category}" is off for this goal: don't take or propose this action.`);
-  }
-  const state = { action: { ...input.action, params: input.action.params ?? {} } };
-  if (mode === "propose") {
-    insertTask(db2, { ...base, status: "active", state, requires_approval: true, review_requested_at: now });
-  } else {
-    insertTask(db2, { ...base, status: "completed", state, result: input.result ?? `Done automatically: ${input.action.summary}` });
-  }
-  return { task: getTask(db2, planId, id), existing: false, mode };
-}
-function summarizeItem(t) {
-  const action = isProposal(t) ? t.state.action : void 0;
-  return {
-    id: t.id,
-    goal: t.goal,
-    status: t.status,
-    external_ref: t.external_ref,
-    awaiting_review: t.review_requested_at !== null,
-    approved_to_execute: action !== void 0 && t.approved_at !== null && t.status === "active",
-    ...action && { action }
-  };
-}
-function buildBrief(db2, planId, runId) {
-  const goal = mustGetGoal(db2, planId);
-  const plan = getPlan(db2, planId);
-  const run = runId ? getRun(db2, runId) : void 0;
-  if (runId && (!run || run.plan_id !== planId)) throw new GoalError(`Run ${runId} not found for this goal.`);
-  const previous = listRuns(db2, planId, 10, { includeSkipped: false }).find((r) => r.id !== runId && r.status !== "queued" && r.status !== "running");
-  const since = previous?.started_at ?? "1970-01-01T00:00:00.000Z";
-  const decisions = db2.prepare(`
-    SELECT v.task_id, v.gate, v.passed, v.output, v.created_at, t.goal, t.state
-    FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
-    WHERE v.plan_id = ? AND v.gate IN ('approval', 'override') AND v.actor = 'human' AND v.created_at > ?
-    ORDER BY v.created_at
-  `).all(planId, since).map((d) => {
-    const action = JSON.parse(d.state).action;
-    return {
-      item: d.task_id,
-      goal: d.goal,
-      decision: d.gate === "override" ? "completed_by_human" : d.passed ? "approved" : "rejected",
-      ...d.output && { feedback: d.output },
-      ...action && { action },
-      at: d.created_at
-    };
-  });
-  const active = listMemory(db2, planId, { activeOnly: true });
-  const ordered = [
-    ...active.filter((m) => m.pinned),
-    ...active.filter((m) => !m.pinned).sort((a, b) => (b.last_used_at ?? b.created_at).localeCompare(a.last_used_at ?? a.created_at))
-  ];
-  const memory = [];
-  let chars = 0;
-  for (const m of ordered) {
-    if (!m.pinned && chars + m.text.length > MEMORY_BRIEF_CHARS) continue;
-    memory.push(m);
-    chars += m.text.length;
-  }
-  const nowIso = (/* @__PURE__ */ new Date()).toISOString();
-  for (const m of memory) updateMemory(db2, m.id, { last_used_at: nowIso });
-  const items = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL AND status IN ('pending', 'active')").all(planId).map(deserializeTask).map(summarizeItem).sort((a, b) => Number(b.approved_to_execute) - Number(a.approved_to_execute) || compareTaskIds(a.id, b.id));
-  const dayAgo = new Date(Date.now() - 864e5).toISOString();
-  const resolved24h = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(planId, dayAgo).n;
-  return {
-    goal: { id: planId, name: plan.name, objective: goal.objective, instructions: goal.instructions, status: goal.status },
-    run: run ? { id: run.id, trigger: run.trigger, started_at: run.started_at, limits: goal.limits } : null,
-    autonomy: { default: "propose", categories: goal.autonomy },
-    memory: memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned })),
-    memory_omitted: active.length - memory.length,
-    decisions_since_last_run: decisions,
-    open_items: items,
-    recent_runs: listRuns(db2, planId, 10, { includeSkipped: false }).filter((r) => r.id !== runId && r.summary).slice(0, 3).map((r) => ({ at: r.started_at, summary: r.summary })),
-    counts: {
-      open: items.length,
-      awaiting_review: items.filter((i) => i.awaiting_review).length,
-      approved_to_execute: items.filter((i) => i.approved_to_execute).length,
-      resolved_last_24h: resolved24h
-    },
-    health: (() => {
-      const [h] = listHealth(db2, planId, 1);
-      return h ? { passed: h.passed, value: h.value, at: h.created_at, ...!h.passed && h.output && { output: h.output.slice(-500) } } : null;
-    })()
-  };
-}
-function queueRun(db2, planId, trigger = "manual") {
-  const goal = mustGetGoal(db2, planId);
-  if (goal.status !== "active") throw new GoalError(`Goal is ${goal.status}; resume it before running.`);
-  return getOpenRun(db2, planId) ?? insertRun(db2, planId, trigger, "queued");
-}
-function endRun(db2, runId, summary) {
-  const run = getRun(db2, runId);
-  if (!run) throw new GoalError(`Run ${runId} not found.`);
-  if (run.status !== "running" && run.status !== "queued") throw new GoalError(`Run ${runId} already ended (${run.status}).`);
-  if (!summary.trim()) throw new GoalError("A summary is required: what you did, what is waiting, what you learned.");
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  const created = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND run_id = ?").get(run.plan_id, runId).n;
-  const resolved = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(run.plan_id, run.started_at).n;
-  updateRun(db2, runId, { status: "completed", summary: summary.trim(), ended_at: now, items_created: created, items_resolved: resolved });
-  archiveResolved(db2, run.plan_id);
-  finishIfDone(db2, run.plan_id);
-  return getRun(db2, runId);
-}
-function countOpenItems(db2, planId) {
-  return db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND archived_at IS NULL AND status IN ('pending', 'active')").get(planId).n;
-}
-function finishIfDone(db2, planId) {
-  const goal = getGoal(db2, planId);
-  if (!goal?.one_off || goal.status !== "active" || countOpenItems(db2, planId) > 0) return false;
-  updateGoal(db2, planId, { status: "retired", next_run_at: null });
-  return true;
-}
-function failRun(db2, runId, status, reason) {
-  const run = getRun(db2, runId);
-  if (!run || run.status !== "running" && run.status !== "queued") return;
-  updateRun(db2, runId, { status, ended_at: (/* @__PURE__ */ new Date()).toISOString(), summary: run.summary ?? reason });
-}
-function archiveResolved(db2, planId, now = /* @__PURE__ */ new Date()) {
-  const goal = getGoal(db2, planId);
-  if (!goal) return 0;
-  const cutoff = new Date(now.getTime() - goal.item_retention_days * 864e5).toISOString();
-  return db2.prepare(`
-    UPDATE tasks SET archived_at = ?
-    WHERE plan_id = ? AND archived_at IS NULL AND status IN ('completed', 'abandoned') AND updated_at < ?
-  `).run(now.toISOString(), planId, cutoff).changes;
-}
-function withinActiveHours(activeHours, date3) {
-  if (!activeHours) return true;
-  const [start, end] = activeHours.split("-").map((s) => {
-    const [h, m] = s.split(":").map(Number);
-    return h * 60 + m;
-  });
-  const minutes = date3.getHours() * 60 + date3.getMinutes();
-  return start <= end ? minutes >= start && minutes < end : minutes >= start || minutes < end;
-}
-function decideTick(db2, planId, now = /* @__PURE__ */ new Date()) {
-  const goal = getGoal(db2, planId);
-  if (!goal || goal.status !== "active") return { action: "none" };
-  const open = getOpenRun(db2, planId);
-  if (open?.status === "running") return { action: "none" };
-  const schedule = getSchedule(db2, planId);
-  const queued = open?.status === "queued" ? open : void 0;
-  const scheduleDue = Boolean(schedule && goal.next_run_at && goal.next_run_at <= now.toISOString());
-  if (!queued && !scheduleDue) return { action: "none" };
-  if (!queued && schedule?.kind === "interval" && !withinActiveHours(schedule.active_hours, now)) {
-    return { action: "defer", next_run_at: new Date(now.getTime() + schedule.minutes * 6e4).toISOString() };
-  }
-  const kind = queued ? queued.trigger : schedule.kind;
-  const runsToday = countRunsSince(db2, planId, new Date(now.getTime() - 864e5).toISOString()) - (queued ? 1 : 0);
-  if (runsToday >= goal.limits.max_runs_per_day) {
-    return { action: "skip", trigger: kind, reason: `daily run limit reached (${goal.limits.max_runs_per_day})`, queuedRunId: queued?.id };
-  }
-  return { action: "start", trigger: kind, queuedRunId: queued?.id };
-}
-function nextIntervalRun(db2, planId, from = /* @__PURE__ */ new Date()) {
-  return nextScheduledRun(db2, planId, from);
-}
-function recordSkip(db2, planId, trigger, reason, now = /* @__PURE__ */ new Date()) {
-  const hourAgo = new Date(now.getTime() - 36e5).toISOString();
-  const recent = db2.prepare("SELECT 1 FROM goal_runs WHERE plan_id = ? AND status = 'skipped' AND skip_reason = ? AND started_at >= ?").get(planId, reason, hourAgo);
-  return recent ? null : insertRun(db2, planId, trigger, "skipped", reason);
-}
-
-// ../core/src/guard.ts
-var QUARTERDECK_TOOL_PREFIX = "mcp__quarterdeck__";
-var PLUGIN_QUARTERDECK_TOOL_PREFIX = "mcp__plugin_quarterdeck-goals_quarterdeck__";
-function canonicalToolName(name) {
-  return name.startsWith(PLUGIN_QUARTERDECK_TOOL_PREFIX) ? QUARTERDECK_TOOL_PREFIX + name.slice(PLUGIN_QUARTERDECK_TOOL_PREFIX.length) : name;
-}
-function matchToolCategory(rawMap, rawName) {
-  const toolName = canonicalToolName(rawName);
-  const toolMap = Object.fromEntries(Object.entries(rawMap).map(([p, c]) => [canonicalToolName(p), c]));
-  if (toolMap[toolName]) return toolMap[toolName];
-  const globs = Object.entries(toolMap).filter(([p]) => p.includes("*")).sort(([a], [b]) => b.length - a.length);
-  for (const [pattern, category] of globs) {
-    const re = new RegExp("^" + pattern.split("*").map((s) => s.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*") + "$");
-    if (re.test(toolName)) return category;
-  }
-  return null;
-}
-function record2(db2, run, toolName, category, decision, reason) {
-  db2.prepare(`
-    INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(newId("tc"), run.plan_id, run.id, toolName, category, decision, reason, (/* @__PURE__ */ new Date()).toISOString());
-}
-function guardToolCallForRun(db2, runId, toolName) {
-  const run = db2.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId);
-  return run ? guardRun(db2, run, toolName) : { decision: "allow" };
-}
-function guardRun(db2, run, toolName) {
-  const goal = getGoal(db2, run.plan_id);
-  if (!goal) return { decision: "allow" };
-  const category = matchToolCategory(goal.tool_map, toolName);
-  if (!category) return { decision: "allow", run_id: run.id };
-  const mode = autonomyFor(goal, category);
-  if (mode === "auto") {
-    record2(db2, run, toolName, category, "allow", null);
-    return { decision: "allow", category, run_id: run.id };
-  }
-  if (mode === "off") {
-    const reason2 = `Quarterdeck goal guard: "${category}" is off for this goal, so ${toolName} is not allowed. Don't take or propose this action.`;
-    record2(db2, run, toolName, category, "deny", reason2);
-    return { decision: "deny", category, run_id: run.id, reason: reason2 };
-  }
-  const approved = db2.prepare(`
-    SELECT COUNT(*) AS n FROM tasks
-    WHERE plan_id = ? AND status = 'active' AND archived_at IS NULL AND approved_at IS NOT NULL
-      AND json_extract(state, '$.action.category') = ?
-  `).get(run.plan_id, category).n;
-  if (approved > 0) {
-    record2(db2, run, toolName, category, "allow", null);
-    return { decision: "allow", category, run_id: run.id };
-  }
-  const reason = `Quarterdeck goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`;
-  record2(db2, run, toolName, category, "deny", reason);
-  return { decision: "deny", category, run_id: run.id, reason };
-}
-
-// ../core/src/goal-changes.ts
-var MODES = /* @__PURE__ */ new Set(["off", "propose", "auto"]);
-function applyGoalChanges(db2, planId, changes) {
-  const goal = getGoal(db2, planId);
-  const plan = getPlan(db2, planId);
-  if (!goal || !plan) throw new GoalError(`Goal ${planId} not found.`);
-  for (const [category, mode] of Object.entries(changes.autonomy ?? {})) {
-    if (mode !== null && !MODES.has(mode)) throw new GoalError(`"${mode}" isn't a mode for ${category}: use off, propose or auto.`);
-  }
-  for (const id of changes.forget_memory ?? []) {
-    if (getMemory(db2, id)?.plan_id !== planId) throw new GoalError(`Memory ${id} isn't this goal's.`);
-  }
-  const done = [];
-  db2.transaction(() => {
-    if (changes.name?.trim() && changes.name.trim() !== plan.name) {
-      updatePlan(db2, planId, { name: changes.name.trim(), updated_at: (/* @__PURE__ */ new Date()).toISOString() });
-      done.push(`renamed to "${changes.name.trim()}"`);
-    }
-    if (changes.objective?.trim() && changes.objective.trim() !== goal.objective) {
-      updateGoal(db2, planId, { objective: changes.objective.trim() });
-      updatePlan(db2, planId, { description: changes.objective.trim() });
-      done.push("objective changed");
-    }
-    if (changes.instructions !== void 0 && changes.instructions !== goal.instructions) {
-      updateGoal(db2, planId, { instructions: changes.instructions });
-      done.push(changes.instructions.trim() ? "instructions changed" : "instructions cleared");
-    }
-    if (changes.autonomy && Object.keys(changes.autonomy).length) {
-      const autonomy = { ...goal.autonomy };
-      for (const [category, mode] of Object.entries(changes.autonomy)) {
-        if (mode === null) delete autonomy[category];
-        else autonomy[category] = mode;
-        done.push(mode === null ? `${category}: back to propose` : `${category}: ${mode}`);
-      }
-      updateGoal(db2, planId, { autonomy });
-    }
-    if (changes.tool_map && Object.keys(changes.tool_map).length) {
-      const toolMap = { ...goal.tool_map };
-      for (const [pattern, category] of Object.entries(changes.tool_map)) {
-        if (category === null) delete toolMap[pattern];
-        else toolMap[pattern] = category;
-        done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} \u2192 ${category}`);
-      }
-      updateGoal(db2, planId, { tool_map: toolMap });
-    }
-    for (const m of changes.add_memory ?? []) {
-      insertMemory(db2, { plan_id: planId, kind: m.kind, text: m.text, source: "human", pinned: m.pinned ?? false });
-      done.push(`remembered (${m.kind}): ${m.text}`);
-    }
-    for (const id of changes.forget_memory ?? []) {
-      updateMemory(db2, id, { active: false });
-      done.push(`forgot memory ${id}`);
-    }
-    if (changes.status && changes.status !== goal.status) {
-      if (goal.status === "retired") throw new GoalError("This goal is done; run it again first.");
-      updateGoal(db2, planId, { status: changes.status });
-      done.push(changes.status === "paused" ? "paused" : "resumed");
-    }
-  })();
-  return done;
-}
-function getRunHold(db2, now = /* @__PURE__ */ new Date()) {
-  const row = db2.prepare("SELECT until, reason FROM goal_run_hold WHERE id = 1").get();
-  if (!row) return null;
-  if (row.until <= now.toISOString()) {
-    db2.prepare("DELETE FROM goal_run_hold WHERE id = 1").run();
-    return null;
-  }
-  return row;
-}
-function setRunHold(db2, hold) {
-  db2.prepare("INSERT INTO goal_run_hold (id, until, reason) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET until = excluded.until, reason = excluded.reason").run(hold.until, hold.reason);
-}
-var LIMIT = /(hit|reached) (your|the) .{0,30}limit|usage limit|rate limit|out of (credits|usage)/i;
-var DEFAULT_HOLD_MS = 30 * 6e4;
-function isUsageLimit(text) {
-  return LIMIT.test(text);
-}
-function parseLimitReset(text, now = /* @__PURE__ */ new Date()) {
-  const m = /resets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i.exec(text);
-  if (!m) return null;
-  let hour = Number(m[1]);
-  const minute = Number(m[2] ?? 0);
-  const meridiem = m[3]?.toLowerCase();
-  if (hour > 23 || minute > 59 || meridiem && hour > 12) return null;
-  if (meridiem === "pm" && hour < 12) hour += 12;
-  if (meridiem === "am" && hour === 12) hour = 0;
-  const at = new Date(now);
-  at.setHours(hour, minute, 0, 0);
-  if (at <= now) at.setDate(at.getDate() + 1);
-  return at;
-}
-function addRunUsage(db2, runId, usage) {
-  db2.prepare(`
-    UPDATE goal_runs SET input_tokens = input_tokens + ?, output_tokens = output_tokens + ?,
-      cache_read_tokens = cache_read_tokens + ?, cache_write_tokens = cache_write_tokens + ?, model = COALESCE(?, model)
-    WHERE id = ?
-  `).run(usage.input_tokens || 0, usage.output_tokens || 0, usage.cache_read_input_tokens || 0, usage.cache_creation_input_tokens || 0, usage.model ?? null, runId);
-}
-function reportRunEnd(db2, runId, input, now = /* @__PURE__ */ new Date()) {
-  const run = getRun(db2, runId);
-  if (!run) return { outcome: "unchanged" };
-  if (input.usage) addRunUsage(db2, runId, input.usage);
-  if (run.status !== "running") return { outcome: "unchanged" };
-  const answer = input.answer.trim();
-  if (isUsageLimit(answer)) {
-    const until = (parseLimitReset(answer, now) ?? new Date(now.getTime() + DEFAULT_HOLD_MS)).toISOString();
-    const hold = { until, reason: answer.split("\n")[0].slice(0, 200) };
-    updateRun(db2, runId, { status: "skipped", skip_reason: `usage limit reached: ${hold.reason}`, ended_at: now.toISOString() });
-    setRunHold(db2, hold);
-    return { outcome: "held", hold };
-  }
-  if (input.reason === "error") {
-    failRun(db2, runId, "failed", `The agent stopped on an error: ${answer.slice(0, 300) || "no message"}`);
-    return { outcome: "failed" };
-  }
-  return { outcome: "unchanged" };
-}
-
-// ../core/src/goal-tick.ts
-var LEASE_NAME = "goals";
-var LEASE_MS = 9e4;
-var STALE_GRACE_MS = 5 * 6e4;
-var DEFAULT_MAX_CONCURRENT = 3;
-function takeLease(db2, holder, now = /* @__PURE__ */ new Date()) {
-  db2.prepare(`
-    INSERT INTO scheduler_lease (name, holder, expires_at) VALUES (?, ?, ?)
-    ON CONFLICT(name) DO UPDATE SET holder = excluded.holder, expires_at = excluded.expires_at
-    WHERE scheduler_lease.holder = excluded.holder OR scheduler_lease.expires_at <= ?
-  `).run(LEASE_NAME, holder, new Date(now.getTime() + LEASE_MS).toISOString(), now.toISOString());
-  const row = db2.prepare("SELECT holder FROM scheduler_lease WHERE name = ?").get(LEASE_NAME);
-  return row.holder === holder;
-}
-function releaseLease(db2, holder) {
-  db2.prepare("DELETE FROM scheduler_lease WHERE name = ? AND holder = ?").run(LEASE_NAME, holder);
-}
-function goalRunPrompt(p) {
-  return [
-    `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
-    `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries.`,
-    "Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal's state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category's autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.",
-    "When you need something only the person can give or do (a choice, details you can't find, connecting a service, allowing a site), add_item with ask_person: true and one clear question, and carry on with what you can; don't guess. Their answer arrives as memory and the item is completed.",
-    "Save anything future runs should know with remember.",
-    'Your summary, items and memory are read by the person who owns this goal: write to them as "you", and never guess their gender or pronouns.',
-    `You have about ${p.maxRunMinutes} minutes; leave the rest for the next run. Don't wait on long background commands. Finish with end_run and a short summary: that summary is your report, so your final message can be one line.`
-  ].join("\n\n");
-}
-function claimRun(db2, planId, opts) {
-  const now = (opts.now ?? /* @__PURE__ */ new Date()).toISOString();
-  const claim = db2.transaction(() => {
-    const run2 = opts.queuedRunId ? getRun(db2, opts.queuedRunId) : insertRun(db2, planId, opts.trigger ?? "manual", "queued");
-    if (!run2) return null;
-    const changed = db2.prepare("UPDATE goal_runs SET status = 'running', holder = ?, started_at = ? WHERE id = ? AND status = 'queued'").run(opts.holder, now, run2.id).changes;
-    if (!changed) return null;
-    updateGoal(db2, planId, { last_run_at: now });
-    return getRun(db2, run2.id);
-  });
-  const run = claim();
-  if (!run) return null;
-  const goal = getGoal(db2, planId);
-  const plan = listGoals(db2).find((g) => g.plan.id === planId).plan;
-  return {
-    run_id: run.id,
-    goal_id: planId,
-    name: plan.name,
-    working_dir: plan.working_dir,
-    trigger: run.trigger,
-    max_run_minutes: goal.limits.max_run_minutes,
-    prompt: goalRunPrompt({ goalId: planId, runId: run.id, name: plan.name, workingDir: plan.working_dir, maxRunMinutes: goal.limits.max_run_minutes })
-  };
-}
-function attachAgent(db2, runId, agentId) {
-  updateRun(db2, runId, { agent_id: agentId });
-}
-function expireStaleRuns(db2, now = /* @__PURE__ */ new Date(), opts = {}) {
-  const rows = db2.prepare(`
-    SELECT r.id, r.started_at, g.limits FROM goal_runs r JOIN goals g ON g.plan_id = r.plan_id WHERE r.status = 'running'
-  `).all();
-  const expired = [];
-  for (const r of rows) {
-    if (opts.skipRunIds?.has(r.id)) continue;
-    const maxMinutes = JSON.parse(r.limits || "{}").max_run_minutes ?? 15;
-    if (now.getTime() - new Date(r.started_at).getTime() > maxMinutes * 6e4 + STALE_GRACE_MS) {
-      failRun(db2, r.id, "timed_out", "Run did not finish (Claude Code closed or the agent stopped responding)");
-      expired.push(r.id);
-    }
-  }
-  return expired;
-}
-async function checkHealth(db2, planId) {
-  const result = await runHealthCheck(db2, planId);
-  const goal = getGoal(db2, planId);
-  let queuedRun = false;
-  if (!result.passed && goal?.health_triggers_run && goal.status === "active" && !getOpenRun(db2, planId)) {
-    queueRun(db2, planId, "health");
-    queuedRun = true;
-  }
-  return { passed: result.passed, queuedRun };
-}
-async function schedulerPass(db2, opts) {
-  const now = opts.now ?? /* @__PURE__ */ new Date();
-  if (schemaOutdated(db2)) return { leader: false, claimed: [], expired: [], outdated: true };
-  if (!opts.ignoreLease && !takeLease(db2, opts.holder, now)) return { leader: false, claimed: [], expired: [] };
-  const expired = expireStaleRuns(db2, now, { skipRunIds: opts.trackedRunIds });
-  const goals = listGoals(db2, "active");
-  for (const { goal } of goals) {
-    if (!healthDue(goal, now)) continue;
-    await checkHealth(db2, goal.plan_id).catch(() => {
-    });
-  }
-  const hold = getRunHold(db2, now);
-  if (hold) return { leader: true, claimed: [], expired, hold };
-  let running = db2.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get().n;
-  const max = opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT;
-  const claimed = [];
-  for (const { plan } of goals) {
-    archiveResolved(db2, plan.id, now);
-    const decision = decideTick(db2, plan.id, now);
-    if (decision.action === "none") continue;
-    if (decision.action === "defer") {
-      updateGoal(db2, plan.id, { next_run_at: decision.next_run_at });
-      continue;
-    }
-    if (decision.action === "skip") {
-      if (decision.queuedRunId) {
-        updateRun(db2, decision.queuedRunId, { status: "skipped", skip_reason: decision.reason, ended_at: now.toISOString() });
-      } else {
-        recordSkip(db2, plan.id, decision.trigger, decision.reason, now);
-      }
-      updateGoal(db2, plan.id, { next_run_at: nextIntervalRun(db2, plan.id, now) });
-      continue;
-    }
-    if (running >= max) continue;
-    const run = claimRun(db2, plan.id, { holder: opts.holder, queuedRunId: decision.queuedRunId, trigger: decision.trigger, now });
-    if (run) {
-      claimed.push(run);
-      running++;
-    }
-    if (decision.trigger === "interval" || decision.trigger === "cron") updateGoal(db2, plan.id, { next_run_at: nextIntervalRun(db2, plan.id, now) });
-  }
-  return { leader: true, claimed, expired };
-}
-function decideItem(db2, planId, taskId, input) {
-  const task = getTask(db2, planId, taskId);
-  if (!task) throw new GoalError(`Item ${taskId} not found.`);
-  let queuedRun = null;
-  const active = () => getGoal(db2, planId)?.status === "active";
-  if (input.decision === "answer") {
-    const answer = (input.feedback ?? "").trim();
-    if (!answer) throw new GoalError("An answer is needed.");
-    if (!asksPerson(task)) throw new GoalError(`Item ${taskId} isn't a question for you; approve or reject it instead.`);
-    approveTask(db2, planId, taskId);
-    updateTask(db2, planId, taskId, { result: `Your answer: ${answer}`, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
-    insertMemory(db2, { plan_id: planId, kind: "fact", text: `You answered "${task.goal}": ${answer}`, source: "human", source_ref: taskId });
-    if (active()) queuedRun = queueRun(db2, planId);
-  } else if (input.decision === "approve") {
-    approveTask(db2, planId, taskId);
-    if ((isProposal(task) || asksPerson(task)) && active()) queuedRun = queueRun(db2, planId);
-  } else {
-    rejectTask(db2, planId, taskId, input.feedback ?? "");
-    const goal = getGoal(db2, planId);
-    if (isProposal(task) && goal?.one_off && goal.status === "active") queuedRun = queueRun(db2, planId);
-  }
-  return { task: getTask(db2, planId, taskId), queuedRun };
-}
-function reviveIfDone(db2, planId) {
-  const goal = getGoal(db2, planId);
-  if (!goal?.one_off || goal.status !== "retired") return false;
-  updateGoal(db2, planId, { status: "active" });
-  return true;
-}
-
-// ../core/src/goal-overview.ts
-import { createHash } from "crypto";
-var RUNS = 5;
-var OPEN_ITEMS = 10;
-var HEALTH = 20;
-var MEMORY = 10;
-var CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400 };
-function clip(text, max) {
-  if (text === null || text.length <= max) return text;
-  return `${text.slice(0, max - 1).trimEnd()}\u2026`;
-}
-var DONE = 10;
-var ACTIVITY_EVENTS = 20;
-var PROMOTE_AFTER = 10;
-function getGoalItems(db2, planId) {
-  const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL").all(planId);
-  return rows.map(deserializeTask).sort((a, b) => compareTaskIds(a.id, b.id));
-}
-function itemView(t) {
-  return {
-    id: t.id,
-    goal: t.goal,
-    status: t.status,
-    result: t.result,
-    notes: t.notes,
-    external_ref: t.external_ref,
-    run_id: t.run_id,
-    action: isProposal(t) ? t.state.action : null,
-    asks_person: asksPerson(t),
-    awaiting_review: t.review_requested_at !== null,
-    approved_to_execute: isProposal(t) && t.approved_at !== null && t.status === "active",
-    updated_at: t.updated_at
-  };
-}
-function overviewItem(t) {
-  const v = itemView(t);
-  const action = v.action;
-  const short = { ...v, goal: clip(v.goal, CLIP.title), notes: clip(v.notes, CLIP.notes), result: clip(v.result, CLIP.result) };
-  return action ? { ...short, action: { category: action.category, summary: clip(action.summary, CLIP.title) } } : short;
-}
-function getAutonomySuggestions(db2, planId) {
-  const goal = getGoal(db2, planId);
-  if (!goal) return [];
-  const rows = db2.prepare(`
-    SELECT json_extract(t.state, '$.action.category') AS category, v.passed
-    FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
-    WHERE v.plan_id = ? AND v.gate = 'approval' AND json_extract(t.state, '$.action.category') IS NOT NULL
-    ORDER BY v.created_at DESC, v.rowid DESC
-  `).all(planId);
-  const streak = /* @__PURE__ */ new Map();
-  for (const r of rows) {
-    const s = streak.get(r.category) ?? { n: 0, broken: false };
-    if (!s.broken) {
-      if (r.passed) s.n++;
-      else s.broken = true;
-    }
-    streak.set(r.category, s);
-  }
-  return [...streak.entries()].filter(([c, s]) => s.n >= PROMOTE_AFTER && autonomyFor(goal, c) === "propose").map(([category, s]) => ({ category, approved_in_a_row: s.n }));
-}
-var oneLine = (s) => s.replace(/\s+/g, " ").trim();
-var str = (v) => typeof v === "string" && v.trim() ? oneLine(v) : null;
-function describeEvent(e, itemGoal) {
-  const p = e.payload;
-  switch (e.event_type) {
-    case "agent_message":
-      return str(p.message);
-    case "tool_call":
-      return str(p.tool) ? `Using ${str(p.tool)}` : null;
-    case "task_created": {
-      const goal = str(p.goal);
-      return goal ? `Added "${goal}"${p.mode === "propose" ? " for approval" : ""}` : null;
-    }
-    case "status_changed": {
-      const goal = itemGoal(e.task_id);
-      if (!goal) return null;
-      if (p.to === "completed") return `Completed "${goal}"`;
-      if (p.to === "abandoned") return `Dropped "${goal}"`;
-      return null;
-    }
-    case "memory_added":
-      return str(p.text) ? `Noted: ${str(p.text)}` : null;
-    default:
-      return null;
-  }
-}
-function describeActivity({ goal, openRun, lastRun, events, items }) {
-  if (openRun?.status === "running") {
-    const goals = new Map(items.map((t) => [t.id, t.goal]));
-    for (const e of events) {
-      if (e.created_at < openRun.started_at) break;
-      if (e.actor !== "agent") continue;
-      const text = describeEvent(e, (id) => goals.get(id) ?? null);
-      if (text) return { state: "running", text, at: e.created_at };
-    }
-    return { state: "running", text: "Starting: reading the brief", at: openRun.started_at };
-  }
-  if (openRun) return { state: "queued", text: `Queued (${openRun.trigger}) \u2014 starts within a minute while Claude Code is open`, at: openRun.started_at };
-  if (goal.status === "paused") return { state: "paused", text: "Paused", at: null };
-  const approved = items.filter((t) => isProposal(t) && t.approved_at !== null && t.status === "active");
-  if (approved.length > 0) {
-    const more = approved.length > 1 ? ` and ${approved.length - 1} more` : "";
-    return { state: "idle", text: `Next run carries out "${oneLine(approved[0].goal)}"${more}`, at: null };
-  }
-  const summary = str(lastRun?.summary);
-  if (summary) return { state: "idle", text: `Last run: ${summary}`, at: null };
-  return { state: "idle", text: "Waiting for its first run", at: null };
-}
-var NEEDS_YOU = 5;
-var CARD_TEXT = 160;
-function buildOverview(db2, detail = "all") {
-  const all = listGoals(db2);
-  const done = all.filter(({ goal }) => goal.status === "retired" && goal.one_off).sort((a, b) => (b.goal.last_run_at ?? "").localeCompare(a.goal.last_run_at ?? "")).slice(0, DONE);
-  const goals = [...all.filter(({ goal }) => goal.status !== "retired"), ...done].sort((a, b) => a.plan.name.localeCompare(b.plan.name)).map(({ plan, goal }) => {
-    const items = getGoalItems(db2, plan.id);
-    const open = items.filter((t) => t.status === "pending" || t.status === "active");
-    const openRun = getOpenRun(db2, plan.id) ?? null;
-    const runs = listRuns(db2, plan.id, RUNS, { includeSkipped: false });
-    return {
-      id: plan.id,
-      name: plan.name,
-      objective: clip(goal.objective, CLIP.objective),
-      status: goal.status,
-      one_off: goal.one_off,
-      instructions: clip(goal.instructions, CLIP.instructions),
-      autonomy: goal.autonomy,
-      tool_map: goal.tool_map,
-      next_run_at: goal.next_run_at,
-      schedule: getSchedule(db2, plan.id),
-      open_run: openRun,
-      activity: (() => {
-        const a = describeActivity({
-          goal,
-          openRun,
-          lastRun: runs.find((r) => r.status !== "queued" && r.status !== "running") ?? null,
-          events: openRun?.status === "running" ? getEvents(db2, plan.id, { limit: ACTIVITY_EVENTS }) : [],
-          items
-        });
-        return { ...a, text: clip(a.text, CLIP.activity) };
-      })(),
-      runs: runs.map((r) => ({
-        id: r.id,
-        status: r.status,
-        trigger: r.trigger,
-        summary: clip(r.summary, CLIP.summary),
-        started_at: r.started_at,
-        ended_at: r.ended_at,
-        agent_id: r.agent_id,
-        // New tokens only: every model call re-reads the cached prompt, so cache reads would swamp the total
-        tokens: r.input_tokens + r.output_tokens + r.cache_write_tokens,
-        model: r.model
-      })),
-      needs_you: open.filter((t) => t.review_requested_at).map(overviewItem),
-      open_items: open.filter((t) => !t.review_requested_at).slice(0, OPEN_ITEMS).map(overviewItem),
-      open_item_count: open.filter((t) => !t.review_requested_at).length,
-      health: listHealth(db2, plan.id, HEALTH).map((h) => ({ passed: h.passed, value: h.value, created_at: h.created_at })),
-      memory: listMemory(db2, plan.id, { activeOnly: true }).slice(-MEMORY).reverse().map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory), source: m.source, pinned: m.pinned, created_at: m.created_at })),
-      suggestions: getAutonomySuggestions(db2, plan.id)
-    };
-  }).map((g) => {
-    const waiting = g.needs_you.length;
-    if (detail === "all" || detail.includes(g.id)) return { ...g, detail: true, needs_you_count: waiting };
-    return {
-      ...g,
-      detail: false,
-      needs_you_count: waiting,
-      objective: clip(g.objective, CARD_TEXT),
-      // On a card, each waiting item carries only what its row shows
-      needs_you: g.needs_you.slice(0, NEEDS_YOU).map((i) => ({
-        id: i.id,
-        goal: clip(i.goal, CARD_TEXT),
-        asks_person: i.asks_person,
-        action: i.action ? { category: i.action.category, summary: clip(i.action.summary, CARD_TEXT) } : null
-      })),
-      runs: g.runs.slice(0, 1),
-      open_items: [],
-      memory: [],
-      instructions: "",
-      tool_map: {}
-    };
-  });
-  return { goals, hold: getRunHold(db2), ...schemaOutdated(db2) ? { outdated: true } : {} };
-}
-function overviewWithEtag(db2, detail = "all") {
-  const body = JSON.stringify(buildOverview(db2, detail));
-  return { body, etag: `"${createHash("sha256").update(body).digest("base64url").slice(0, 27)}"` };
-}
-
-// ../core/src/todos.ts
-import { randomUUID as randomUUID3 } from "crypto";
-var DEFAULT_LIST = "To do";
-var samePath = (a, b) => norm(a) === norm(b);
-var norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-function listPlans2(db2, workingDir) {
-  const plans = db2.prepare("SELECT * FROM plans WHERE status = 'active' AND kind != 'goal' ORDER BY updated_at DESC").all();
-  return plans.filter((p) => samePath(p.working_dir, workingDir));
-}
-function headingOf(tasks) {
-  const roots = tasks.filter((t) => !t.id.includes("."));
-  if (roots.length !== 1) return null;
-  return tasks.some((t) => t.id.startsWith(`${roots[0].id}.`)) ? roots[0].id : null;
-}
-function toList(db2, plan) {
-  const tasks = getAllTasks(db2, plan.id).filter((t) => !t.archived_at);
-  const heading = headingOf(tasks);
-  const shown = heading ? tasks.filter((t) => t.id !== heading) : tasks;
-  const base = heading ? 2 : 1;
-  const items = shown.map((t) => ({ id: t.id, text: t.goal, status: t.status, depth: t.id.split(".").length - base, notes: t.notes }));
-  const done = items.filter((i) => i.status === "completed" || i.status === "abandoned").length;
-  return { id: plan.id, name: plan.name, items, open: items.length - done, done };
-}
-function todoLists(db2, workingDir) {
-  const plans = listPlans2(db2, workingDir);
-  plans.sort((a, b) => Number(b.name === DEFAULT_LIST) - Number(a.name === DEFAULT_LIST));
-  return plans.map((p) => toList(db2, p));
-}
-function addTodo(db2, input) {
-  const text = input.text.trim();
-  if (!text) throw new Error("A to-do needs some text.");
-  const now = (/* @__PURE__ */ new Date()).toISOString();
-  let plan = input.listId ? getPlan(db2, input.listId) : listPlans2(db2, input.workingDir).find((p) => p.name === DEFAULT_LIST);
-  if (input.listId && (!plan || plan.kind === "goal")) throw new Error(`List ${input.listId} not found.`);
-  let created = false;
-  if (!plan) {
-    const id = `plan_${randomUUID3().replace(/-/g, "").slice(0, 10)}`;
-    insertPlan(db2, { id, name: DEFAULT_LIST, description: "Your to-do list for this project", status: "active", working_dir: input.workingDir, created_at: now, updated_at: now });
-    plan = getPlan(db2, id);
-    created = true;
-  }
-  const parent = headingOf(getAllTasks(db2, plan.id).filter((t) => !t.archived_at));
-  const itemId = nextChildId(db2, plan.id, parent);
-  insertTask(db2, {
-    id: itemId,
-    plan_id: plan.id,
-    goal: text,
-    status: "pending",
-    result: null,
-    abandon_reason: null,
-    state: {},
-    depends_on: null,
-    notes: null,
-    created_by: input.by ?? "human",
-    created_at: now,
-    updated_at: now
-  });
-  touchPlan(db2, plan.id);
-  return { listId: plan.id, itemId, created };
-}
-function setTodo(db2, listId, itemId, change) {
-  const task = getTask(db2, listId, itemId);
-  if (!task) throw new Error(`To-do ${itemId} not found in list ${listId}.`);
-  const text = change.text?.trim();
-  if (change.text !== void 0 && !text) throw new Error("A to-do needs some text.");
-  updateTask(db2, listId, itemId, {
-    updated_at: (/* @__PURE__ */ new Date()).toISOString(),
-    ...change.status !== void 0 && { status: change.status },
-    ...change.notes !== void 0 && { notes: change.notes },
-    ...text !== void 0 && { goal: text }
-  });
-  touchPlan(db2, listId);
-  const t = getTask(db2, listId, itemId);
-  return { id: t.id, text: t.goal, status: t.status, depth: 0, notes: t.notes };
-}
-
-// ../core/src/index.ts
-function envVar(name, env = process.env) {
-  return env[`QUARTERDECK_${name}`] ?? env[`CONDUCTOR_${name}`];
-}
-function defaultDbPath(env = process.env, home = homedir()) {
-  const set = envVar("DB", env);
-  if (set) return set;
-  const path = join(home, ".quarterdeck", "tasks.db");
-  const old = join(home, ".conductor", "tasks.db");
-  return !existsSync2(path) && existsSync2(old) ? old : path;
-}
-function openDatabase(path = defaultDbPath()) {
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
-  const db2 = new Database(path);
-  db2.pragma("journal_mode = WAL");
-  db2.pragma("foreign_keys = ON");
-  runMigrations(db2);
-  return db2;
-}
-
 // src/db.ts
+init_src();
 var db = openDatabase();
 var getPlan2 = (id) => getPlan(db, id);
 var listPlans3 = (status) => listPlans(db, status);
@@ -21499,7 +21643,7 @@ var countItems = (planId) => db.prepare(
 ).get(planId);
 var schedulerPass2 = (opts) => schedulerPass(db, opts);
 var releaseLease2 = (holder) => releaseLease(db, holder);
-var overviewWithEtag2 = (detail = "all") => overviewWithEtag(db, detail);
+var overviewWithEtag2 = (detail = "all", standingSession = null) => overviewWithEtag(db, detail, standingSession);
 var decideItem2 = (planId, taskId, input) => decideItem(db, planId, taskId, input);
 var failRun2 = (runId, status, reason) => failRun(db, runId, status, reason);
 var attachAgent2 = (runId, agentId) => attachAgent(db, runId, agentId);
@@ -21808,6 +21952,7 @@ async function update_task(args) {
 }
 
 // src/tools/set_status.ts
+init_src();
 async function set_status(args) {
   const input = SetStatusSchema.parse(args);
   const planId = getOpenPlan();
@@ -22011,6 +22156,7 @@ async function provision_tasks(args) {
 }
 
 // src/tools/next_task.ts
+init_src();
 var isResolved = (t) => t.status === "completed" || t.status === "abandoned";
 async function next_task(args) {
   NextTaskSchema.parse(args);
@@ -22274,7 +22420,47 @@ async function run_goal(args) {
 }
 
 // src/tools/goal_runner.ts
-import { existsSync as existsSync3 } from "fs";
+import { existsSync as existsSync4 } from "fs";
+
+// src/runner-session.ts
+import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync, rmSync, statSync, writeFileSync } from "fs";
+import { homedir as homedir2, userInfo } from "os";
+import { dirname as dirname2, join as join2 } from "path";
+function runnerDir(home = homedir2()) {
+  return join2(home, ".quarterdeck", "runner");
+}
+function recordCliPath(serverDir, dir = runnerDir()) {
+  try {
+    const cli = join2(serverDir, "quarterdeck-cli.mjs");
+    if (!existsSync3(join2(dir, "launch.mjs")) || !existsSync3(cli)) return;
+    const file = join2(dir, "cli-path");
+    if (existsSync3(file) && readFileSync(file, "utf8").trim() === cli) return;
+    writeFileSync(file, cli);
+  } catch {
+  }
+}
+function standingSessionId(dir = runnerDir()) {
+  try {
+    return JSON.parse(readFileSync(join2(dir, "state.json"), "utf8")).sessionId ?? null;
+  } catch {
+    return null;
+  }
+}
+var RUNNER_USAGE = [
+  "Usage: quarterdeck runner <command>",
+  "",
+  "The standing session: a Claude Code session in a hidden console with Remote Control on, which runs",
+  "goals while no Claude Code window is open (the computer must be on and you logged in).",
+  "",
+  "  install [--permission-mode <mode>]   Start it, and keep it running with a scheduled task",
+  "  uninstall                            Stop it and delete the scheduled task",
+  "  start [--permission-mode <mode>]     Start it now",
+  "  stop                                 Stop it",
+  "  status                               Whether it is running and starting goal runs",
+  "  ensure                               Start it if it is missing; restart it after an update"
+].join("\n");
+
+// src/tools/goal_runner.ts
 var human = { actor: "human", via: "plugin" };
 async function goals_tick(args) {
   const input = GoalsTickSchema.parse(args);
@@ -22294,7 +22480,7 @@ async function goals_tick(args) {
 }
 async function goals_overview(args) {
   const input = GoalsOverviewSchema.parse(args);
-  const { body, etag } = overviewWithEtag2(input.detail ?? "all");
+  const { body, etag } = overviewWithEtag2(input.detail ?? "all", standingSessionId());
   if (input.etag === etag) return { changed: false, etag };
   return { changed: true, etag, ...JSON.parse(body) };
 }
@@ -22353,7 +22539,7 @@ async function guard_check(args) {
 }
 async function create_goal(args) {
   const input = CreateGoalSchema.parse(args);
-  if (!existsSync3(input.working_dir)) throw new Error(`Working directory not found: ${input.working_dir}`);
+  if (!existsSync4(input.working_dir)) throw new Error(`Working directory not found: ${input.working_dir}`);
   if (input.one_off && input.schedule) throw new Error("A one-off goal has no schedule.");
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const id = `plan_${nanoid2(10)}`;
@@ -22529,6 +22715,7 @@ async function handleReadResource(request) {
 }
 
 // src/tool-filter.ts
+init_src();
 var PLAN_TOOLS = /* @__PURE__ */ new Set([
   "create_plan",
   "list_plans",
@@ -22547,6 +22734,8 @@ function isListed(name, env = process.env) {
 }
 
 // src/index.ts
+import { dirname as dirname3 } from "path";
+import { fileURLToPath } from "url";
 var COMPACT_TOOLS = /* @__PURE__ */ new Set(["goals_overview", "goals_tick"]);
 var TOOLS = [
   {
@@ -22755,5 +22944,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 });
 server.setRequestHandler(ListResourcesRequestSchema, handleListResources);
 server.setRequestHandler(ReadResourceRequestSchema, handleReadResource);
+recordCliPath(dirname3(fileURLToPath(import.meta.url)));
 var transport = new StdioServerTransport();
 await server.connect(transport);
