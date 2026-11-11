@@ -497,7 +497,17 @@ function spawnInTmux(dir: string, args: string[]): number {
   if (!claude) throw new Error('`claude` is not on the PATH.')
   // One standing session: an older one whose state.json was lost goes
   try { tmux(['kill-session', '-t', TMUX_SESSION]) } catch { /* none */ }
-  const out = tmux(['new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', dir, '-P', '-F', '#{pane_pid}', '--', claude, ...args], env)
+  const newSession = ['new-session', '-d', '-s', TMUX_SESSION, '-x', '200', '-y', '50', '-c', dir, '-P', '-F', '#{pane_pid}', '--', claude, ...args]
+  let out: string
+  try {
+    // In a scope of its own, the tmux server isn't left behind in `ensure`'s service, which systemd
+    // logs as an unclean stop at every check (seen Nov 2026)
+    out = execFileSync('systemd-run', ['--user', '--scope', '--collect', '--quiet', '--description=Quarterdeck standing session', 'tmux', '-L', TMUX_SOCKET, ...newSession],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env })
+  } catch {
+    // No systemd user manager: tmux alone
+    out = tmux(newSession, env)
+  }
   const pid = Number(out.trim())
   if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Could not start the tmux session: ${out.trim().slice(0, 200)}`)
   return pid
