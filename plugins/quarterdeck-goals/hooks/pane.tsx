@@ -1,18 +1,20 @@
 /**
  * The Goals pane: one card per goal with its proposals (Approve / Reject),
  * controls (Run now, Pause / Resume, Cancel run) and, expanded, its open
- * items, recent runs and memory.
+ * items, recent runs and memory. A goal with nothing for the person (isQuiet)
+ * is one line until it is expanded.
  *
  * Hotkeys while the pane has focus: a / r approve or reject the first
- * proposal, n runs the first goal that can run, g refreshes, 1–9 expand a goal.
+ * proposal, n runs the first goal that shows Run now, g refreshes, 1–9 expand
+ * a goal.
  */
 import type { EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
-import type { Confirm, GoalCard, TodoItem, Todos } from '../types'
+import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, clip, discussPrompt, holdUntilText, isFailed, lastRun, nextRunText, runCost, scheduleLabel, spark } from './model'
+import { ago, clip, discussPrompt, holdUntilText, isFailed, isQuiet, lastRun, nextRunText, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
 import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
@@ -104,23 +106,33 @@ export async function renderPane($: $, e: E) {
   const current = s.goals.filter((g) => g.status !== 'retired')
   const done = s.goals.filter((g) => g.status === 'retired')
   const firstWithProposal = current.find((g) => g.needsYou.length > 0)
+  const shown = await getExpanded($)
+  // A goal with nothing for the person is one line until it is expanded
+  const oneLine = current.map((g) => isQuiet(g) && !shown.includes(g.id))
   const view: View = {
     now: await $.clock.now(),
     columns: e.props.bodyColumns,
     base: await baseUrl($),
     doing: await getBusy($),
     open: await getRejecting($),
-    shown: await getExpanded($),
+    shown,
     pending: await getConfirm($),
     discussing: await getDiscussing($),
     first: firstWithProposal ? `${firstWithProposal.id}/${firstWithProposal.needsYou[0]!.id}` : null,
-    runnable: current.find(canRun)?.id ?? null,
+    // Only a full card has Run now to carry the hotkey
+    runnable: current.find((g, i) => canRun(g) && !oneLine[i])?.id ?? null,
   }
 
   return (
     <Box flexDirection="column">
       {guardMissing && <Text color="yellow">{GUARD_MISSING}</Text>}
       {s.outdated && <Text color="yellow">Quarterdeck was updated in another session: run /reload-plugins here to use the new version (this session won't start goal runs until then).</Text>}
+      {s.update && (
+        <Box>
+          <Text color="yellow">Quarterdeck {s.update.latest} is available (you have {s.update.installed}). </Text>
+          {action($, e, { key: 'update-install', label: view.doing === 'update-install' ? 'Sending…' : 'Ask Claude to install it', onPress: () => void askToUpdate($, s.update!) })}
+        </Box>
+      )}
       {s.standing && <Text dimColor>The standing session is starting goal runs, so they also run with this window closed.</Text>}
       {s.hold && <Text color="yellow">Goal runs are on hold until {holdUntilText(s.hold.until, view.now)}: the usage limit is reached. Due runs start after that.</Text>}
       {phone === 'no_transport' && (
@@ -141,7 +153,10 @@ export async function renderPane($: $, e: E) {
           <Text dimColor>Create one with /goal-new &lt;objective&gt;; /goal-new alone offers ready-made ones.</Text>
         </Box>
       )}
-      {current.map((g, i) => goalCard($, e, view, g, i))}
+      {current.map((g, i) => (oneLine[i]
+        // One-line goals sit together; a blank line only before a card or the next section
+        ? quietLine($, e, view, g, i, oneLine[i + 1] ? 0 : 1)
+        : goalCard($, e, view, g, i)))}
       {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo, askingAbout, editing)}
       {done.length > 0 && doneSection($, e, view, done)}
       {message && <Text color="red">{message}</Text>}
@@ -164,6 +179,30 @@ function welcome($: $, e: E) {
       <Text dimColor>/goal-new                pick a ready-made goal</Text>
       <Text dimColor>/goal-new &lt;objective&gt;    start your own (it suggests a schedule)</Text>
       <Text dimColor>/todo &lt;text&gt;             add to this project's to-do list, shown here</Text>
+    </Box>
+  )
+}
+
+/**
+ * A goal with nothing for the person, on one line: its name (press it, or its
+ * number, for the full card), the tokens its last run used and when it runs next.
+ */
+function quietLine($: $, e: E, view: View, g: GoalCard, index: number, gap: number) {
+  const { Box, Text, Button } = $.ui.resolve(e)
+  const run = lastRun(g)
+  const facts = [
+    g.status === 'active' ? '' : ` · ${g.status}`,
+    // What the last run used; when it ran only if its tokens weren't recorded
+    ` · ${run ? runTokens(run) || `ran ${ago(run.endedAt ?? run.startedAt, view.now)}` : 'no runs yet'}`,
+    nextRunText(g, view.now),
+    g.openItemCount > 0 ? ` · ${g.openItemCount} open` : '',
+  ].join('')
+  // The name keeps its room; the facts take what is left of the line ("1: ▸ " comes first)
+  const room = view.columns - 5 - [...g.name].length
+  return (
+    <Box key={g.id} marginBottom={gap}>
+      <Button key={`toggle-${g.id}`} plain label={`▸ ${g.name}`} hotkey={index < 9 ? String(index + 1) : undefined} onPress={() => void toggleExpanded($, g.id).then(() => refresh($))} />
+      {room >= 8 && <Text dimColor>{clip(facts, room)}</Text>}
     </Box>
   )
 }
@@ -638,6 +677,11 @@ function todoSection($: $, e: E, view: View, todos: Todos, addingTo: string | nu
       })}
     </Box>
   )
+}
+
+/** Asks Claude, in the conversation, to install the published update. */
+async function askToUpdate($: $, update: Update): Promise<boolean> {
+  return act($, 'update-install', 'ask Claude to update', async () => void (await sendToChat($, updatePrompt(update), `install Quarterdeck ${update.latest}: claude plugin update quarterdeck-goals@quarterdeck`)))
 }
 
 /**

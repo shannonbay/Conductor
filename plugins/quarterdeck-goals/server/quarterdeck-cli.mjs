@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Quarterdeck MCP server 0.15.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.17.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __defProp = Object.defineProperty;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -2394,11 +2394,17 @@ import { dirname as dirname2, join as join2 } from "path";
 import { fileURLToPath } from "url";
 var SESSION_NAME = "Quarterdeck goals";
 var TASK_NAME = "Quarterdeck goals runner";
+var UNIT_NAME = "quarterdeck-runner";
+var TMUX_SOCKET = "quarterdeck";
+var TMUX_SESSION = "quarterdeck-goals";
 var ENSURE_MINUTES = 5;
 var PERMISSION_MODES = ["acceptEdits", "auto", "bypassPermissions", "manual", "dontAsk", "plan"];
 function liveState(deps) {
   const state = deps.readState();
   return state && state.pid > 0 && deps.pidAlive(state.pid) ? state : null;
+}
+function waitingOn(screen) {
+  return screen && /trust this folder/i.test(screen) ? "trust" : null;
 }
 function status(deps) {
   const live = liveState(deps);
@@ -2408,12 +2414,15 @@ function status(deps) {
     sessionId: live?.sessionId ?? null,
     holdsLease: live !== null && holder === live.sessionId,
     leaseElsewhere: holder !== null && holder !== live?.sessionId,
-    stale: live !== null && live.build !== deps.build
+    stale: live !== null && live.build !== deps.build,
+    waiting: live ? waitingOn(deps.screenText?.(live.pid)) : null
   };
 }
+var ATTACH_HINT = 'Run `quarterdeck runner attach`, choose "Yes, I trust this folder", then leave with Ctrl-b d (it keeps running).';
 function statusText(s) {
   if (!s.running) return "The standing session is not running. Start it with: quarterdeck runner start";
-  const who = s.holdsLease ? "it is the session starting goal runs" : s.leaseElsewhere ? "an open Claude Code window is starting goal runs now; it takes over when that closes" : "no session has started goal runs in the last minutes (it takes over within 90 seconds)";
+  const who = s.holdsLease ? "it is the session starting goal runs" : s.leaseElsewhere ? "another session holds the goal runs (an open Claude Code window, or a session that just stopped); it takes over within 90 seconds of that one going quiet" : "no session has started goal runs in the last minutes (it takes over within 90 seconds)";
+  if (s.waiting) return `The standing session is running (${s.sessionId}) but waiting to be told its folder is safe, so no goal runs in it yet. ${ATTACH_HINT}`;
   return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? " It started with an older Quarterdeck and restarts at the next check with no run going." : ""}`;
 }
 function startArgs(sessionId, permissionMode) {
@@ -2513,20 +2522,67 @@ function taskXml(p) {
 </Task>
 `;
 }
+function sdQuote(s, exec) {
+  const escaped = s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/%/g, "%%");
+  return `"${exec ? escaped.replace(/\$/g, "$$$$") : escaped}"`;
+}
+function systemdUnits(p) {
+  const description = "Keeps the Quarterdeck standing session running, so goals run with no Claude Code window open. Remove with: quarterdeck runner uninstall";
+  const path = [dirname2(p.node), ...p.path.split(":").filter((d) => d && d !== dirname2(p.node))].join(":");
+  return {
+    service: `[Unit]
+Description=${description}
+
+[Service]
+Type=oneshot
+ExecStart=${sdQuote(p.node, true)} ${sdQuote(p.launcher, true)}
+WorkingDirectory=${p.dir.replace(/%/g, "%%")}
+Environment=${sdQuote(`PATH=${path}`, false)}
+KillMode=process
+TimeoutStartSec=5min
+`,
+    timer: `[Unit]
+Description=${description}
+
+[Timer]
+OnActiveSec=1min
+OnUnitActiveSec=${ENSURE_MINUTES}min
+
+[Install]
+WantedBy=timers.target
+`
+  };
+}
+function keepAliveName(platform) {
+  return platform === "win32" ? `the scheduled task "${TASK_NAME}"` : `the systemd timer ${UNIT_NAME}.timer`;
+}
+var SUPPORTED = ["win32", "linux"];
+var WSL_WARNING = "This is WSL, which stops a minute or so after its last window closes, and the standing session with it: goals run here only while a WSL window is open. To run them with every window closed, use the standing session on Windows instead (`runner install` from a Windows terminal).";
 function install(deps, opts = {}) {
-  if (deps.platform !== "win32") throw new Error("The standing session is set up for Windows only so far (it needs a hidden console and Task Scheduler).");
+  if (!SUPPORTED.includes(deps.platform)) throw new Error("The standing session is set up for Windows and Linux only so far.");
   if (!deps.cliPath) throw new Error("Run this from the built CLI: node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install (after `npm run build --prefix mcp`).");
+  checkMode(opts.permissionMode);
   const launcher = join2(deps.dir, "launch.mjs");
   deps.writeFile(launcher, LAUNCHER);
   deps.writeFile(join2(deps.dir, "cli-path"), deps.cliPath);
-  const file = join2(deps.dir, "task.xml");
-  deps.writeFile(file, "\uFEFF" + taskXml({ user: deps.user, node: deps.node, launcher }), "utf16le");
-  deps.schtasks(["/create", "/tn", TASK_NAME, "/xml", file, "/f"]);
-  const lines = [
-    `Created the scheduled task "${TASK_NAME}": it checks at logon and every ${ENSURE_MINUTES} minutes that the standing session is running.`,
-    startByTask(deps, opts).text
-  ];
+  const lines = [];
+  if (deps.platform === "win32") {
+    const file = join2(deps.dir, "task.xml");
+    deps.writeFile(file, "\uFEFF" + taskXml({ user: deps.user, node: deps.node, launcher }), "utf16le");
+    deps.schtasks(["/create", "/tn", TASK_NAME, "/xml", file, "/f"]);
+    lines.push(`Created the scheduled task "${TASK_NAME}": it checks at logon and every ${ENSURE_MINUTES} minutes that the standing session is running.`);
+  } else {
+    const units = systemdUnits({ node: deps.node, launcher, dir: deps.dir, path: deps.path });
+    deps.writeFile(join2(deps.systemdDir, `${UNIT_NAME}.service`), units.service);
+    deps.writeFile(join2(deps.systemdDir, `${UNIT_NAME}.timer`), units.timer);
+    deps.systemctl(["daemon-reload"]);
+    deps.systemctl(["enable", "--now", `${UNIT_NAME}.timer`]);
+    lines.push(`Created the systemd user timer ${UNIT_NAME}.timer: it checks at login and every ${ENSURE_MINUTES} minutes that the standing session is running.`);
+  }
+  lines.push(startByTask(deps, opts).text);
   lines.push("Goals now run while this computer is on and you are logged in, with no Claude Code window open. Remove with: quarterdeck runner uninstall");
+  if (deps.platform === "linux" && deps.wsl) lines.push(WSL_WARNING);
+  else if (deps.platform === "linux") lines.push("To keep it running after you log out too: loginctl enable-linger");
   return lines.join("\n");
 }
 function startByTask(deps, opts = {}) {
@@ -2534,14 +2590,24 @@ function startByTask(deps, opts = {}) {
   const live = liveState(deps);
   if (live) return { started: false, sessionId: live.sessionId, text: `The standing session is already running (${live.sessionId}).` };
   if (opts.permissionMode) deps.writeState({ sessionId: deps.readState()?.sessionId ?? "", pid: 0, build: deps.build, permissionMode: opts.permissionMode });
-  deps.schtasks(["/run", "/tn", TASK_NAME]);
+  if (deps.platform === "win32") deps.schtasks(["/run", "/tn", TASK_NAME]);
+  else deps.systemctl(["start", `${UNIT_NAME}.service`]);
   let made = null;
   for (let i = 0; i < 40 && !made; i++) {
     deps.sleep(500);
     made = liveState(deps);
   }
-  if (!made) throw new Error(`The scheduled task ran but no session appeared. See ${join2(deps.dir, "ensure.log")}.`);
-  return { started: true, sessionId: made.sessionId, text: `Started the standing session (${made.sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` };
+  if (!made) throw new Error(`${keepAliveName(deps.platform).replace(/^t/, "T")} ran but no session appeared. See ${join2(deps.dir, "ensure.log")}.`);
+  return { started: true, sessionId: made.sessionId, text: `Started the standing session (${made.sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.${questionNote(deps, made.pid)}` };
+}
+function questionNote(deps, pid) {
+  if (!deps.screenText) return "";
+  for (let i = 0; i < 16; i++) {
+    deps.sleep(500);
+    if (waitingOn(deps.screenText(pid))) return `
+It is waiting to be told its folder (${deps.dir}) is safe; no goal runs in it until then. ${ATTACH_HINT}`;
+  }
+  return "";
 }
 function uninstall(deps) {
   const lines = [];
@@ -2552,6 +2618,19 @@ function uninstall(deps) {
     } catch {
       lines.push(`There was no scheduled task "${TASK_NAME}".`);
     }
+  } else if (deps.platform === "linux") {
+    const had = taskInstalled(deps);
+    try {
+      deps.systemctl(["disable", "--now", `${UNIT_NAME}.timer`]);
+    } catch {
+    }
+    deps.removeFile(join2(deps.systemdDir, `${UNIT_NAME}.timer`));
+    deps.removeFile(join2(deps.systemdDir, `${UNIT_NAME}.service`));
+    try {
+      deps.systemctl(["daemon-reload"]);
+    } catch {
+    }
+    lines.push(had ? `Deleted the systemd timer ${UNIT_NAME}.timer.` : `There was no systemd timer ${UNIT_NAME}.timer.`);
   }
   deps.removeFile(join2(deps.dir, "launch.mjs"));
   deps.removeFile(join2(deps.dir, "task.xml"));
@@ -2559,9 +2638,10 @@ function uninstall(deps) {
   return lines.join("\n");
 }
 function taskInstalled(deps) {
-  if (deps.platform !== "win32") return false;
   try {
-    deps.schtasks(["/query", "/tn", TASK_NAME]);
+    if (deps.platform === "win32") deps.schtasks(["/query", "/tn", TASK_NAME]);
+    else if (deps.platform === "linux") deps.systemctl(["is-enabled", "--quiet", `${UNIT_NAME}.timer`]);
+    else return false;
     return true;
   } catch {
     return false;
@@ -2586,6 +2666,59 @@ function sessionEnv() {
   for (const key of Object.keys(env)) if (/^CLAUDE(CODE$|_CODE_|_PID$|_EFFORT$)/.test(key)) delete env[key];
   return env;
 }
+function tmux(args, env) {
+  try {
+    return execFileSync("tmux", ["-L", TMUX_SOCKET, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], ...env ? { env } : {} });
+  } catch (err) {
+    if (err.code === "ENOENT") throw new Error("The standing session needs tmux on Linux: install it (for example `sudo apt install tmux`).");
+    throw err;
+  }
+}
+function onPath(name, path) {
+  for (const d of path.split(":")) if (d && existsSync3(join2(d, name))) return join2(d, name);
+  return null;
+}
+function spawnInTmux(dir, args) {
+  const env = sessionEnv();
+  delete env.TMUX;
+  delete env.TMUX_PANE;
+  env.PATH = [dirname2(process.execPath), env.PATH ?? ""].join(":");
+  const claude = onPath("claude", env.PATH);
+  if (!claude) throw new Error("`claude` is not on the PATH.");
+  try {
+    tmux(["kill-session", "-t", TMUX_SESSION]);
+  } catch {
+  }
+  const newSession = ["new-session", "-d", "-s", TMUX_SESSION, "-x", "200", "-y", "50", "-c", dir, "-P", "-F", "#{pane_pid}", "--", claude, ...args];
+  let out;
+  try {
+    out = execFileSync(
+      "systemd-run",
+      ["--user", "--scope", "--collect", "--quiet", "--description=Quarterdeck standing session", "tmux", "-L", TMUX_SOCKET, ...newSession],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env }
+    );
+  } catch {
+    out = tmux(newSession, env);
+  }
+  const pid = Number(out.trim());
+  if (!Number.isInteger(pid) || pid <= 0) throw new Error(`Could not start the tmux session: ${out.trim().slice(0, 200)}`);
+  return pid;
+}
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function tmuxPaneAlive(pid) {
+  try {
+    return tmux(["list-panes", "-t", TMUX_SESSION, "-F", "#{pane_pid}"]).split("\n").includes(String(pid));
+  } catch {
+    return false;
+  }
+}
 async function realDeps() {
   const core = await Promise.resolve().then(() => (init_src(), src_exports));
   const dir = runnerDir();
@@ -2605,8 +2738,10 @@ async function realDeps() {
     build: currentBuild(),
     // conhost --headless gives `claude` a console with no window. Started through PowerShell's
     // Start-Process: started by Node's spawn (detached or not, any stdio) it exits within seconds (seen Nov 2026)
+    // On Linux, a detached tmux session instead
     spawnSession: (args) => {
-      if (process.platform !== "win32") throw new Error("The standing session is set up for Windows only so far (it needs a hidden console).");
+      if (process.platform === "linux") return spawnInTmux(dir, args);
+      if (process.platform !== "win32") throw new Error("The standing session is set up for Windows and Linux only so far.");
       const claude = execFileSync("where.exe", ["claude"], { encoding: "utf8", windowsHide: true }).split(/\r?\n/)[0].trim();
       const quote = (a) => /[\s"]/.test(a) ? `"${a}"` : a;
       const ps = (s) => `'${s.replace(/'/g, "''")}'`;
@@ -2622,6 +2757,7 @@ async function realDeps() {
       return pid;
     },
     pidAlive: (pid) => {
+      if (process.platform === "linux") return tmuxPaneAlive(pid);
       try {
         if (process.platform !== "win32") {
           process.kill(pid, 0);
@@ -2635,8 +2771,20 @@ async function realDeps() {
     killTree: (pid) => {
       try {
         if (process.platform === "win32") execFileSync("taskkill.exe", ["/pid", String(pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
-        else process.kill(pid);
+        else if (process.platform === "linux") {
+          tmux(["kill-session", "-t", TMUX_SESSION]);
+          for (let i = 0; i < 20 && processAlive(pid); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 500);
+          if (processAlive(pid)) process.kill(pid, "SIGKILL");
+        } else process.kill(pid);
       } catch {
+      }
+    },
+    screenText: (pid) => {
+      if (process.platform !== "linux" || !tmuxPaneAlive(pid)) return null;
+      try {
+        return tmux(["capture-pane", "-p", "-t", TMUX_SESSION]);
+      } catch {
+        return null;
       }
     },
     newId: () => randomUUID4(),
@@ -2658,9 +2806,29 @@ async function realDeps() {
     cliPath: /quarterdeck-cli\.mjs$/.test(script) ? script : null,
     user: process.platform === "win32" && process.env.USERDOMAIN ? `${process.env.USERDOMAIN}\\${userInfo().username}` : userInfo().username,
     node: process.execPath,
-    writeFile: (path, content, encoding) => writeFileSync(path, content, encoding ?? "utf8"),
+    writeFile: (path, content, encoding) => {
+      mkdirSync2(dirname2(path), { recursive: true });
+      writeFileSync(path, content, encoding ?? "utf8");
+    },
     removeFile: (path) => rmSync(path, { force: true }),
     schtasks: (args) => execFileSync("schtasks.exe", args, { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }),
+    systemctl: (args) => execFileSync("systemctl", ["--user", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
+    systemdDir: join2(process.env.XDG_CONFIG_HOME || join2(homedir2(), ".config"), "systemd", "user"),
+    path: process.env.PATH ?? "",
+    wsl: process.platform === "linux" && (() => {
+      try {
+        return /microsoft/i.test(readFileSync("/proc/version", "utf8"));
+      } catch {
+        return false;
+      }
+    })(),
+    attach: () => {
+      if (process.platform !== "linux") throw new Error("attach is for Linux, where the session is in tmux.");
+      if (!process.stdin.isTTY) throw new Error(`attach needs a terminal: run it in one of its own (or: tmux -L ${TMUX_SOCKET} attach -t ${TMUX_SESSION}).`);
+      const env = { ...process.env };
+      delete env.TMUX;
+      execFileSync("tmux", ["-L", TMUX_SOCKET, "attach", "-t", TMUX_SESSION], { stdio: "inherit", env });
+    },
     sleep: (ms) => {
       Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
     }
@@ -2669,15 +2837,17 @@ async function realDeps() {
 var RUNNER_USAGE = [
   "Usage: quarterdeck runner <command>",
   "",
-  "The standing session: a Claude Code session in a hidden console with Remote Control on, which runs",
-  "goals while no Claude Code window is open (the computer must be on and you logged in).",
+  "The standing session: a Claude Code session with Remote Control on, in a hidden console (Windows) or a",
+  "tmux session (Linux), which runs goals while no Claude Code window is open (the computer must be on",
+  "and you logged in).",
   "",
-  "  install [--permission-mode <mode>]   Start it, and keep it running with a scheduled task",
-  "  uninstall                            Stop it and delete the scheduled task",
+  "  install [--permission-mode <mode>]   Start it, and keep it running (a scheduled task; on Linux a systemd timer)",
+  "  uninstall                            Stop it and delete the scheduled task or timer",
   "  start [--permission-mode <mode>]     Start it now",
   "  stop                                 Stop it",
   "  status                               Whether it is running and starting goal runs",
-  "  ensure                               Start it if it is missing; restart it after an update"
+  "  ensure                               Start it if it is missing; restart it after an update",
+  "  attach                               Linux: open its terminal (to answer a question); Ctrl-b d leaves it running"
 ].join("\n");
 async function runnerCommand(args, deps) {
   const [command2, ...rest] = args;
@@ -2692,8 +2862,10 @@ async function runnerCommand(args, deps) {
       case "uninstall":
         return { text: uninstall(d), code: 0 };
       case "start": {
-        if (d.platform === "win32" && taskInstalled(d)) return { text: startByTask(d, { permissionMode }).text, code: 0 };
+        if (taskInstalled(d)) return { text: startByTask(d, { permissionMode }).text, code: 0 };
         const r = start(d, { permissionMode });
+        const live = r.started ? liveState(d) : null;
+        if (live) r.text += questionNote(d, live.pid);
         const warning = r.started && d.insideClaudeCode ? "\nStarted from inside Claude Code, so it may stop when this window closes. Run `quarterdeck runner install` (or start it from a terminal of its own) to keep it." : "";
         return { text: r.text + warning, code: 0 };
       }
@@ -2705,6 +2877,11 @@ async function runnerCommand(args, deps) {
       }
       case "ensure":
         return { text: ensure(d).text, code: 0 };
+      case "attach": {
+        if (!liveState(d)) return { text: "The standing session is not running. Start it with: quarterdeck runner start", code: 1 };
+        d.attach();
+        return { text: "", code: 0 };
+      }
       default:
         return { text: RUNNER_USAGE, code: 1 };
     }
@@ -2952,9 +3129,11 @@ async function checkRunner(o, deps) {
   try {
     const d = deps ?? await realDeps();
     const s = status(d);
-    const task = d.platform !== "win32" || taskInstalled(d);
-    if (!s.running) return warn(name, `not running${task ? " (the scheduled task starts it within 5 minutes)" : ""}, so goals run only while a Claude Code window is open`, "Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.");
-    if (!task) return warn(name, `${statusText(s)} But the scheduled task "${TASK_NAME}" is missing, so nothing restarts it after a logon or an update`, "Run `quarterdeck runner install`.");
+    const task = !["win32", "linux"].includes(d.platform) || taskInstalled(d);
+    if (!s.running) return warn(name, `not running${task ? ` (${keepAliveName(d.platform)} starts it within 5 minutes)` : ""}, so goals run only while a Claude Code window is open`, "Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.");
+    if (d.platform === "linux" && d.wsl) return warn(name, `${statusText(s)} But ${WSL_WARNING.replace(/^This is WSL, which/, "WSL")}`, "Run `quarterdeck runner uninstall` here and `quarterdeck runner install` in a Windows terminal.");
+    if (s.waiting) return warn(name, "running but waiting to be told its folder is safe, so no goal runs in it", ATTACH_HINT);
+    if (!task) return warn(name, `${statusText(s)} But ${keepAliveName(d.platform)} is missing, so nothing restarts it after a logon or an update`, "Run `quarterdeck runner install`.");
     return ok(name, statusText(s));
   } catch (e) {
     return warn(name, `could not be checked: ${firstLine2(e.message)}`, "Check that `claude agents --json` works in a terminal.");
@@ -3029,7 +3208,7 @@ if (command === "doctor") {
   process.exit(results.some((r) => r.level === "fail") ? 1 : 0);
 } else if (command === "runner") {
   const { text, code } = await runnerCommand(process.argv.slice(3));
-  console.log(text);
+  if (text) console.log(text);
   process.exit(code);
 } else {
   console.log([

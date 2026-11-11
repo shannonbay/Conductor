@@ -2,7 +2,7 @@
  * Pure functions: the web app's overview turned into cards, goal-name
  * matching, alert diffing and the small formatters the pane uses.
  */
-import type { GoalCard, Item, Schedule, Snapshot } from '../types'
+import type { GoalCard, Item, Schedule, Snapshot, Update } from '../types'
 
 /** One goal as GET /api/goals/overview returns it (the fields used here). */
 export type OverviewGoal = {
@@ -74,6 +74,21 @@ export function lastRun(g: GoalCard) {
 
 export function isFailed(status: string): boolean {
   return status === 'failed' || status === 'timed_out'
+}
+
+/**
+ * Nothing here needs the person: nothing waiting for them, no run going, the
+ * last run didn't fail, the health check isn't failing and there is no
+ * suggestion. The pane draws such a goal as one line until it is expanded.
+ */
+export function isQuiet(g: GoalCard): boolean {
+  const run = lastRun(g)
+  return g.needsYou.length === 0
+    && g.needsYouCount === 0
+    && !g.openRun
+    && !(run && isFailed(run.status))
+    && !(g.health && !g.health.passed)
+    && g.suggestions.length === 0
 }
 
 /**
@@ -407,6 +422,19 @@ export function discussPrompt(g: GoalCard, run?: GoalCard['runs'][number], quest
   return `Let's talk about this run of my goal "${g.name}" (goal ${g.id}, run ${run.id}): ${when}.\n\nIts summary: ${run.summary ?? '(none)'}\n\n${isFailed(run.status) ? 'Why did it fail, and what should change so it doesn\'t again?' : 'Is this what should have happened, and what should change?'}${transcript} ${how}`
 }
 
+/** The prompt that asks Claude to install a published update (the pane's "Ask Claude to install it"). */
+export function updatePrompt(u: Update): string {
+  return [
+    `Quarterdeck ${u.latest} is available (I have ${u.installed}). Please install it:`,
+    '',
+    '1. `claude plugin marketplace update quarterdeck`',
+    '2. `claude plugin update quarterdeck-goals@quarterdeck`',
+    '3. `claude plugin update quarterdeck-guard@quarterdeck`',
+    '',
+    "Tell me what each one answered. If they worked, remind me to run /reload-plugins in every open Claude Code session (only I can type that), and that goal runs wait in a session until it has. If one failed, say why and don't try anything else without asking me.",
+  ].join('\n')
+}
+
 export type GoalChanges = {
   name?: string
   objective?: string
@@ -439,11 +467,18 @@ export function holdUntilText(until: string, now: number): string {
   return new Date(now).toDateString() === d.toDateString() ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
 }
 
+/** "48k tokens": the new tokens a run used (no cache reads); '' when unknown. */
+export function runTokens(run: { tokens?: number }): string {
+  const t = run.tokens ?? 0
+  if (t <= 0) return ''
+  return `${t >= 1_000_000 ? `${(t / 1_000_000).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : t} tokens`
+}
+
 /** "48k tokens · 2m": the new tokens a finished run used (no cache reads), and how long it took; '' when unknown. */
 export function runCost(run: { tokens?: number; startedAt: string; endedAt: string | null }): string {
   const parts: string[] = []
-  const t = run.tokens ?? 0
-  if (t > 0) parts.push(`${t >= 1_000_000 ? `${(t / 1_000_000).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : t} tokens`)
+  const tokens = runTokens(run)
+  if (tokens) parts.push(tokens)
   if (run.endedAt) {
     const s = Math.max(0, Math.round((Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 1000))
     parts.push(s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`)

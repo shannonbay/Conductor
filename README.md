@@ -105,6 +105,8 @@ Claude Code updates Anthropic's marketplaces on its own but leaves others to you
 claude plugin update quarterdeck-goals@quarterdeck
 ```
 
+Without auto-update you still hear about new versions: the server looks at the `release` branch every six hours, and the Goals pane then says `Quarterdeck 0.16.0 is available` with **Ask Claude to install it**, which sends Claude the update commands to run. Turn the check off with `QUARTERDECK_UPDATE_CHECK=0`.
+
 With several sessions open, `/reload-plugins` in each. Until you do, a session that's still on the old version stops starting goal runs and its Goals pane says so: the updated session runs them.
 
 ### Upgrading from a manual install
@@ -157,13 +159,15 @@ node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install
 
 (Without a clone: `node ~/.claude/plugins/cache/quarterdeck/quarterdeck-goals/<version>/server/quarterdeck-cli.mjs` `runner install`.)
 
-This starts the **standing session**: one Claude Code session in `~/.quarterdeck/runner`, in a hidden console, with Remote Control on. **Windows only so far.** It is an ordinary session with both plugins, so runs, the guard, alerts and approvals work in it as in any window. A scheduled task ("Quarterdeck goals runner", Windows Task Scheduler) checks at logon and every 5 minutes that it is running, and restarts it after a Quarterdeck update once no run is going.
+This starts the **standing session**: one Claude Code session in `~/.quarterdeck/runner` with Remote Control on, in a hidden console on Windows or a detached tmux session on Linux (macOS not yet). It is an ordinary session with both plugins, so runs, the guard, alerts and approvals work in it as in any window. Something checks at logon and every 5 minutes that it is running, and restarts it after a Quarterdeck update once no run is going: a scheduled task on Windows ("Quarterdeck goals runner", Task Scheduler), a systemd user timer on Linux (`quarterdeck-runner.timer`).
+
+- **Linux:** needs tmux and systemd's user manager (`systemctl --user`; on WSL, systemd turned on in `/etc/wsl.conf`). Run `install` from a terminal whose `PATH` finds `claude`; the timer keeps that `PATH`, with the Node that ran `install` first. The first time, Claude Code asks whether you trust the folder, and nobody is at the session's terminal to answer, so `install` says so: run `runner attach`, choose "Yes, I trust this folder", and leave with Ctrl-b d. The timer runs while you are logged in; `loginctl enable-linger` keeps it going after you log out. **Not on WSL:** WSL stops a minute or so after its last window closes, taking the session with it, so on a Windows computer install the standing session from a Windows terminal instead (`install` and the doctor say so).
 
 - **Who starts runs:** one session at a time, as always. While a Claude Code window is open, that window may be the one; when it closes, the standing session takes over within 90 seconds. `runner status` says which.
 - **From your phone:** the standing session appears as "Quarterdeck goals" in the Claude app and at claude.ai/code. Alerts arrive there, and you can approve, reject or answer by replying.
 - **Permissions:** the session uses your default permission mode. Nobody is at its terminal, so a mode that doesn't stop to ask suits it: `runner install --permission-mode auto`. (Answering a permission prompt from the phone hasn't been tried yet.)
 - **Limits:** the computer must be on, awake, and you logged in. The standing session uses your subscription only when it works (a run, or passing an alert to your phone). An update that arrives while no window is open is picked up the next time you open one.
-- **Other commands:** `runner status`, `runner stop`, `runner start`, `runner uninstall`.
+- **Other commands:** `runner status`, `runner stop`, `runner start`, `runner uninstall`, and on Linux `runner attach` (look at the session's terminal; Ctrl-b d leaves it running).
 
 ## Checking your setup
 
