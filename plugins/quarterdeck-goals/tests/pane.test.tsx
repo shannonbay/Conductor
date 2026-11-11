@@ -45,10 +45,12 @@ test("each goal shows a line of what its agent is doing, clipped to the pane", a
     const ui = await $.ui.mount({ ...PANE, surface })
     const running = await ui.find({ type: 'Text', text: /^● Drafting/ })
     expect(running?.text).toBe('● Drafting a reply to Alice · 3m ago')
+    await ui.press({ key: 'toggle-g2' }) // quiet, so its activity line shows once expanded
     const idle = await ui.find({ type: 'Text', text: /^Last run: filed/ })
     expect(idle?.text.startsWith('Last run: filed invoices')).toBe(true)
     expect(idle?.text.endsWith('…')).toBe(true)
     expect([...idle!.text].length).toBeLessThanOrEqual(PANE.props.bodyColumns)
+    await ui.press({ key: 'toggle-g2' }) // collapse again for the next surface
     await ui.unmount()
   }
 })
@@ -110,6 +112,7 @@ test('pause and resume, and cancel a run only after confirming', async ($, on) =
   await $.session.start(START)
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' }) // expanded, so it keeps its controls once the run is gone
   expect(await ui.find({ key: 'run-g1' })).toBeUndefined()
   await ui.press({ key: 'cancel-run-g1' })
   expect(fake.of('cancel_run')).toEqual([])
@@ -218,8 +221,12 @@ test('each goal says how long until its next automatic run, or that it has no sc
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ type: 'Text', text: /no runs yet · next in 25m/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /no runs yet · no schedule/ })).toBeDefined()
+    await ui.press({ key: 'toggle-g1' })
+    await ui.press({ key: 'toggle-g2' })
     expect(await ui.find({ key: 'schedule-g2' })).toBeDefined()
     expect(await ui.find({ key: 'schedule-g1' })).toBeUndefined()
+    await ui.press({ key: 'toggle-g1' }) // collapse again for the next surface
+    await ui.press({ key: 'toggle-g2' })
     await ui.unmount()
   }
 })
@@ -229,6 +236,7 @@ test('Set schedule asks with the suggestion first and sets the choice', async ($
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Status', objective: 'a weekly report', next_run_at: null, schedule: null })])
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' }) // a quiet goal is one line: its controls show once expanded
   await ui.press({ key: 'schedule-g1' })
   expect(asked[0]).toContain('How often should "Status" run? Suggested: daily')
   expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 10080 } }])
@@ -266,6 +274,8 @@ test('a goal\'s controls are separated by dots, and a scheduled goal has Resched
   ])
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' })
+  await ui.press({ key: 'toggle-g2' })
   expect(await ui.find({ key: 'reschedule-g1' })).toBeDefined()
   expect(await ui.find({ key: 'schedule-g1' })).toBeUndefined()
   expect(await ui.find({ key: 'reschedule-g2' })).toBeUndefined()
@@ -279,6 +289,7 @@ test('Reschedule shows the current schedule; a dismissed question changes nothin
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' })])
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' }) // a quiet goal is one line: its controls show once expanded
   await ui.press({ key: 'reschedule-g1' })
   expect(asked[0]).toMatch(/^Now: every \S+\. How often should "Inbox" run\?/)
   expect(fake.of('set_schedule')).toEqual([])
@@ -290,6 +301,7 @@ test('Reschedule sets the chosen schedule', async ($, on) => {
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' })])
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' }) // a quiet goal is one line: its controls show once expanded
   await ui.press({ key: 'reschedule-g1' })
   expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 10080 } }])
   await ui.unmount()
@@ -335,6 +347,7 @@ test('Delete asks first, then deletes the goal; not while a run is going', async
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Jobs' }), goal({ id: 'g2', name: 'Inbox', open_run: { id: 'r1', status: 'running' } })])
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' }) // a quiet goal is one line: its controls show once expanded
   expect(await ui.find({ key: 'delete-g2' })).toBeUndefined()
   await ui.press({ key: 'delete-g1' })
   expect(await ui.find({ type: 'Text', text: /Delete "Jobs" for good/ })).toBeDefined()
@@ -351,6 +364,7 @@ test('Reschedule takes "30d", and explains an answer it can\'t read', async ($, 
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' })])
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' }) // a quiet goal is one line: its controls show once expanded
   await ui.press({ key: 'reschedule-g1' })
   expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 43200 } }])
   await ui.press({ key: 'reschedule-g1' })
@@ -364,6 +378,7 @@ test('Reschedule hands an answer it can\'t read to the small model, and says how
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' })])
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' }) // a quiet goal is one line: its controls show once expanded
   await ui.press({ key: 'reschedule-g1' })
   expect(fake.of('set_schedule').map((c) => c.input)).toEqual([{ goal_id: 'g1', schedule: { kind: 'interval', minutes: 20160 } }])
   expect(toasts.at(-1)).toBe('Inbox now runs every 14d (read "every other week" as every 2w).')
@@ -376,7 +391,7 @@ test("with the server from this plugin (mcp__plugin_quarterdeck-goals_quarterdec
   await $.session.start(START)
   expect(statuses.at(-1)).toBe('Quarterdeck: all clear')
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /Waiting for its first run/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /no runs yet/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -412,4 +427,41 @@ test('offline, the pane dates the goals it still shows, not the last failed read
   expect((await ui.find({ type: 'Text', text: /^Offline/ }))?.text).toContain('10m ago')
   expect(await ui.find({ key: 'toggle-g1' })).toBeDefined()
   await ui.unmount()
+})
+
+test('a goal with nothing for you is one line; one that needs you keeps its card', async ($, on) => {
+  engine(on)
+  const ran = (status: string) => [{ id: `r-${status}`, status, trigger: 'schedule', summary: 'Checked', started_at: '2026-11-07T07:00:00Z', ended_at: '2026-11-07T07:02:00Z' }]
+  fakeQuarterdeck(on, [
+    goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z', runs: ran('completed'), activity: { state: 'idle', text: 'Last run: Checked', at: null } }),
+    goal({ id: 'g2', name: 'Invoices', next_run_at: '2026-11-07T08:25:00Z', runs: ran('failed') }),
+    goal({ id: 'g3', name: 'Reports', status: 'paused', next_run_at: null }),
+    goal({ id: 'g4', name: 'Disk', health: [{ passed: false, value: 7 }] }),
+  ])
+  await $.session.start(START)
+
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    // Quiet: the name, when it ran and when it runs next, and nothing else
+    expect((await ui.find({ key: 'toggle-g1' }))?.props.label).toBe('▸ Inbox')
+    expect((await ui.find({ key: 'toggle-g1' }))?.props.hotkey).toBe('1')
+    expect(await ui.find({ type: 'Text', text: /^ · ran 58m ago · next in 25m$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Last run: Checked/ })).toBeUndefined()
+    expect(await ui.find({ key: 'pause-g1' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: /^ · paused · no runs yet$/ })).toBeDefined()
+    expect(await ui.find({ key: 'resume-g3' })).toBeUndefined()
+    // A failed run or a failing health check keeps the card, in the same place in the list
+    expect((await ui.find({ key: 'toggle-g2' }))?.props.hotkey).toBe('2')
+    expect(await ui.find({ key: 'discuss-g2' })).toBeDefined()
+    expect((await ui.find({ key: 'run-g2' }))?.props.hotkey).toBe('n')
+    expect(await ui.find({ key: 'pause-g4' })).toBeDefined()
+
+    // Expanded, a quiet goal is the full card
+    await ui.press({ key: 'toggle-g1' })
+    expect(await ui.find({ type: 'Text', text: /^Last run: Checked/ })).toBeDefined()
+    expect((await ui.find({ key: 'run-g1' }))?.props.hotkey).toBe('n')
+    expect(await ui.find({ key: 'pause-g1' })).toBeDefined()
+    await ui.press({ key: 'toggle-g1' }) // collapse again for the next surface
+    await ui.unmount()
+  }
 })

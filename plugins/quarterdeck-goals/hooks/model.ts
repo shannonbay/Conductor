@@ -77,6 +77,21 @@ export function isFailed(status: string): boolean {
 }
 
 /**
+ * Nothing here needs the person: nothing waiting for them, no run going, the
+ * last run didn't fail, the health check isn't failing and there is no
+ * suggestion. The pane draws such a goal as one line until it is expanded.
+ */
+export function isQuiet(g: GoalCard): boolean {
+  const run = lastRun(g)
+  return g.needsYou.length === 0
+    && g.needsYouCount === 0
+    && !g.openRun
+    && !(run && isFailed(run.status))
+    && !(g.health && !g.health.passed)
+    && g.suggestions.length === 0
+}
+
+/**
  * Finds a goal by name: exact, then prefix, then substring, ignoring case.
  * More than one match at the first level that matches is ambiguous.
  */
