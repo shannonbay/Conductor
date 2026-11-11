@@ -250,6 +250,12 @@ export interface GoalRun {
   cache_write_tokens: number
   /** The model that answered the run's last turn. */
   model: string | null
+  /** The run's latest tool call outside Quarterdeck (`Bash: npm test`), and when; reported by the guard plugin. */
+  now_tool: string | null
+  now_tool_at: string | null
+  /** The tool call waiting for a permission answer, and since when (null once answered). */
+  waiting_tool: string | null
+  waiting_since: string | null
 }
 
 export type MemoryKind = 'fact' | 'rule' | 'preference'

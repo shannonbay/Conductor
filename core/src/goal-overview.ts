@@ -114,11 +114,13 @@ export type Activity = {
   text: string
   /** When `text` last changed, for a running agent's latest step. */
   at: string | null
+  /** A running agent's tool call waiting for the person's permission answer (`text` says so too). */
+  waiting?: { tool: string; since: string }
 }
 
 type ActivityInput = {
   goal: Pick<Goal, 'status'>
-  openRun: Pick<GoalRun, 'status' | 'trigger' | 'started_at'> | null
+  openRun: Pick<GoalRun, 'status' | 'trigger' | 'started_at'> & Partial<Pick<GoalRun, 'now_tool' | 'now_tool_at' | 'waiting_tool' | 'waiting_since'>> | null
   lastRun: Pick<GoalRun, 'summary'> | null
   /** The goal's recent events, newest first. */
   events: Pick<Event, 'event_type' | 'actor' | 'task_id' | 'payload' | 'created_at'>[]
@@ -157,14 +159,27 @@ function describeEvent(e: ActivityInput['events'][number], itemGoal: (id: string
 /** A one-line summary of what a goal is doing now, or what it does next. */
 export function describeActivity({ goal, openRun, lastRun, events, items }: ActivityInput): Activity {
   if (openRun?.status === 'running') {
+    if (openRun.waiting_tool && openRun.waiting_since) {
+      const tool = openRun.waiting_tool
+      return { state: 'running', text: `Waiting for your permission: ${tool}`, at: openRun.waiting_since, waiting: { tool, since: openRun.waiting_since } }
+    }
+    // The newest of: what its Quarterdeck calls recorded, and its latest other tool call
     const goals = new Map(items.map((t) => [t.id, t.goal]))
+    let latest: Activity | null = null
     for (const e of events) {
       if (e.created_at < openRun.started_at) break
       if (e.actor !== 'agent') continue
       const text = describeEvent(e, (id) => goals.get(id) ?? null)
-      if (text) return { state: 'running', text, at: e.created_at }
+      if (text) {
+        latest = { state: 'running', text, at: e.created_at }
+        break
+      }
     }
-    return { state: 'running', text: 'Starting: reading the brief', at: openRun.started_at }
+    const tool = openRun.now_tool && openRun.now_tool_at && openRun.now_tool_at >= openRun.started_at
+      ? { state: 'running' as const, text: `Using ${openRun.now_tool}`, at: openRun.now_tool_at }
+      : null
+    if (tool && (!latest || tool.at > latest.at!)) return tool
+    return latest ?? { state: 'running', text: 'Starting: reading the brief', at: openRun.started_at }
   }
   if (openRun) return { state: 'queued', text: `Queued (${openRun.trigger}) — starts within a minute while Claude Code is open`, at: openRun.started_at }
   if (goal.status === 'paused') return { state: 'paused', text: 'Paused', at: null }

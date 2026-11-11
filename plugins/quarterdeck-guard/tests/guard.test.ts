@@ -130,3 +130,29 @@ test('with the server from the quarterdeck-goals plugin, its tools are named mcp
   const d = await $.tool.call(call({ tool: 'mcp__gmail__delete', id: 'm1', agentId: 'run-agent' }))
   expect(said(d)).toContain('email.delete is off')
 })
+
+test("a run's calls are reported for the Goals pane, and a call put to the person shows as waiting until it settles", async ($, on) => {
+  world(on)
+  const progress: unknown[] = []
+  on('tool.call', { tool: 'mcp__quarterdeck__run_progress' }, (_, e) => {
+    const { run_id, event, label } = e as unknown as Record<string, unknown>
+    progress.push({ run_id, event, label })
+    return { result: '{"updated":true}' } as never
+  })
+  on('tool.call', { tool: 'mcp__notes__read' }, () => ({ result: 'ok' }) as never)
+  on('tool.check', { tool: 'mcp__notes__send' }, () => ({ decision: 'ask' }))
+  on('tool.call', { tool: 'mcp__notes__send' }, () => ({ result: 'sent' }) as never)
+  await $.session.start(START)
+  await $.tool.call(call({ tool: 'mcp__notes__read', agentId: 'run-agent' }))
+  // Nobody answers the ask here, so the call is refused: the wait is over all the same
+  await $.tool.call(call({ tool: 'mcp__notes__send', to: 'a@example.com', agentId: 'run-agent' }))
+  await $.tool.call(call({ tool: 'mcp__notes__read', agentId: 'model-agent' }))
+  await $.tool.call(call({ tool: 'mcp__quarterdeck__get_goal_brief', goal_id: 'g1', agentId: 'run-agent' }))
+  expect(progress).toEqual([
+    { run_id: 'run_abc123', event: 'tool', label: 'notes read' },
+    { run_id: 'run_abc123', event: 'settled', label: 'notes read' },
+    { run_id: 'run_abc123', event: 'tool', label: 'notes send' },
+    { run_id: 'run_abc123', event: 'waiting', label: 'notes send' },
+    { run_id: 'run_abc123', event: 'settled', label: 'notes send' },
+  ])
+})

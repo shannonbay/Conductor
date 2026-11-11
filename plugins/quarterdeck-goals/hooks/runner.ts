@@ -43,6 +43,7 @@ export const HUMAN_ONLY_TOOLS = serverToolNames(
   'update_goal',
   'report_run_end',
   'watch_report',
+  'run_progress',
 )
 
 /** Also refused to a run's agent: a run doesn't queue more runs. */

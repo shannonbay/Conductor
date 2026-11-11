@@ -38,6 +38,7 @@ import {
   UpdateGoalSchema,
   ReportRunEndSchema,
   WatchReportSchema,
+  RunProgressSchema,
   DeleteGoalSchema,
   UnsubscribeOneClickSchema,
   TodoListSchema,
@@ -61,7 +62,7 @@ import { verify_task } from './tools/verify_task.js'
 import { list_goals, get_goal_brief, add_item, remember, forget, end_run, run_goal } from './tools/goals.js'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory, set_schedule, update_goal, report_run_end, delete_goal, watch_report,
+  create_goal, delete_memory, set_schedule, update_goal, report_run_end, delete_goal, watch_report, run_progress,
 } from './tools/goal_runner.js'
 import { todo_list, todo_add, todo_set } from './tools/todos.js'
 import { unsubscribe_one_click } from './tools/unsubscribe.js'
@@ -237,6 +238,7 @@ const TOOLS = [
     ['update_goal', "Changes a goal's name, objective, instructions, autonomy, tool rules, memory, watches or status, once the human has confirmed.", UpdateGoalSchema, update_goal],
     ['report_run_end', "Reports how a goal run's agent finished a turn: a usage limit skips the run and holds goal runs until the reset.", ReportRunEndSchema, report_run_end],
     ['watch_report', "Records what a goal's tool watch answered when the plugin called its tool; something new queues a run.", WatchReportSchema, watch_report],
+    ['run_progress', "Records what a goal run's agent is doing: its latest tool call, or a call waiting for the person's permission answer.", RunProgressSchema, run_progress],
   ] as const).map(([name, description, schema, handler]) => ({
     name,
     description: `${description} For the quarterdeck-goals plugin only: agents and the model must not call this.`,

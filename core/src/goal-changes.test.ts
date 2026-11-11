@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, getGoal, getPlan, listMemory, insertMemory, queueRun, getRun, claimRun, schedulerPass, buildOverview,
-  applyGoalChanges, reportRunEnd, getRunHold, setRunHold, parseLimitReset, isUsageLimit,
+  applyGoalChanges, reportRunEnd, reportRunProgress, insertEvent, getRunHold, setRunHold, parseLimitReset, isUsageLimit,
 } from './index.js'
 
 let db: Database
@@ -96,5 +96,43 @@ describe('run usage', () => {
     reportRunEnd(db, run.run_id, { answer: 'Done.', usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } })
     expect(getRun(db, run.run_id)).toMatchObject({ input_tokens: 110, output_tokens: 55, cache_read_tokens: 1000, cache_write_tokens: 200, model: 'claude-sonnet-5-5' })
     expect(buildOverview(db).goals[0]!.runs[0]).toMatchObject({ tokens: 365,model: 'claude-sonnet-5-5' })
+  })
+})
+
+describe("a run's progress", () => {
+  it('shows its latest tool call, and a call waiting for permission until it settles', () => {
+    const t0 = new Date(2099, 0, 5, 9, 0)
+    const at = (min: number) => new Date(t0.getTime() + min * 60_000)
+    const run = claimRun(db, 'g1', { holder: 'A', now: t0 })!
+    const activity = () => buildOverview(db).goals[0]!.activity
+    expect(activity().text).toBe('Starting: reading the brief')
+
+    reportRunProgress(db, run.run_id, { event: 'tool', tool: 'Gmail search_threads' }, at(1))
+    expect(activity()).toMatchObject({ state: 'running', text: 'Using Gmail search_threads', at: at(1).toISOString() })
+
+    reportRunProgress(db, run.run_id, { event: 'tool', tool: 'Bash: rm old.zip' }, at(2))
+    reportRunProgress(db, run.run_id, { event: 'waiting', tool: 'Bash: rm old.zip' }, at(2))
+    expect(activity()).toMatchObject({
+      text: 'Waiting for your permission: Bash: rm old.zip', waiting: { tool: 'Bash: rm old.zip', since: at(2).toISOString() },
+    })
+    // Another call settling doesn't end this wait
+    reportRunProgress(db, run.run_id, { event: 'settled', tool: 'Gmail search_threads' }, at(3))
+    expect(activity().waiting).toBeDefined()
+    reportRunProgress(db, run.run_id, { event: 'settled', tool: 'Bash: rm old.zip' }, at(4))
+    expect(activity()).toMatchObject({ text: 'Using Bash: rm old.zip' })
+    expect(activity().waiting).toBeUndefined()
+
+    // A newer Quarterdeck event says more than the last tool call
+    insertEvent(db, { id: 'e1', plan_id: 'g1', task_id: 'g1', event_type: 'memory_added', actor: 'agent', payload: { text: 'Bank mail stays' }, created_at: at(5).toISOString() })
+    expect(activity().text).toBe('Noted: Bank mail stays')
+    reportRunProgress(db, run.run_id, { event: 'tool', tool: 'Gmail label_thread' }, at(6))
+    expect(activity().text).toBe('Using Gmail label_thread')
+  })
+
+  it('changes nothing once the run has ended', () => {
+    const run = claimRun(db, 'g1', { holder: 'A' })!
+    reportRunEnd(db, run.run_id, { answer: 'x', reason: 'error' })
+    expect(reportRunProgress(db, run.run_id, { event: 'waiting', tool: 'Bash: ls' })).toEqual({ updated: false })
+    expect(getRun(db, run.run_id)!.waiting_tool).toBeNull()
   })
 })

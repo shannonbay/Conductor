@@ -252,6 +252,12 @@ export const ReportRunEndSchema = z.object({
   }).optional().describe("The turn's token counts, added to the run"),
 })
 
+export const RunProgressSchema = z.object({
+  run_id: z.string(),
+  event: z.enum(['tool', 'waiting', 'settled']).describe("tool: a call starting; waiting: put to the person for a permission answer; settled: finished, allowed or refused"),
+  label: z.string().trim().min(1).max(200).describe('The call, as the pane shows it (`Bash: npm test`)'),
+})
+
 export const DeleteMemorySchema = z.object({
   goal_id: z.string(),
   memory_id: z.string(),

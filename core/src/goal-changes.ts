@@ -197,3 +197,22 @@ export function reportRunEnd(
   }
   return { outcome: 'unchanged' }
 }
+
+/**
+ * What a running run's agent is doing, reported by the guard plugin as it sees
+ * the agent's tool calls: `tool` a call starting, `waiting` a call put to the
+ * person for a permission answer, `settled` a call that finished (allowed,
+ * refused or answered). Quarterdeck's own tools aren't reported: their events say more.
+ */
+export type RunProgress = { event: 'tool' | 'waiting' | 'settled'; tool: string }
+
+export function reportRunProgress(db: Database, runId: string, { event, tool }: RunProgress, now: Date = new Date()): { updated: boolean } {
+  const run = getRun(db, runId)
+  if (!run || run.status !== 'running') return { updated: false }
+  const at = now.toISOString()
+  if (event === 'tool') updateRun(db, runId, { now_tool: tool, now_tool_at: at })
+  else if (event === 'waiting') updateRun(db, runId, { now_tool: tool, now_tool_at: at, waiting_tool: tool, waiting_since: at })
+  else if (run.waiting_tool === tool) updateRun(db, runId, { waiting_tool: null, waiting_since: null })
+  else return { updated: false }
+  return { updated: true }
+}

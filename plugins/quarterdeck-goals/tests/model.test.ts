@@ -35,6 +35,8 @@ test('statusText counts what needs you and what is running', async () => {
     card({ id: 'g2', name: 'Invoices', open_run: { id: 'r', status: 'running' } }),
   ] }
   expect(statusText(s)).toBe('Quarterdeck: 2 need you · Invoices running')
+  const asking = card({ id: 'g3', name: 'Tidy', open_run: { id: 'r3', status: 'running' }, activity: { state: 'running', text: 'Waiting for your permission: Bash: rm a.txt', at: null, waiting: { tool: 'Bash: rm a.txt', since: '2026-11-07T08:00:00Z' } } })
+  expect(statusText({ ...s, goals: [...s.goals, asking] })).toBe('Quarterdeck: 2 need you · Tidy waiting for your permission · Invoices running')
   expect(statusText({ ...s, goals: [] })).toBeUndefined()
 })
 

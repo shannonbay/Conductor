@@ -7,12 +7,13 @@
 import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
   getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory,
-  setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd, deleteGoal,
+  setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd, reportRunProgress, deleteGoal,
   listWatches, checkCommandWatch, getWatch, reportToolWatch, queueForWatchEvents,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
   FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema, DeleteGoalSchema, WatchReportSchema,
+  RunProgressSchema,
 } from '../schema.js'
 import type { GoalChanges } from '@quarterdeck/core'
 import { existsSync } from 'fs'
@@ -228,6 +229,15 @@ export async function report_run_end(args: unknown) {
     record(run.plan_id, run.plan_id, r.outcome === 'held' ? 'run_skipped' : 'agent_failed', { run_id: run.id, ...(r.hold && { hold_until: r.hold.until }), reason: input.answer.slice(0, 200) }, { via: 'plugin' })
   }
   return r
+}
+
+/**
+ * What a run's agent is doing (reported by the guard plugin): its latest tool
+ * call, and a call waiting for the person's permission answer. The Goals pane shows it.
+ */
+export async function run_progress(args: unknown) {
+  const { run_id, event, label } = RunProgressSchema.parse(args)
+  return reportRunProgress(run_id, { event, tool: label })
 }
 
 /** Deletes a goal for good, for the person (the plugin confirms first). */

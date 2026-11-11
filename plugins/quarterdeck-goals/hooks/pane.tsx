@@ -285,9 +285,22 @@ function autoSuggestion($: Engine, e: E, view: View, g: GoalCard, s: GoalCard['s
 
 /** One line: what the goal's agent is doing now, or what happens next. */
 function activityLine($: Engine, e: E, view: View, g: GoalCard) {
-  const { Text } = $.ui.resolve(e)
-  const { state, text, at } = g.activity
+  const { Box, Text } = $.ui.resolve(e)
+  const { state, text, at, waiting } = g.activity
   if (!text) return null
+  if (state === 'running' && waiting) {
+    // Claude Code asks wherever the run's session shows it: say so, as nothing here answers it
+    const age = ` · ${ago(waiting.since, view.now)}`
+    return (
+      <Box key={`activity-${g.id}`} flexDirection="column">
+        <Text>
+          <Text color="yellow">⏸ {clip(text, Math.max(view.columns - 2 - age.length, 10))}</Text>
+          <Text dimColor>{age}</Text>
+        </Text>
+        <Text dimColor>{clip("Answer Claude Code's permission prompt for this run: in its window, the Claude app or claude.ai/code.", Math.max(view.columns - 2, 10))}</Text>
+      </Box>
+    )
+  }
   if (state === 'running') {
     const age = at ? ` · ${ago(at, view.now)}` : ''
     return (

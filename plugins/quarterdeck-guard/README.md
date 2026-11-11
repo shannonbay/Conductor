@@ -13,6 +13,7 @@ For every subagent that quarterdeck-goals started for a goal run:
 - **It refuses, it never allows.** When the guard doesn't object, the call goes on to Claude Code's own permission rules, exactly as if the guard weren't there: an allow rule lets it through, auto mode's safety review judges it, and otherwise Claude Code asks you. So `auto` means "Quarterdeck doesn't object", not "allowed": for a run to act without asking, Claude Code must allow the tool too. The Goals pane lists the allow rules a goal's `auto` tools need ("Claude Code allow rules") and Claude can add them for you. Tools outside the map, and Quarterdeck's own tools, follow your session's permission rules in the same way.
 - **Your actions stay yours.** A run can't approve, reject, cancel, pause, change a goal's schedule or settings (`update_goal`), create goals or delete memory, can't queue more runs, and can't start other agents.
 - **Stopped runs are reported.** When a run's agent stops on your usage limit or an error, the guard tells Quarterdeck (`report_run_end`): a usage limit skips the run and holds goal runs until the reset, and another error fails the run with its message.
+- **What a run is doing, and when it waits for you.** The guard tells Quarterdeck each tool call a run makes (`run_progress`), so the Goals pane's line under the goal shows the run's latest step. When Claude Code puts one of a run's calls to you as a permission prompt, the pane says the run is waiting for your permission and on which call, until the call is answered.
 - **Reports stay out of your chat.** A run's report is its `end_run` summary, shown in the Goals pane. The run's final message isn't handed back into your conversation.
 
 It also refuses those person-only Quarterdeck actions to Claude in your conversation and to other agents. quarterdeck-goals itself takes them when you press the pane's buttons.
@@ -21,14 +22,15 @@ It also refuses those person-only Quarterdeck actions to Claude in your conversa
 
 Claude Code's plugin directory asks a plugin to say plainly what it does without being asked. This is all of it; the source is `hooks/register.ts`.
 
-**Tools it calls itself.** Only two, both on the local quarterdeck server that quarterdeck-goals brings (under whichever name the session has: `mcp__plugin_quarterdeck-goals_quarterdeck__` or `mcp__quarterdeck__`):
+**Tools it calls itself.** Only three, both on the local quarterdeck server that quarterdeck-goals brings (under whichever name the session has: `mcp__plugin_quarterdeck-goals_quarterdeck__` or `mcp__quarterdeck__`):
 
 - `guard_check`, for each tool call a goal run's agent makes that the goal's tool rules may cover, with the run id and the tool's name (not its input). The answer is "deny, because …" or "no objection".
 - `report_run_end`, when a run agent's turn ends, with the run id, the agent's final message, why the turn ended and its token usage, so the run's tokens are counted and a stop on your usage limit or an error is recorded.
+- `run_progress`, when a goal run's agent starts a tool call other than Quarterdeck's own, when Claude Code puts one to you as a permission prompt, and when the call has finished, with the run id and a short label for the call: the tool's name and the first line of its command, file path, address or query, cut to 80 characters (`Bash: npm test`). The Goals pane shows it.
 
 It also reads the engine's list of running agents (`$.agent.list()`) to tell a goal run's subagent (`spawnedBy: quarterdeck-goals`, description `Goal: <name> (<run id>)`) from any other.
 
-**What it fetches, runs and sends.** Nothing outside your computer: it makes no network requests, runs no commands and starts no agents. What it reads (agent records, a run's tool names, a run agent's final message, messages handed back to your conversation) goes only to the local quarterdeck server, which keeps it in `~/.quarterdeck/tasks.db`.
+**What it fetches, runs and sends.** Nothing outside your computer: it makes no network requests, runs no commands and starts no agents. What it reads (agent records, a run's tool names and call labels, a run agent's final message, messages handed back to your conversation) goes only to the local quarterdeck server, which keeps it in `~/.quarterdeck/tasks.db`.
 
 **The permission hook** (`tool.check`) only ever refuses, or passes the check on to Claude Code's own permission rules; it never allows. It refuses:
 
@@ -40,11 +42,12 @@ Everything else goes on to your permission rules unchanged.
 **Hooks on tool calls** (`tool.call`), for a goal run's agent only:
 
 - **Changes a tool's input**: adds `run_scope` (the run's id) to a Quarterdeck server call that doesn't already carry it, so the call acts on that run's goal and never on the plan open in your own conversation. A call that already carries it is left exactly as it is (auto mode refuses a call whose input changes after its review).
-- **The goal's guard**: before any other tool runs, asks `guard_check`; on "deny" the call is refused with the reason, and otherwise it goes on unchanged.
+- **The goal's guard**: before any other tool runs, asks `guard_check`; on "deny" the call is refused with the reason, and otherwise it goes on unchanged, reported to `run_progress` as it starts and when it has finished.
 - **Answers in place of a tool**: `SubagentHandback`, the tool a subagent's report would come back to your conversation through, is answered "Report saved by Quarterdeck (end_run)" without running, because a run reports in the Goals pane. And this plugin's own `status` tool (`mcp__quarterdeck-guard__status`, read-only) answers that runs are guarded, with the number of runs it knows and its last few turn ends; quarterdeck-goals starts no run without it.
 
 **Other hooks:**
 
+- `classic.PermissionRequest`: when Claude Code is about to ask you about a run agent's tool call (and no settings hook has answered), sends `run_progress` that the run waits for your answer. It never answers the request itself; Claude Code asks you as usual.
 - `turn.complete`: for a run agent, sends `report_run_end` as above. Other turns are passed on untouched.
 - `session.send`: stops a run agent's messages to your conversation (the run reports through `end_run`). Other messages go on.
 - `session.receive`: reads a message arriving in your conversation only to recognise a run's handed-back report (by the sending agent, or by matching a run agent's last answer) and keep it out of your chat. Everything else goes on unchanged.

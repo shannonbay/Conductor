@@ -55,6 +55,25 @@ test("each goal shows a line of what its agent is doing, clipped to the pane", a
   }
 })
 
+test('a run waiting for a permission answer says so, on which call, and where to answer', async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [
+    goal({
+      id: 'g1',
+      name: 'Tidy',
+      open_run: { id: 'r1', status: 'running' },
+      activity: { state: 'running', text: 'Waiting for your permission: Bash: rm old.zip', at: '2026-11-07T07:58:00Z', waiting: { tool: 'Bash: rm old.zip', since: '2026-11-07T07:58:00Z' } },
+    }),
+  ])
+  await $.session.start(START)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect((await ui.find({ type: 'Text', text: /^⏸ Waiting/ }))?.text).toBe('⏸ Waiting for your permission: Bash: rm old.zip · 2m ago')
+    expect(await ui.find({ type: 'Text', text: /permission prompt for this run/ })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
 test("Reject opens a feedback box and shows Quarterdeck's error", async ($, on) => {
   engine(on)
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox', needs_you: [proposal('11', 'Reply to Alice')] })], {

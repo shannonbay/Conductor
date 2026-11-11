@@ -17,7 +17,8 @@ export type OverviewGoal = {
   autonomy?: Record<string, string>
   tool_map?: Record<string, string>
   open_run: { id: string; status: string } | null
-  activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null }
+  /** `waiting`: a run's tool call waits for the person's permission answer (from the guard plugin's reports). */
+  activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null; waiting?: { tool: string; since: string } }
   runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null; tokens?: number }[]
   /** False for a card: runs, memory, open items, instructions and tool rules left out. */
   detail?: boolean
@@ -153,9 +154,11 @@ export function statusText(s: Snapshot): string | undefined {
   if (!s.reachable) return 'Quarterdeck: offline'
   if (s.goals.length === 0) return undefined
   const waiting = s.goals.reduce((n, g) => n + g.needsYou.length, 0)
-  const running = s.goals.filter((g) => g.openRun?.status === 'running').map((g) => g.name)
+  const asking = s.goals.filter((g) => g.openRun?.status === 'running' && g.activity.waiting).map((g) => g.name)
+  const running = s.goals.filter((g) => g.openRun?.status === 'running' && !g.activity.waiting).map((g) => g.name)
   const parts = [
     waiting > 0 ? `${waiting} need${waiting === 1 ? 's' : ''} you` : null,
+    asking.length > 0 ? `${asking.join(', ')} waiting for your permission` : null,
     running.length > 0 ? `${running.join(', ')} running` : null,
   ].filter(Boolean)
   return `Quarterdeck: ${parts.length > 0 ? parts.join(' · ') : 'all clear'}`

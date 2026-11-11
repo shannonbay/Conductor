@@ -36,7 +36,7 @@ export const REVISION_TRIGGERS = [
  * a session still running older code then sees it is outdated (`schemaOutdated`)
  * and leaves scheduling to the newer one.
  */
-export const SCHEMA_VERSION = 2
+export const SCHEMA_VERSION = 3
 
 /** The schema version recorded in the database (0 before versions existed). */
 export function dbSchemaVersion(db: Database): number {
@@ -272,7 +272,11 @@ export function runMigrations(db: Database): void {
       output_tokens  INTEGER NOT NULL DEFAULT 0,
       cache_read_tokens  INTEGER NOT NULL DEFAULT 0,
       cache_write_tokens INTEGER NOT NULL DEFAULT 0,
-      model          TEXT
+      model          TEXT,
+      now_tool       TEXT,
+      now_tool_at    TEXT,
+      waiting_tool   TEXT,
+      waiting_since  TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
 
@@ -323,6 +327,10 @@ export function runMigrations(db: Database): void {
     try { db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 0`) } catch { /* already exists */ }
   }
   try { db.exec('ALTER TABLE goal_runs ADD COLUMN model TEXT') } catch { /* already exists */ }
+  // What a running run is doing now, and the call waiting on a permission answer (reported by the guard plugin)
+  for (const col of ['now_tool', 'now_tool_at', 'waiting_tool', 'waiting_since']) {
+    try { db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`) } catch { /* already exists */ }
+  }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS goal_health (

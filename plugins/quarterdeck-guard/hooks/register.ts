@@ -57,6 +57,7 @@ const HUMAN_ONLY = new Set([
   'update_goal',
   'report_run_end',
   'watch_report',
+  'run_progress',
 ])
 const isHumanOnly = (tool: string) => HUMAN_ONLY.has(serverTool(tool) ?? '')
 const HUMAN_ONLY_REASON = "This Quarterdeck action is the person's: they take it from the Goals pane (/goals)."
@@ -92,7 +93,7 @@ async function runIdFor($: Engine, agentId: string | undefined): Promise<string 
  */
 let guardCallsInFlight = 0
 /** The person-only tools this plugin itself calls, inside a run's loop. */
-const OWN_CALLS = new Set(['guard_check', 'report_run_end'])
+const OWN_CALLS = new Set(['guard_check', 'report_run_end', 'run_progress'])
 
 type Verdict = { decision: 'allow' | 'deny'; category?: string; reason?: string }
 
@@ -152,6 +153,41 @@ async function reportRunEnd($: Engine, runId: string, answer: string, reason: st
   } finally {
     guardCallsInFlight--
   }
+}
+
+// ── What a run is doing ───────────────────────────────────────────────────────
+
+const LABEL_DETAIL = 80
+const firstLine = (v: unknown) => (typeof v === 'string' ? v.trim().split(/\r?\n/)[0]!.replace(/\s+/g, ' ') : '')
+const clipText = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s)
+
+/**
+ * A tool call as the Goals pane shows it: `Bash: npm test`, `Edit: src/a.ts`,
+ * `Gmail search_threads`. Only the start of a command, path, address or query.
+ */
+export function toolLabel(tool: string, input: unknown): string {
+  const mcp = /^mcp__(.+?)__(.+)$/.exec(tool)
+  if (mcp) {
+    const server = mcp[1]!.replace(/^claude_ai_/, '').replace(/^plugin_[^_]+_/, '').replace(/_/g, ' ')
+    return `${server} ${mcp[2]}`
+  }
+  const i = (input ?? {}) as Record<string, unknown>
+  const detail = firstLine(i.command) || firstLine(i.file_path) || firstLine(i.notebook_path) || firstLine(i.url) || firstLine(i.query) || firstLine(i.pattern)
+  return detail ? `${tool}: ${clipText(detail, LABEL_DETAIL)}` : tool
+}
+
+/** Progress reports, one at a time and in order; only a call's last one is waited for. */
+let progressQueue: Promise<unknown> = Promise.resolve()
+
+function reportProgress($: Engine, runId: string, event: 'tool' | 'waiting' | 'settled', label: string): Promise<unknown> {
+  return progressQueue = progressQueue.then(async () => {
+    guardCallsInFlight++
+    try {
+      await callServer($, 'run_progress', { run_id: runId, event, label })
+    } finally {
+      guardCallsInFlight--
+    }
+  }).catch(() => {})
 }
 
 /**
@@ -245,7 +281,25 @@ export const register: Register = (on) => {
       const verdict = await guardCheck($, runId, e.tool)
       if (verdict.decision === 'deny') return { deny: verdict.reason ?? "Not allowed by the goal's autonomy." }
     }
-    return serverTool(e.tool) !== null && !scoped ? next({ ...e, run_scope: runId } as typeof e) : next(e)
+    // The pane's "Now:" line: the call starts, and once it has run or been refused,
+    // any permission wait on it is over (classic.PermissionRequest below marks one)
+    const label = toolLabel(e.tool, e)
+    void reportProgress($, runId, 'tool', label)
+    try {
+      return await (serverTool(e.tool) !== null && !scoped ? next({ ...e, run_scope: runId } as typeof e) : next(e))
+    } finally {
+      await reportProgress($, runId, 'settled', label)
+    }
+  }).catch(($, e, next) => next(e))
+
+  // A run's call is about to be put to the person (a permission prompt in the
+  // window, the Claude app or claude.ai/code): the pane says the run waits on them.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    const r = await next(e)
+    const runId = await runIdFor($, e.agent_id)
+    // A settings hook that answered leaves nothing for the person to answer
+    if (runId && !(r as { decision?: unknown } | undefined)?.decision) void reportProgress($, runId, 'waiting', toolLabel(e.tool_name, e.tool_input))
+    return r
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {
