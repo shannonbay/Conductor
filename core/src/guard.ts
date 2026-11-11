@@ -12,6 +12,10 @@
  *             the run marks the item done. Every call is still recorded.
  *
  * Calls outside goal runs, or to tools not in the map, are always allowed.
+ *
+ * "allow" means only that Quarterdeck doesn't object: the plugin passes such a
+ * call on to Claude Code's own permission rules, which decide it. It never
+ * answers allow itself.
  */
 import type { Database } from './sqlite.js'
 import { autonomyFor } from './goal-engine.js'
