@@ -4,8 +4,8 @@ Written 11 Nov 2026 for a later Claude Code session to pick up. The aim is to su
 
 ## Where things stand
 
-- **v0.17.0 is published** (`main`, the `release` branch and tags are on GitHub).
-- **The listing copy is committed on `main` but not released.** Both `plugin.json` files have `displayName` ("Quarterdeck", "Quarterdeck Guard"), a rewritten `description`, `author`, `homepage`, `repository` and `keywords`. `marketplace.json` has a description and the same plugin descriptions. Both plugin READMEs open with what Quarterdeck is, and the goals README has a "What it runs, stores and sends" section for the security scan.
+- **v0.18.0 is published** (`main`, the `release` branch and tags are on GitHub). Submit from this release.
+- **The listing copy and icons are released** in 0.18.0. Both `plugin.json` files have `displayName` ("Quarterdeck", "Quarterdeck Guard"), a rewritten `description`, `author`, `homepage`, `repository` and `keywords`. `marketplace.json` has a description and the same plugin descriptions. Both plugin READMEs open with what Quarterdeck is, and the goals README has a "What it runs, stores and sends" section for the security scan.
 - **Nothing has been done in the portal.** The one attempt at browser control failed with "Browser extension is not connected".
 - `claude plugin validate --strict` passes for both plugins.
 
@@ -30,8 +30,8 @@ Promote only **quarterdeck-goals** ("Quarterdeck"). The guard is a separate plug
 ## Before opening the portal
 
 1. **Icon: done.** Both plugins have the approved icon at `.claude-plugin/icon.png` (1024 px, rendered from `docs/quarterdeck-icon.svg` with sharp). The portal takes the icon only once, at the first save or submission, so check it shows in Listing details before saving anything.
-2. **Fix the release script.** `scripts/release.mjs` builds on the local `release` branch. On 11 Nov that branch was a version behind the remote, so the push was rejected and needed a hand-made merge commit. Make it fetch and start from `origin/release`.
-3. **Release 0.17.1** (`npm run release -- 0.17.1 --push`) so the `release` branch carries the listing copy and the icons. Check that `icon.png` ships: the script's copy filter leaves out only `tests`, `node_modules`, `tsconfig.json` and `.claude-plugin/types`.
+2. **Release script: done.** `scripts/release.mjs` now fetches and builds on `origin/release`.
+3. **Release: done (0.18.0).** It carries the listing copy and the icons (`icon.png` checked on the `release` branch in both plugins).
 4. **Ask the person which claude.ai account to submit from**, and check the browser is signed in to that one. Submitting needs a paid plan, and that account's GitHub connection must be able to push to `shannonbay/Quarterdeck`.
 5. **Browser control.** The Claude in Chrome extension must be installed, running, and signed in to the same account as Claude Code. Chrome may need a restart after installing it.
 
