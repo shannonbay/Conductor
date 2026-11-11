@@ -86,7 +86,7 @@ describe('the standing session', () => {
     const { deps, world } = fake()
     const r = start(deps)
     expect(r).toMatchObject({ started: true, sessionId: 'session-1' })
-    expect(world.spawned).toEqual([['--remote-control', SESSION_NAME, '--name', SESSION_NAME, '--session-id', 'session-1']])
+    expect(world.spawned).toEqual([['--remote-control', SESSION_NAME, '--name', SESSION_NAME, '--session-id', 'session-1', '--allowedTools', 'mcp__plugin_quarterdeck-goals_quarterdeck,mcp__quarterdeck']])
     expect(world.state).toEqual({ sessionId: 'session-1', pid: 101, build: '0.14.0+1' })
     // Not `claude --bg`: the background service retires such a session after a turn
     expect(startArgs('x')).not.toContain('--bg')
@@ -282,6 +282,21 @@ describe('the standing session', () => {
     expect(await runnerCommand(['start'], broken)).toEqual({ code: 1, text: 'quarterdeck runner: conhost.exe not found' })
   })
 
+  it("install uses auto mode unless told otherwise, and the session starts with Quarterdeck's own tools allowed", () => {
+    const { deps, world } = fake()
+    const text = install(deps)
+    expect(world.spawned[0]).toEqual(expect.arrayContaining(['--permission-mode', 'auto']))
+    // Quarterdeck's server under both of its names, as one argument with no spaces
+    expect(world.spawned[0]).toEqual(expect.arrayContaining(['--allowedTools', 'mcp__plugin_quarterdeck-goals_quarterdeck,mcp__quarterdeck']))
+    expect(world.state).toMatchObject({ permissionMode: 'auto' })
+    expect(text).toContain('Permission mode: auto (the default')
+    expect(Object.keys(world.files).some((p) => p.includes('settings.json'))).toBe(false)
+    // Again with a mode: the running session keeps its own until it restarts
+    const again = install(deps, { permissionMode: 'dontAsk' })
+    expect(again).toMatch(/keeps its current permission mode until it next restarts/)
+    expect(world.state).toMatchObject({ permissionMode: 'dontAsk' })
+  })
+
   it('the doctor reports it only once it is set up', async () => {
     const home = mkdtempSync(join(tmpdir(), 'quarterdeck-runner-'))
     try {
@@ -294,6 +309,11 @@ describe('the standing session', () => {
       start(deps)
       expect(await checkRunner(o, deps)).toMatchObject({ level: 'warn', detail: expect.stringMatching(/scheduled task .* is missing/) })
       world.tasks.push(['/create'])
+      // No mode of its own, or one that asks: its runs would wait with nobody to answer
+      expect(await checkRunner(o, deps)).toMatchObject({ level: 'warn', detail: expect.stringMatching(/no permission mode of its own/) })
+      world.state = { ...world.state!, permissionMode: 'manual' }
+      expect(await checkRunner(o, deps)).toMatchObject({ level: 'warn', detail: expect.stringMatching(/"manual", which asks/) })
+      world.state = { ...world.state!, permissionMode: 'auto' }
       expect(await checkRunner(o, deps)).toMatchObject({ level: 'ok' })
       world.screen = TRUST
       expect(await checkRunner(o, deps)).toMatchObject({ level: 'warn', fix: expect.stringMatching(/runner attach/) })

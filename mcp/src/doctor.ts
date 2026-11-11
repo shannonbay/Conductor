@@ -7,7 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { ATTACH_HINT, keepAliveName, WSL_WARNING, realDeps, status, statusText, taskInstalled, type InstallDeps } from './runner-session.js'
+import { ATTACH_HINT, keepAliveName, modeWarning, WSL_WARNING, realDeps, status, statusText, taskInstalled, type InstallDeps } from './runner-session.js'
 
 export type Level = 'ok' | 'warn' | 'fail'
 
@@ -317,6 +317,8 @@ export async function checkRunner(o: DoctorOptions, deps?: InstallDeps): Promise
     if (d.platform === 'linux' && d.wsl) return warn(name, `${statusText(s)} But ${WSL_WARNING.replace(/^This is WSL, which/, 'WSL')}`, 'Run `quarterdeck runner uninstall` here and `quarterdeck runner install` in a Windows terminal.')
     if (s.waiting) return warn(name, 'running but waiting to be told its folder is safe, so no goal runs in it', ATTACH_HINT)
     if (!task) return warn(name, `${statusText(s)} But ${keepAliveName(d.platform)} is missing, so nothing restarts it after a logon or an update`, 'Run `quarterdeck runner install`.')
+    const mode = modeWarning(d.readState()?.permissionMode)
+    if (mode) return warn(name, `${statusText(s)} But ${mode}`, 'Run `quarterdeck runner install` (it uses auto mode), or `quarterdeck runner install --permission-mode <mode>` for another.')
     return ok(name, statusText(s))
   } catch (e) {
     return warn(name, `could not be checked: ${firstLine((e as Error).message)}`, 'Check that `claude agents --json` works in a terminal.')

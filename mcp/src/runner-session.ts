@@ -31,6 +31,33 @@ export const TMUX_SOCKET = 'quarterdeck'
 export const TMUX_SESSION = 'quarterdeck-goals'
 export const ENSURE_MINUTES = 5
 const PERMISSION_MODES = ['acceptEdits', 'auto', 'bypassPermissions', 'manual', 'dontAsk', 'plan']
+/**
+ * The mode `install` uses when none is given. Nobody is at the standing session
+ * to answer a permission prompt, and the guard plugin never allows a call itself
+ * (the plugin directory's rule), so a mode that asks leaves every run waiting
+ * until its time limit (tested Nov 2026: `manual` stalls, `dontAsk` refuses
+ * even get_goal_brief, `auto` runs). With no mode at all the session takes the
+ * person's own default, which may be one that asks.
+ */
+export const DEFAULT_PERMISSION_MODE = 'auto'
+/** Modes in which the standing session waits for an answer nobody is there to give. */
+const ASKING_MODES = ['manual', 'plan']
+/**
+ * Allow rules the standing session starts with (`--allowedTools`), so a run can
+ * always read its brief and end, whatever the mode: Quarterdeck's own server,
+ * under both of its names. What a run does beyond that stays with the session's
+ * permission mode and the person's rules. Not a settings file in the session's
+ * folder: with one there the session came up but never ticked (seen Nov 2026,
+ * Windows, where its screen can't be read; likely a question about the new file).
+ */
+export const OWN_TOOL_RULES = ['mcp__plugin_quarterdeck-goals_quarterdeck', 'mcp__quarterdeck']
+
+/** A line for the doctor when the standing session's mode leaves runs waiting; null when it is fine. */
+export function modeWarning(permissionMode: string | undefined): string | null {
+  if (!permissionMode) return `it has no permission mode of its own, so it uses your default; if that one asks before a tool runs, its runs wait with nobody to answer`
+  if (ASKING_MODES.includes(permissionMode)) return `its permission mode is "${permissionMode}", which asks before a tool runs, and nobody is there to answer (a prompt does reach the Claude app on your phone)`
+  return null
+}
 
 /** What `ensure` remembers between its runs (runner/state.json). */
 export interface RunnerState {
@@ -121,7 +148,7 @@ export function statusText(s: RunnerStatus): string {
 
 /** The `claude` arguments that start the standing session. */
 export function startArgs(sessionId: string, permissionMode?: string): string[] {
-  return ['--remote-control', SESSION_NAME, '--name', SESSION_NAME, '--session-id', sessionId, ...(permissionMode ? ['--permission-mode', permissionMode] : [])]
+  return ['--remote-control', SESSION_NAME, '--name', SESSION_NAME, '--session-id', sessionId, '--allowedTools', OWN_TOOL_RULES.join(','), ...(permissionMode ? ['--permission-mode', permissionMode] : [])]
 }
 
 export type StartResult = { started: boolean; sessionId: string | null; text: string }
@@ -328,6 +355,8 @@ export function install(deps: InstallDeps, opts: { permissionMode?: string } = {
   if (!SUPPORTED.includes(deps.platform)) throw new Error('The standing session is set up for Windows and Linux only so far.')
   if (!deps.cliPath) throw new Error('Run this from the built CLI: node plugins/quarterdeck-goals/server/quarterdeck-cli.mjs runner install (after `npm run build --prefix mcp`).')
   checkMode(opts.permissionMode)
+  const given = opts.permissionMode ?? deps.readState()?.permissionMode
+  const permissionMode = given ?? DEFAULT_PERMISSION_MODE
   const launcher = join(deps.dir, 'launch.mjs')
   deps.writeFile(launcher, LAUNCHER)
   deps.writeFile(join(deps.dir, 'cli-path'), deps.cliPath)
@@ -346,7 +375,16 @@ export function install(deps: InstallDeps, opts: { permissionMode?: string } = {
     deps.systemctl(['enable', '--now', `${UNIT_NAME}.timer`])
     lines.push(`Created the systemd user timer ${UNIT_NAME}.timer: it checks at login and every ${ENSURE_MINUTES} minutes that the standing session is running.`)
   }
-  lines.push(startByTask(deps, opts).text)
+  const started = startByTask(deps, { permissionMode })
+  lines.push(started.text)
+  // Already running: the mode is kept for its next start
+  const state = deps.readState()
+  if (!started.started && state && state.permissionMode !== permissionMode) {
+    deps.writeState({ ...state, permissionMode })
+    lines.push(`It keeps its current permission mode until it next restarts (quarterdeck runner stop, then start).`)
+  }
+  lines.push(`Permission mode: ${permissionMode}${given ? '' : ' (the default: nobody is at this session to answer a permission prompt, so Claude Code decides each tool call itself)'}. Change it with: quarterdeck runner install --permission-mode <mode>`)
+  lines.push(`Quarterdeck's own tools are allowed in that session (--allowedTools), so a run can always read its brief and report.`)
   lines.push('Goals now run while this computer is on and you are logged in, with no Claude Code window open. Remove with: quarterdeck runner uninstall')
   if (deps.platform === 'linux' && deps.wsl) lines.push(WSL_WARNING)
   else if (deps.platform === 'linux') lines.push('To keep it running after you log out too: loginctl enable-linger')
@@ -624,7 +662,7 @@ export const RUNNER_USAGE = [
   'tmux session (Linux), which runs goals while no Claude Code window is open (the computer must be on',
   'and you logged in).',
   '',
-  '  install [--permission-mode <mode>]   Start it, and keep it running (a scheduled task; on Linux a systemd timer)',
+  '  install [--permission-mode <mode>]   Start it, and keep it running (a scheduled task; on Linux a systemd timer). The mode is auto unless given',
   '  uninstall                            Stop it and delete the scheduled task or timer',
   '  start [--permission-mode <mode>]     Start it now',
   '  stop                                 Stop it',
