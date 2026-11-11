@@ -10,7 +10,7 @@ if (command === 'doctor') {
   process.exit(results.some((r) => r.level === 'fail') ? 1 : 0)
 } else if (command === 'runner') {
   const { text, code } = await runnerCommand(process.argv.slice(3))
-  console.log(text)
+  if (text) console.log(text)
   process.exit(code)
 } else {
   console.log([

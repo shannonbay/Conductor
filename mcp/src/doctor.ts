@@ -7,7 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { homedir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
-import { realDeps, status, statusText, taskInstalled, TASK_NAME, type InstallDeps } from './runner-session.js'
+import { ATTACH_HINT, keepAliveName, realDeps, status, statusText, taskInstalled, type InstallDeps } from './runner-session.js'
 
 export type Level = 'ok' | 'warn' | 'fail'
 
@@ -312,9 +312,10 @@ export async function checkRunner(o: DoctorOptions, deps?: InstallDeps): Promise
   try {
     const d = deps ?? await realDeps()
     const s = status(d)
-    const task = d.platform !== 'win32' || taskInstalled(d)
-    if (!s.running) return warn(name, `not running${task ? ' (the scheduled task starts it within 5 minutes)' : ''}, so goals run only while a Claude Code window is open`, 'Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.')
-    if (!task) return warn(name, `${statusText(s)} But the scheduled task "${TASK_NAME}" is missing, so nothing restarts it after a logon or an update`, 'Run `quarterdeck runner install`.')
+    const task = !['win32', 'linux'].includes(d.platform) || taskInstalled(d)
+    if (!s.running) return warn(name, `not running${task ? ` (${keepAliveName(d.platform)} starts it within 5 minutes)` : ''}, so goals run only while a Claude Code window is open`, 'Run `quarterdeck runner start`, or `quarterdeck runner uninstall` if you no longer want it.')
+    if (s.waiting) return warn(name, 'running but waiting to be told its folder is safe, so no goal runs in it', ATTACH_HINT)
+    if (!task) return warn(name, `${statusText(s)} But ${keepAliveName(d.platform)} is missing, so nothing restarts it after a logon or an update`, 'Run `quarterdeck runner install`.')
     return ok(name, statusText(s))
   } catch (e) {
     return warn(name, `could not be checked: ${firstLine((e as Error).message)}`, 'Check that `claude agents --json` works in a terminal.')

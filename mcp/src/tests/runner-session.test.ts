@@ -3,14 +3,17 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  ensure, install, runnerCommand, start, startArgs, startByTask, status, statusText, stop, taskXml, uninstall, SESSION_NAME, TASK_NAME,
-  type InstallDeps, type RunnerState,
+  ensure, install, runnerCommand, start, startArgs, startByTask, status, statusText, stop, systemdUnits, taskXml, uninstall, waitingOn,
+  SESSION_NAME, TASK_NAME, UNIT_NAME, type InstallDeps, type RunnerState,
 } from '../runner-session.js'
 import { checkRunner } from '../doctor.js'
 
 const DIR = 'C:\\Users\\me\\.quarterdeck\\runner'
 
-/** A fake computer: started sessions are process ids in `alive`; running the scheduled task runs `ensure`, as Task Scheduler would. */
+const UNITS = '/home/me/.config/systemd/user'
+const TRUST = ' Quick safety check: Is this a project you created or one you trust?\n ❯ No, exit\n   Yes, I trust this folder\n'
+
+/** A fake computer: started sessions are process ids in `alive`; running the scheduled task (or the systemd service) runs `ensure`, as Task Scheduler or systemd would. */
 function fake(over: Partial<InstallDeps> = {}) {
   const world = {
     alive: new Set<number>(),
@@ -22,6 +25,10 @@ function fake(over: Partial<InstallDeps> = {}) {
     running: 0,
     holder: null as string | null,
     made: 0,
+    systemctl: [] as string[][],
+    enabled: false,
+    screen: null as string | null,
+    attached: 0,
   }
   const deps: InstallDeps = {
     dir: DIR,
@@ -55,6 +62,18 @@ function fake(over: Partial<InstallDeps> = {}) {
       if (args[0] === '/run') ensure(deps)
       return 'SUCCESS'
     },
+    systemctl: (args) => {
+      world.systemctl.push(args)
+      if (args[0] === 'enable') world.enabled = true
+      if (args[0] === 'disable') world.enabled = false
+      if (args[0] === 'is-enabled' && !world.enabled) throw new Error('disabled')
+      if (args[0] === 'start') ensure(deps)
+      return ''
+    },
+    systemdDir: UNITS,
+    path: '/usr/local/bin:/home/me/.local/bin:/usr/bin',
+    attach: () => { world.attached++ },
+    screenText: () => world.screen,
     sleep: () => {},
     ...over,
   }
@@ -160,9 +179,65 @@ describe('the standing session', () => {
     expect(x).toContain('<StartBoundary>2026-11-10T02:03:04</StartBoundary>')
   })
 
-  it('install needs the built CLI, and Windows', () => {
+  it('install needs the built CLI, and Windows or Linux', () => {
     expect(() => install(fake({ cliPath: null }).deps)).toThrow(/built CLI/)
-    expect(() => install(fake({ platform: 'linux' }).deps)).toThrow(/Windows only/)
+    expect(() => install(fake({ platform: 'darwin' }).deps)).toThrow(/Windows and Linux only/)
+  })
+
+  it('on Linux, install writes a systemd timer and service, and the service starts the session; uninstall undoes it', async () => {
+    const { deps, world } = fake({ platform: 'linux', dir: '/home/me/.quarterdeck/runner', node: '/opt/node22/bin/node', cliPath: '/plugins/quarterdeck-goals/server/quarterdeck-cli.mjs' })
+    const text = install(deps, { permissionMode: 'auto' })
+    expect(world.files[`${UNITS}/${UNIT_NAME}.service`]).toContain('ExecStart="/opt/node22/bin/node" "/home/me/.quarterdeck/runner/launch.mjs"')
+    expect(world.files[`${UNITS}/${UNIT_NAME}.timer`]).toContain('OnUnitActiveSec=5min')
+    expect(world.systemctl).toEqual([['daemon-reload'], ['enable', '--now', `${UNIT_NAME}.timer`], ['start', `${UNIT_NAME}.service`]])
+    expect(world.tasks).toEqual([])
+    expect(world.spawned[0]).toContain('auto')
+    expect(text).toMatch(/systemd user timer .* every 5 minutes/)
+    expect(text).toMatch(/loginctl enable-linger/)
+    // Started again, it goes through systemd too, not as this window's child
+    stop(deps)
+    await expect(runnerCommand(['start'], { ...deps, insideClaudeCode: true })).resolves.toMatchObject({ code: 0, text: expect.not.stringMatching(/may stop when/) })
+
+    expect(uninstall(deps)).toMatch(/Deleted the systemd timer/)
+    expect(world.systemctl).toContainEqual(['disable', '--now', `${UNIT_NAME}.timer`])
+    expect(world.files[`${UNITS}/${UNIT_NAME}.service`]).toBeUndefined()
+    expect(world.files[`${UNITS}/${UNIT_NAME}.timer`]).toBeUndefined()
+    expect(world.alive.size).toBe(0)
+  })
+
+  it('the systemd service leaves the tmux session running when it ends, and finds this Node first', () => {
+    const u = systemdUnits({ node: '/opt/node 22/bin/node', launcher: '/home/me/100%/launch.mjs', dir: '/home/me/.quarterdeck/runner', path: '/usr/bin:/opt/node 22/bin:/mnt/c/Program Files (x86)/x' })
+    // By default systemd ends what a finished oneshot service left behind: the tmux server with the session (seen Nov 2026)
+    expect(u.service).toContain('KillMode=process')
+    expect(u.service).toContain('Type=oneshot')
+    expect(u.service).toContain('ExecStart="/opt/node 22/bin/node" "/home/me/100%%/launch.mjs"')
+    expect(u.service).toContain('Environment="PATH=/opt/node 22/bin:/usr/bin:/mnt/c/Program Files (x86)/x"')
+    expect(u.timer).toContain('OnActiveSec=1min')
+    expect(u.timer).toContain('WantedBy=timers.target')
+    expect(systemdUnits({ node: '/n/node', launcher: '/a$b"c', dir: '/d', path: '' }).service).toContain('"/n/node" "/a$$b\\"c"')
+  })
+
+  it('says when the session waits at the folder trust question, and how to answer it', async () => {
+    expect(waitingOn(TRUST)).toBe('trust')
+    expect(waitingOn('❯ \n /remote-control is active')).toBeNull()
+    const { deps, world } = fake({ platform: 'linux' })
+    world.enabled = true
+    world.screen = TRUST
+    const r = startByTask(deps)
+    expect(r.text).toMatch(/waiting to be told its folder .* is safe/)
+    expect(r.text).toMatch(/quarterdeck runner attach/)
+    expect(status(deps).waiting).toBe('trust')
+    expect(statusText(status(deps))).toMatch(/no goal runs in it yet/)
+    expect(await runnerCommand(['attach'], deps)).toEqual({ text: '', code: 0 })
+    expect(world.attached).toBe(1)
+    world.screen = '❯ '
+    expect(status(deps).waiting).toBeNull()
+    stop(deps)
+    expect(await runnerCommand(['attach'], deps)).toMatchObject({ code: 1, text: expect.stringMatching(/not running/) })
+    // Started directly (no timer yet), it looks too
+    world.enabled = false
+    world.screen = TRUST
+    expect((await runnerCommand(['start'], deps)).text).toMatch(/runner attach/)
   })
 
   it('start goes through the task once it is installed, and warns when it would be this window\'s child', async () => {
@@ -199,6 +274,8 @@ describe('the standing session', () => {
       expect(await checkRunner(o, deps)).toMatchObject({ level: 'warn', detail: expect.stringMatching(/scheduled task .* is missing/) })
       world.tasks.push(['/create'])
       expect(await checkRunner(o, deps)).toMatchObject({ level: 'ok' })
+      world.screen = TRUST
+      expect(await checkRunner(o, deps)).toMatchObject({ level: 'warn', fix: expect.stringMatching(/runner attach/) })
     } finally {
       rmSync(home, { recursive: true, force: true })
     }
