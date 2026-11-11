@@ -7,7 +7,7 @@ Written 11 Nov 2026 for a later Claude Code session to pick up. The aim is to su
 - **v0.17.0 is published** (`main`, the `release` branch and tags are on GitHub).
 - **The listing copy is committed on `main` but not released.** Both `plugin.json` files have `displayName` ("Quarterdeck", "Quarterdeck Guard"), a rewritten `description`, `author`, `homepage`, `repository` and `keywords`. `marketplace.json` has a description and the same plugin descriptions. Both plugin READMEs open with what Quarterdeck is, and the goals README has a "What it runs, stores and sends" section for the security scan.
 - **Nothing has been done in the portal.** The one attempt at browser control failed with "Browser extension is not connected".
-- `claude plugin validate` passes for both plugins and the marketplace, with one warning each: no icon.
+- `claude plugin validate --strict` passes for both plugins.
 
 ## Which route
 
@@ -20,7 +20,7 @@ Written 11 Nov 2026 for a later Claude Code session to pick up. The aim is to su
 
 ## Before opening the portal
 
-1. **Icon.** Each plugin needs a square PNG, 512 to 2048 px, under 2 MB, at `plugins/<name>/.claude-plugin/icon.png`. The portal takes the icon only once, at the first save or submission, and later changes don't change the listing. Get the person's icon first; don't submit without one unless they say so.
+1. **Icon: done.** Both plugins have the approved icon at `.claude-plugin/icon.png` (1024 px, rendered from `docs/quarterdeck-icon.svg` with sharp). The portal takes the icon only once, at the first save or submission, so check it shows in Listing details before saving anything.
 2. **Fix the release script.** `scripts/release.mjs` builds on the local `release` branch. On 11 Nov that branch was a version behind the remote, so the push was rejected and needed a hand-made merge commit. Make it fetch and start from `origin/release`.
 3. **Release 0.17.1** (`npm run release -- 0.17.1 --push`) so the `release` branch carries the listing copy and the icons. Check that `icon.png` ships: the script's copy filter leaves out only `tests`, `node_modules`, `tsconfig.json` and `.claude-plugin/types`.
 4. **Ask the person which claude.ai account to submit from**, and check the browser is signed in to that one. Submitting needs a paid plan, and that account's GitHub connection must be able to push to `shannonbay/Quarterdeck`.

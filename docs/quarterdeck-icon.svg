@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="A three-masted sailing ship in bronze">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="75%">
+      <stop offset="0" stop-color="#40301f"/>
+      <stop offset="1" stop-color="#150e08"/>
+    </radialGradient>
+    <linearGradient id="sail" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f8e2b8"/>
+      <stop offset="1" stop-color="#d49a52"/>
+    </linearGradient>
+    <linearGradient id="hull" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c98440"/>
+      <stop offset="1" stop-color="#6b411d"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f1c27d"/>
+      <stop offset="0.5" stop-color="#cd7f32"/>
+      <stop offset="1" stop-color="#7a4d24"/>
+    </linearGradient>
+    <clipPath id="hullClip">
+      <path d="M92 296H188V318H366V306H424L452 298C444 350 420 390 372 394H156C122 394 104 366 92 296Z"/>
+    </clipPath>
+  </defs>
+
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <rect x="14" y="14" width="484" height="484" rx="100" fill="none" stroke="url(#rim)" stroke-width="6"/>
+
+  <g transform="translate(-28 0)">
+    <!-- Masts, bowsprit and stay -->
+    <g stroke="#8c5a2b" stroke-linecap="round">
+      <path d="M150 104V296M262 78V318M362 112V306" stroke-width="7"/>
+      <path d="M420 306L486 266" stroke-width="7"/>
+      <path d="M362 114L486 266" stroke-width="2.5"/>
+      <path d="M154 242L102 228M154 288L84 292" stroke-width="5"/>
+    </g>
+
+    <!-- Sails -->
+    <g fill="url(#sail)">
+      <!-- Mizzen: spanker, topsail, topgallant -->
+      <path d="M154 242L102 228Q88 260 84 292L154 288Z"/>
+      <path d="M120 170H180Q186 196 184 222Q150 210 116 222Q114 196 120 170Z"/>
+      <path d="M128 122H172Q178 142 176 162Q150 152 124 162Q122 142 128 122Z"/>
+      <!-- Main: course, topsail, topgallant -->
+      <path d="M214 236H310Q316 268 314 300Q262 286 210 300Q208 268 214 236Z"/>
+      <path d="M222 162H302Q308 195 306 228Q262 215 218 228Q216 195 222 162Z"/>
+      <path d="M234 100H290Q296 127 294 154Q262 143 230 154Q228 127 234 100Z"/>
+      <!-- Fore: course, topsail, topgallant -->
+      <path d="M324 250H400Q406 276 404 302Q362 290 320 302Q318 276 324 250Z"/>
+      <path d="M330 184H394Q400 213 398 242Q362 230 326 242Q324 213 330 184Z"/>
+      <path d="M338 130H386Q392 153 390 176Q362 166 334 176Q332 153 338 130Z"/>
+      <!-- Jib -->
+      <path d="M393 156L478 257L430 286Q420 216 393 156Z"/>
+    </g>
+
+    <!-- Yards -->
+    <path d="M116 170H184M124 122H176M210 236H314M218 162H306M230 100H294M320 250H404M326 184H398M334 130H390"
+          stroke="#7a4d24" stroke-width="5" stroke-linecap="round"/>
+
+    <!-- Pennants -->
+    <g fill="#e8a95a">
+      <path d="M262 78L304 85L262 94Z"/>
+      <path d="M150 104L178 109L150 116Z"/>
+      <path d="M362 112L390 117L362 124Z"/>
+    </g>
+
+    <!-- Hull, with its raised quarterdeck at the stern -->
+    <path d="M92 296H188V318H366V306H424L452 298C444 350 420 390 372 394H156C122 394 104 366 92 296Z" fill="url(#hull)"/>
+    <g clip-path="url(#hullClip)">
+      <rect x="80" y="336" width="380" height="26" fill="#f1c27d" opacity="0.85"/>
+      <g fill="#24170c">
+        <rect x="150" y="342" width="14" height="14" rx="2"/>
+        <rect x="186" y="342" width="14" height="14" rx="2"/>
+        <rect x="222" y="342" width="14" height="14" rx="2"/>
+        <rect x="258" y="342" width="14" height="14" rx="2"/>
+        <rect x="294" y="342" width="14" height="14" rx="2"/>
+        <rect x="330" y="342" width="14" height="14" rx="2"/>
+        <rect x="366" y="342" width="14" height="14" rx="2"/>
+      </g>
+      <g fill="#f8e2b8">
+        <rect x="108" y="308" width="11" height="12" rx="2"/>
+        <rect x="128" y="308" width="11" height="12" rx="2"/>
+        <rect x="148" y="308" width="11" height="12" rx="2"/>
+      </g>
+    </g>
+  </g>
+
+  <!-- Sea -->
+  <g fill="none" stroke-linecap="round" stroke-width="9">
+    <path d="M56 406q25-18 50 0t50 0t50 0t50 0t50 0t50 0t50 0t50 0" stroke="#cd7f32"/>
+    <path d="M106 436q25-18 50 0t50 0t50 0t50 0t50 0t50 0" stroke="#8c5a2b"/>
+  </g>
+</svg>
