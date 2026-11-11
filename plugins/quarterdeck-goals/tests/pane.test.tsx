@@ -469,20 +469,23 @@ test('offline, the pane dates the goals it still shows, not the last failed read
 
 test('a goal with nothing for you is one line; one that needs you keeps its card', async ($, on) => {
   engine(on)
-  const ran = (status: string) => [{ id: `r-${status}`, status, trigger: 'schedule', summary: 'Checked', started_at: '2026-11-07T07:00:00Z', ended_at: '2026-11-07T07:02:00Z' }]
+  const ran = (status: string, tokens?: number) => [{ id: `r-${status}`, status, trigger: 'schedule', summary: 'Checked', started_at: '2026-11-07T07:00:00Z', ended_at: '2026-11-07T07:02:00Z', tokens }]
   fakeQuarterdeck(on, [
-    goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z', runs: ran('completed'), activity: { state: 'idle', text: 'Last run: Checked', at: null } }),
+    goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z', runs: ran('completed', 48_200), activity: { state: 'idle', text: 'Last run: Checked', at: null } }),
     goal({ id: 'g2', name: 'Invoices', next_run_at: '2026-11-07T08:25:00Z', runs: ran('failed') }),
     goal({ id: 'g3', name: 'Reports', status: 'paused', next_run_at: null }),
     goal({ id: 'g4', name: 'Disk', health: [{ passed: false, value: 7 }] }),
+    // A run from before tokens were recorded says when it ran instead
+    goal({ id: 'g5', name: 'Backups', next_run_at: '2026-11-07T08:25:00Z', runs: ran('completed') }),
   ])
   await $.session.start(START)
 
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    // Quiet: the name, when it ran and when it runs next, and nothing else
+    // Quiet: the name, what its last run used and when it runs next, and nothing else
     expect((await ui.find({ key: 'toggle-g1' }))?.props.label).toBe('▸ Inbox')
     expect((await ui.find({ key: 'toggle-g1' }))?.props.hotkey).toBe('1')
+    expect(await ui.find({ type: 'Text', text: /^ · 48k tokens · next in 25m$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^ · ran 58m ago · next in 25m$/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /^Last run: Checked/ })).toBeUndefined()
     expect(await ui.find({ key: 'pause-g1' })).toBeUndefined()

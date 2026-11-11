@@ -467,11 +467,18 @@ export function holdUntilText(until: string, now: number): string {
   return new Date(now).toDateString() === d.toDateString() ? time : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} ${time}`
 }
 
+/** "48k tokens": the new tokens a run used (no cache reads); '' when unknown. */
+export function runTokens(run: { tokens?: number }): string {
+  const t = run.tokens ?? 0
+  if (t <= 0) return ''
+  return `${t >= 1_000_000 ? `${(t / 1_000_000).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : t} tokens`
+}
+
 /** "48k tokens · 2m": the new tokens a finished run used (no cache reads), and how long it took; '' when unknown. */
 export function runCost(run: { tokens?: number; startedAt: string; endedAt: string | null }): string {
   const parts: string[] = []
-  const t = run.tokens ?? 0
-  if (t > 0) parts.push(`${t >= 1_000_000 ? `${(t / 1_000_000).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : t} tokens`)
+  const tokens = runTokens(run)
+  if (tokens) parts.push(tokens)
   if (run.endedAt) {
     const s = Math.max(0, Math.round((Date.parse(run.endedAt) - Date.parse(run.startedAt)) / 1000))
     parts.push(s >= 60 ? `${Math.round(s / 60)}m` : `${s}s`)

@@ -14,7 +14,7 @@ import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, clip, discussPrompt, holdUntilText, isFailed, isQuiet, lastRun, nextRunText, runCost, scheduleLabel, spark, updatePrompt } from './model'
+import { ago, clip, discussPrompt, holdUntilText, isFailed, isQuiet, lastRun, nextRunText, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
 import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
@@ -185,14 +185,15 @@ function welcome($: $, e: E) {
 
 /**
  * A goal with nothing for the person, on one line: its name (press it, or its
- * number, for the full card), when it last ran and when it runs next.
+ * number, for the full card), the tokens its last run used and when it runs next.
  */
 function quietLine($: $, e: E, view: View, g: GoalCard, index: number, gap: number) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const run = lastRun(g)
   const facts = [
     g.status === 'active' ? '' : ` · ${g.status}`,
-    ` · ${run ? `ran ${ago(run.endedAt ?? run.startedAt, view.now)}` : 'no runs yet'}`,
+    // What the last run used; when it ran only if its tokens weren't recorded
+    ` · ${run ? runTokens(run) || `ran ${ago(run.endedAt ?? run.startedAt, view.now)}` : 'no runs yet'}`,
     nextRunText(g, view.now),
     g.openItemCount > 0 ? ` · ${g.openItemCount} open` : '',
   ].join('')

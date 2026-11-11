@@ -41,13 +41,13 @@ failing 18 ▁▃▅█
   email.send: Send: Thursday 2pm works.
 [Approve] [Reject…]
 Cancel run  Pause
-▸ Release watch · ran 3h ago · next in 4d
-▸ Job matches · ran 1d ago · next in 6d
+▸ Release watch · 31k tokens · next in 4d
+▸ Job matches · 112k tokens · next in 6d
 
 Last change just now  Refresh
 ```
 
-- A goal with nothing for you is **one line**: its name, when it last ran and when it runs next. That is a goal with no proposal or question waiting, no run going, a last run that didn't fail, a health check that isn't failing and no suggestion. Press its name (or its number) for the full card with its buttons. Goals stay in the same order either way.
+- A goal with nothing for you is **one line**: its name, the tokens its last run used (when it ran, if they weren't recorded) and when it runs next. That is a goal with no proposal or question waiting, no run going, a last run that didn't fail, a health check that isn't failing and no suggestion. Press its name (or its number) for the full card with its buttons. Goals stay in the same order either way.
 - Under each goal's name is one line saying what its agent is doing. While a run is going, that's the agent's latest step: a progress update, an item it added or finished, or a note it saved. Otherwise it says the run is queued, the goal is paused, what the next run will carry out, or the last run's summary. Claude's `goals_status` tool reports the same line.
 - Below that: the last run, what it used (`· 48k tokens · 2m`: the new tokens the run's agent used, not counting re-reads of the cached prompt, and how long it took) and when the next automatic one is due (`· next in 12m`), `· one-off`, or `· no schedule` with a **Set schedule** button (it suggests one, as `/goal-new` does).
 - **Your to-do lists** for this project, each collapsed to its name and count (see below).
