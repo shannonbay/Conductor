@@ -188,8 +188,11 @@ describe('the standing session', () => {
   it('on Linux, install writes a systemd timer and service, and the service starts the session; uninstall undoes it', async () => {
     const { deps, world } = fake({ platform: 'linux', dir: '/home/me/.quarterdeck/runner', node: '/opt/node22/bin/node', cliPath: '/plugins/quarterdeck-goals/server/quarterdeck-cli.mjs' })
     const text = install(deps, { permissionMode: 'auto' })
-    expect(world.files[`${UNITS}/${UNIT_NAME}.service`]).toContain('ExecStart="/opt/node22/bin/node" "/home/me/.quarterdeck/runner/launch.mjs"')
-    expect(world.files[`${UNITS}/${UNIT_NAME}.timer`]).toContain('OnUnitActiveSec=5min')
+    // The paths are joined as this computer joins them (backslashes when the tests run on Windows); systemdUnits' own test has the Linux text
+    const service = join(UNITS, `${UNIT_NAME}.service`)
+    const timer = join(UNITS, `${UNIT_NAME}.timer`)
+    expect(world.files[service]).toMatch(/^ExecStart="\/opt\/node22\/bin\/node" ".*launch\.mjs"$/m)
+    expect(world.files[timer]).toContain('OnUnitActiveSec=5min')
     expect(world.systemctl).toEqual([['daemon-reload'], ['enable', '--now', `${UNIT_NAME}.timer`], ['start', `${UNIT_NAME}.service`]])
     expect(world.tasks).toEqual([])
     expect(world.spawned[0]).toContain('auto')
@@ -202,8 +205,8 @@ describe('the standing session', () => {
 
     expect(uninstall(deps)).toMatch(/Deleted the systemd timer/)
     expect(world.systemctl).toContainEqual(['disable', '--now', `${UNIT_NAME}.timer`])
-    expect(world.files[`${UNITS}/${UNIT_NAME}.service`]).toBeUndefined()
-    expect(world.files[`${UNITS}/${UNIT_NAME}.timer`]).toBeUndefined()
+    expect(world.files[service]).toBeUndefined()
+    expect(world.files[timer]).toBeUndefined()
     expect(world.alive.size).toBe(0)
   })
 
