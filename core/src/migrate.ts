@@ -15,6 +15,9 @@ export const REVISION_TRIGGERS = [
   'trg_goal_memory_delete_revision',
   'trg_goal_health_insert_revision',
   'trg_goal_tool_calls_insert_revision',
+  'trg_goal_watches_insert_revision',
+  'trg_goal_watches_update_revision',
+  'trg_goal_watches_delete_revision',
 ] as const
 
 /**
@@ -33,7 +36,7 @@ export const REVISION_TRIGGERS = [
  * a session still running older code then sees it is outdated (`schemaOutdated`)
  * and leaves scheduling to the newer one.
  */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 /** The schema version recorded in the database (0 before versions existed). */
 export function dbSchemaVersion(db: Database): number {
@@ -372,6 +375,56 @@ export function runMigrations(db: Database): void {
       until  TEXT NOT NULL,
       reason TEXT NOT NULL
     );
+  `)
+
+  // ── Watches: a check whose new lines start a run (schema version 2) ─────────
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS goal_watches (
+      id              TEXT PRIMARY KEY,
+      plan_id         TEXT NOT NULL REFERENCES plans(id),
+      name            TEXT NOT NULL,
+      kind            TEXT NOT NULL CHECK (kind IN ('command', 'tool')),
+      command         TEXT,
+      tool            TEXT,
+      tool_input      TEXT NOT NULL DEFAULT '{}',
+      match           TEXT,
+      every_minutes   INTEGER NOT NULL DEFAULT 5,
+      -- JSON array of the lines seen so far, capped
+      seen            TEXT NOT NULL DEFAULT '[]',
+      -- null until the first check that worked: that one only records what is there
+      baseline_at     TEXT,
+      last_checked_at TEXT,
+      asked_at        TEXT,
+      last_fired_at   TEXT,
+      last_error      TEXT,
+      fail_count      INTEGER NOT NULL DEFAULT 0,
+      created_at      TEXT NOT NULL,
+      UNIQUE (plan_id, name)
+    );
+
+    -- One row per new line; it waits (run_id null) until a run's brief carries it
+    CREATE TABLE IF NOT EXISTS goal_watch_events (
+      id         TEXT PRIMARY KEY,
+      watch_id   TEXT NOT NULL,
+      plan_id    TEXT NOT NULL REFERENCES plans(id),
+      line       TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      queued_at  TEXT,
+      run_id     TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_goal_watch_events_plan ON goal_watch_events(plan_id, run_id);
+
+  `)
+  // Added while version 2 was being built: a database that already has the table needs the column
+  try { db.exec('ALTER TABLE goal_watches ADD COLUMN asked_at TEXT') } catch { /* already exists */ }
+  db.exec(`
+    CREATE TRIGGER IF NOT EXISTS trg_goal_watches_insert_revision AFTER INSERT ON goal_watches
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    -- Not on every check: only when what the pane shows changes
+    CREATE TRIGGER IF NOT EXISTS trg_goal_watches_update_revision AFTER UPDATE OF name, kind, command, tool, tool_input, match, every_minutes, last_fired_at, last_error ON goal_watches
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = NEW.plan_id; END;
+    CREATE TRIGGER IF NOT EXISTS trg_goal_watches_delete_revision AFTER DELETE ON goal_watches
+    BEGIN UPDATE plans SET revision = revision + 1 WHERE id = OLD.plan_id; END;
   `)
 
   // ── Agent transcripts ───────────────────────────────────────────────────────

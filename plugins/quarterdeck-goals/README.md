@@ -27,13 +27,15 @@ For development, add your checkout as the marketplace instead (`claude plugin ma
 - **Your data stays on your computer.** Goals, their items, memory, run history and to-do lists are in one SQLite file, `~/.quarterdeck/tasks.db`. Quarterdeck has no service of its own and sends none of it anywhere.
 - **One network request of its own.** At most every 6 hours the server reads this plugin's `plugin.json` from the `release` branch on GitHub to see whether a newer version is published. It sends nothing about you. Turn it off with `QUARTERDECK_UPDATE_CHECK=0`.
 - **Background subagents.** Each goal run is a Claude Code subagent on your Claude plan. It can use the tools, MCP servers and connectors your session has, within the goal's rules: a kind of action is off, waits for your approval, or is allowed, as you set it (the quarterdeck-guard plugin holds a run to that). A small model call (Haiku) suggests a schedule and title for a new goal.
-- **Commands you give it.** A goal can have a health command, and an item a check command. The server runs them in the goal's directory. A goal has none unless you set one.
+- **Commands you give it.** A goal can have a health command and watches, and an item a check command. The server runs them in the goal's directory. A goal has none unless you set one, and a watch is set only after you have read its whole command and confirmed it.
+- **Connector calls you set up.** A tool watch calls one connector tool (for example a Gmail search for thread ids) every few minutes from the session that runs goals, with the input you confirmed. Only the ids in the answer are kept. A goal has none unless you set one.
 - **Messages into your conversation.** Discuss, a to-do's Ask, Plan and Start, and phone alerts submit a prompt to your chat, each when you press the button (alerts: when you have been away 5 minutes, see below).
 - **Only if you ask: the standing session.** `quarterdeck-cli.mjs runner install` adds a scheduled task (Windows) or a systemd user timer (Linux) that keeps one Claude Code session running so goals run with no window open. Nothing installs it for you, and `runner uninstall` removes it.
 
 ## How runs work
 
-- Every 30 seconds the plugin asks the quarterdeck server for a scheduler pass (`goals_tick`). The pass runs due health checks and claims the runs that are due: scheduled ones, ones you queued with "Run now", and the one an approval queues.
+- Every 30 seconds the plugin asks the quarterdeck server for a scheduler pass (`goals_tick`). The pass runs due health checks and watches, and claims the runs that are due: scheduled ones, ones you queued with "Run now", the one an approval queues, and the one a watch queues when it sees something new.
+- **Watches** start a run when something happens, not only on a timer. A watch is a command that prints one line per current item (an open issue's number, a feed entry's id, a file name). It is checked every few minutes; a line it hasn't printed before queues a run, whose brief lists the new lines. The first check only records what is there, and a check that fails starts nothing. For mail and other things only a connector reaches, a watch names a read-only connector tool (a Gmail search, say) with its input instead of a command; this session calls it every few minutes without a model turn and without asking, and the ids in its answer are the items. Ask Claude to add one ("start a run when octo/site gets a new issue", "…when new mail arrives from my accountant"): the `goal-watches` skill has the recipes, and you confirm the command, or the tool and its input, before it is set. An expanded goal lists its watches; one that can't check keeps the goal's card open and says why.
 - Each claimed run starts in a background subagent (`quarterdeck-goals:goal-runner`, hidden from Claude's own Agent tool) in the goal's working directory. Its description is `Goal: <name> (<run id>)`.
 - The run reads its brief, works, and ends with `end_run`. Its summary shows in the pane; it isn't handed back into your chat.
 - A run past its time limit (`max_run_minutes`) is stopped and marked timed out. A run whose agent ends without `end_run` is marked failed. Cancelling a run in the pane stops its agent.
@@ -119,7 +121,7 @@ A **one-off** goal runs once, straight away. When its run ends with nothing left
 | `approve_item`, `reject_item` | Approve or reject a proposal. **Asks you first.** |
 | `run_goal` | Queue a run. **Asks you first.** |
 | `todos`, `add_todo`, `complete_todo`, `edit_todo` | Read your to-do lists, add to one (when you ask, or after offering), tick one off (when you say it's done), reword one (when you ask; a toast shows the old wording). |
-| `update_goal` | Change a goal's name, objective, standing instructions, autonomy per category, tool rules, memory, or pause it. **Shows you each change and asks you first.** Runs can't use it. |
+| `update_goal` | Change a goal's name, objective, standing instructions, autonomy per category, tool rules, memory or watches, or pause it. **Shows you each change and asks you first.** Runs can't use it. |
 | `set_schedule` | Set or clear a goal's schedule (same forms as `/goal-schedule`). **Asks you first.** |
 
 Ask things like "what do my goals need?" or "approve the Alice reply".

@@ -4,7 +4,7 @@ import { phoneText } from '../hooks/alerts'
 
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
-  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked} from '../hooks/model'
+  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet } from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -151,4 +151,19 @@ test("planModeBlocked spots Claude Code refusing a plugin's write in plan mode, 
   expect(planModeBlocked("mcp__plugin_quarterdeck-goals_quarterdeck__todo_set wasn't run: this call needs a person's approval, and a mod's own call can't ask for it.")).toBe(true)
   expect(planModeBlocked('Feedback is required')).toBe(false)
   expect(planModeBlocked('fetch failed')).toBe(false)
+})
+
+test('an objective about things happening is spotted, so /goal-new can mention watches', () => {
+  expect(soundsEventDriven('Triage new issues in octo/site')).toBe(true)
+  expect(soundsEventDriven('When a pull request is opened, review it')).toBe(true)
+  expect(soundsEventDriven('Whenever a release is published, write the notes')).toBe(true)
+  expect(soundsEventDriven('Keep my inbox under 20 unread')).toBe(false)
+  expect(soundsEventDriven('Water the plants every morning')).toBe(false)
+})
+
+test('a goal whose watch cannot check is not quiet, and an older server without watches still reads', () => {
+  const watch = (failing: boolean) => ({ name: 'new issues', every_minutes: 5, runs: 'gh issue list', last_fired_at: null, failing, error: failing ? 'Exit code 4' : null })
+  expect(isQuiet(card({ id: 'g1', name: 'Issues', watches: [watch(false)] }))).toBe(true)
+  expect(isQuiet(card({ id: 'g1', name: 'Issues', watches: [watch(true)] }))).toBe(false)
+  expect(card({ id: 'g1', name: 'Issues' })).toMatchObject({ watches: [], watchCount: 0, watchFailing: false })
 })

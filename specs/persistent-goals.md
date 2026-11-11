@@ -164,6 +164,18 @@ The approval UI shows `summary` and `params`; approving sets `approved_at`, and 
 
 Goal-level verify commands that say whether the goal is being met, independent of any one run — e.g. a script printing the count of unread mail older than a day and exiting non-zero above a threshold. Results are stored like verification results and shown as a trend on the goal page; a failing check can trigger an extra run.
 
+### Watches (built after Phase 2.5)
+
+A run starts when something happens, with no listener process per source: a watch is a check the scheduler pass already knows how to run, like a health check.
+
+- A watch (`goal_watches`) is a shell command run in the goal's directory every `every_minutes` (default 5). It prints one line per current item and exits 0.
+- Lines not seen before become events (`goal_watch_events`). The first check that works is the baseline and fires nothing; a failed check leaves the seen lines alone and fires nothing, so an outage never reads as "everything is new".
+- The pass queues one run (trigger `watch`) for a goal's waiting events. Events that arrive during a run queue one more after it. Each event queues at most one run, so past `max_runs_per_day` a noisy watch gives one skipped run, and its news goes to the next run of any kind.
+- The run's brief carries `watch_events` (watch name, the new lines, a count of any left out). A run that fails gives its events back to the next run.
+- Only the person sets a watch (`update_goal` / `create_goal` `watches`), after reading the whole command. The server checks a new watch once and answers how that went.
+- Push sources still use the webhook.
+- **Tool watches** cover what only a connector can reach (Gmail): there is no command to run, and the server can't call a connector. The pass hands due tool watches to the plugin, whose tick calls the tool (a read-only search, with its stored input) and reports the answer with `watch_report`; the server reads one line per match of the watch's `match` (default: every `"id"` in a JSON answer) and the rest is the same. A watch can't call Quarterdeck's own tools, a non-MCP tool, or a tool the goal's rules make a run ask for.
+
 ---
 
 ## How a Run Works

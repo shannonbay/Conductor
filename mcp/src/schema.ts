@@ -113,7 +113,14 @@ export const GoalsTickSchema = z.object({
   tracked_run_ids: z.array(z.string()).default([]).describe('Runs this holder is tracking itself; never expired by the pass'),
   max_concurrent: z.number().int().min(1).max(10).optional().describe('Most runs at once across all goals (default 3)'),
   release: z.boolean().optional().describe('Give the scheduler lease up instead of running a pass (the session is ending)'),
+  tool_watches: z.boolean().optional().describe('The caller checks tool watches: the due ones come back in tool_watches, to call and answer with watch_report'),
 })
+
+export const WatchReportSchema = z.object({
+  watch_id: z.string(),
+  text: z.string().optional().describe("The tool's answer as text"),
+  error: z.string().optional().describe('Why the call failed, when it did'),
+}).refine((v) => v.text !== undefined || v.error !== undefined, { message: 'Give the text the tool answered, or the error.' })
 
 export const GoalsOverviewSchema = z.object({
   etag: z.string().optional().describe('The etag from the last overview; an unchanged overview answers { changed: false }'),
@@ -171,6 +178,14 @@ const GoalScheduleSchema = z.union([
   z.null(),
 ])
 
+const WatchSchema = z.object({
+  command: z.string().trim().min(1).optional().describe('A shell command, run in the goal\'s directory, that prints one line per current item (an issue number, a feed entry\'s id). Lines not seen before start a run; the first check only records what is there. Must exit 0'),
+  tool: z.string().trim().min(1).optional().describe('Instead of a command: a connector or MCP tool (mcp__…) that only reads, called by the session that runs goals, e.g. a mail search'),
+  input: z.record(z.unknown()).optional().describe("The tool's arguments"),
+  match: z.string().optional().describe('A regular expression over the tool\'s answer; each match (its first group) is one line. Left out: every "id" in a JSON answer'),
+  every_minutes: z.number().int().min(1).optional().describe('How often to check (default 5)'),
+}).refine((v) => (v.command === undefined) !== (v.tool === undefined), { message: 'A watch has a command or a tool, one of them.' })
+
 export const CreateGoalSchema = z.object({
   name: z.string().trim().min(1),
   objective: z.string().trim().min(1),
@@ -180,6 +195,7 @@ export const CreateGoalSchema = z.object({
   tool_map: z.record(z.string()).optional().describe('Tool name pattern → category'),
   schedule: GoalScheduleSchema.optional().describe('When it runs on its own; left out or null, on demand'),
   one_off: z.boolean().optional().describe('Runs once now; done when its run leaves nothing open'),
+  watches: z.record(WatchSchema).optional().describe('Watch name → what it checks: a run starts when a watch sees something new'),
 })
 
 export const SetScheduleSchema = z.object({
@@ -221,6 +237,7 @@ export const UpdateGoalSchema = z.object({
   tool_map: z.record(z.string().nullable()).optional().describe('Tool name pattern → category; null removes the rule'),
   add_memory: z.array(z.object({ kind: z.enum(['fact', 'rule', 'preference']), text: z.string().trim().min(1), pinned: z.boolean().optional() })).optional(),
   forget_memory: z.array(z.string()).optional().describe('Memory ids to forget'),
+  watches: z.record(WatchSchema.nullable()).optional().describe('Watch name → what it checks; null removes the watch. A run starts when a watch sees something new'),
   status: z.enum(['active', 'paused']).optional(),
 })
 

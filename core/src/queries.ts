@@ -289,5 +289,5 @@ export function getLatestVerification(db: Database, planId: string, taskId: stri
 // ── Test helpers ──────────────────────────────────────────────────────────────
 
 export function clearAllData(db: Database): void {
-  db.exec('DELETE FROM goal_run_hold; DELETE FROM scheduler_lease; DELETE FROM goal_tool_calls; DELETE FROM goal_health; DELETE FROM goal_memory; DELETE FROM goal_runs; DELETE FROM goal_triggers; DELETE FROM goals; DELETE FROM verifications; DELETE FROM transcript_messages; DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
+  db.exec('DELETE FROM goal_run_hold; DELETE FROM scheduler_lease; DELETE FROM goal_watch_events; DELETE FROM goal_watches; DELETE FROM goal_tool_calls; DELETE FROM goal_health; DELETE FROM goal_memory; DELETE FROM goal_runs; DELETE FROM goal_triggers; DELETE FROM goals; DELETE FROM verifications; DELETE FROM transcript_messages; DELETE FROM events; DELETE FROM agent_sessions; DELETE FROM tasks; DELETE FROM plans;')
 }

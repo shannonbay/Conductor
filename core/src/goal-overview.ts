@@ -11,6 +11,7 @@ import { getOpenRun, getGoal, listGoals, listMemory, listRuns } from './goals.js
 import { autonomyFor } from './goal-engine.js'
 import { getSchedule } from './schedule.js'
 import { listHealth } from './health.js'
+import { describeWatch, listWatches, watchFailing } from './watches.js'
 import type { Event, Goal, GoalRun, Task } from './types.js'
 import { getRunHold } from './goal-changes.js'
 import { schemaOutdated } from './migrate.js'
@@ -28,7 +29,7 @@ const MEMORY = 10
  * grow with how much runs write. The full text is in goal_detail and the
  * goal page.
  */
-const CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400 }
+const CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400, watch: 300 }
 
 function clip(text: string | null, max: number): string | null {
   if (text === null || text.length <= max) return text
@@ -184,7 +185,7 @@ export function describeActivity({ goal, openRun, lastRun, events, items }: Acti
  * Which goals get their full detail (runs, memory, open items, instructions,
  * tool rules): 'all', or the ids asked for (the pane's expanded goals). The
  * rest are cards: the last run, up to NEEDS_YOU items waiting for the person
- * (with a count), health and what's happening now. So the overview grows by a
+ * (with a count), health, how many watches it has and what's happening now. So the overview grows by a
  * card per goal, not by everything every goal has done.
  */
 export type OverviewDetail = 'all' | readonly string[]
@@ -206,6 +207,7 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
       const open = items.filter((t) => t.status === 'pending' || t.status === 'active')
       const openRun = getOpenRun(db, plan.id) ?? null
       const runs = listRuns(db, plan.id, RUNS, { includeSkipped: false })
+      const watches = listWatches(db, plan.id)
       return {
         id: plan.id,
         name: plan.name,
@@ -240,6 +242,13 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
         memory: listMemory(db, plan.id, { activeOnly: true }).slice(-MEMORY).reverse()
           .map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory)!, source: m.source, pinned: m.pinned, created_at: m.created_at })),
         suggestions: getAutonomySuggestions(db, plan.id),
+        // Without when each last checked: that changes every few minutes and would redraw the pane for nothing
+        watches: watches.map((w) => ({
+          name: w.name, kind: w.kind, every_minutes: w.every_minutes, runs: clip(describeWatch(w), CLIP.watch)!,
+          last_fired_at: w.last_fired_at, failing: watchFailing(w), error: watchFailing(w) ? clip(w.last_error, CLIP.notes) : null,
+        })),
+        watch_count: watches.length,
+        watch_failing: watches.some(watchFailing),
       }
     })
     .map((g) => {
@@ -253,7 +262,7 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
           id: i.id, goal: clip(i.goal, CARD_TEXT)!, asks_person: i.asks_person,
           action: i.action ? { category: (i.action as { category: string }).category, summary: clip((i.action as { summary: string }).summary, CARD_TEXT)! } : null,
         })),
-        runs: g.runs.slice(0, 1), open_items: [], memory: [], instructions: '', tool_map: {},
+        runs: g.runs.slice(0, 1), open_items: [], memory: [], instructions: '', tool_map: {}, watches: [],
       }
     })
   const standing = standingSession !== null && leaseHolder(db) === standingSession

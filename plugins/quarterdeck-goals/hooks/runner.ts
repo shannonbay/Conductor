@@ -10,7 +10,7 @@
 import type { EngineInterface } from 'claude-code'
 
 import type { RunEntry } from '../types'
-import { attachAgent, cancelRunRecord, failRun, releaseLease, tick, type ClaimedRun } from './api'
+import { attachAgent, cancelRunRecord, failRun, releaseLease, reportWatch, resultText, tick, type ClaimedRun, type ToolWatch } from './api'
 import { addRun, getNotice, getRuns, getSnapshot, removeRun, setGuardMissing, setNotice } from './state'
 import { serverToolNames } from './names'
 
@@ -42,6 +42,7 @@ export const HUMAN_ONLY_TOOLS = serverToolNames(
   'set_schedule',
   'update_goal',
   'report_run_end',
+  'watch_report',
 )
 
 /** Also refused to a run's agent: a run doesn't queue more runs. */
@@ -120,8 +121,43 @@ async function pass($: $): Promise<void> {
   if (guarded && (await getNotice($)) === GUARD_MISSING) await setNotice($, null)
   if (!guarded) return
   const runs = await getRuns($)
-  const { claimed } = await tick($, await $.session.id(), Object.values(runs).map((r) => r.runId))
+  const { claimed, toolWatches } = await tick($, await $.session.id(), Object.values(runs).map((r) => r.runId))
   for (const run of claimed) await start($, run)
+  // After the runs, so a slow connector never holds a run back
+  let fresh = false
+  for (const watch of toolWatches) fresh = (await checkToolWatch($, watch)) || fresh
+  // Something new queued a run: claim it now, not in 30 s
+  if (fresh) {
+    const again = await tick($, await $.session.id(), Object.values(await getRuns($)).map((r) => r.runId), false)
+    for (const run of again.claimed) await start($, run)
+  }
+}
+
+/** How long a watch's tool may take before the check counts as failed. */
+export const WATCH_CALL_MS = 30_000
+/** The most of a tool's answer sent on: ids are near the start, and a huge answer isn't worth a watch. */
+const WATCH_TEXT_MAX = 60_000
+
+/**
+ * Checks one tool watch: calls its tool (a connector's search, say) with nobody
+ * asked, and reports the answer to Quarterdeck, which works out what is new.
+ * True when that queued a run.
+ */
+async function checkToolWatch($: $, watch: ToolWatch): Promise<boolean> {
+  let report: { text: string } | { error: string }
+  try {
+    const answer = await Promise.race([
+      $.tool.call({ tool: watch.tool, ...watch.input } as never),
+      $.clock.sleep(WATCH_CALL_MS).then(() => 'timeout' as const),
+    ])
+    if (answer === 'timeout') report = { error: `${watch.tool} didn't answer within ${WATCH_CALL_MS / 1000} s` }
+    else if (answer.deny !== undefined) report = { error: `Claude Code refused the call: ${answer.deny}` }
+    else if (answer.isError === true) report = { error: resultText(answer).slice(0, 500) }
+    else report = { text: resultText(answer).slice(0, WATCH_TEXT_MAX) }
+  } catch (err) {
+    report = { error: err instanceof Error ? err.message : String(err) }
+  }
+  return reportWatch($, watch.watch_id, report).then((r) => r.queued_run !== null).catch(() => false)
 }
 
 /** Starts a claimed run in a subagent; a run that can't start is marked failed. */

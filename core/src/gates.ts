@@ -31,9 +31,19 @@ export interface CommandResult {
   output: string
   duration_ms: number
   timed_out: boolean
+  /** With `stdoutOnly`: the end of stderr, which `output` then leaves out. */
+  stderr?: string
 }
 
-export function runVerifyCommand(command: string, cwd: string, timeoutS = DEFAULT_VERIFY_TIMEOUT_S): Promise<CommandResult> {
+export interface CommandOptions {
+  /** Keep stdout only (a watch's lines), instead of stdout and stderr together. */
+  stdoutOnly?: boolean
+  /** How much of the end of the output to keep (default OUTPUT_TAIL_CHARS). */
+  tailChars?: number
+}
+
+export function runVerifyCommand(command: string, cwd: string, timeoutS = DEFAULT_VERIFY_TIMEOUT_S, opts: CommandOptions = {}): Promise<CommandResult> {
+  const tailChars = opts.tailChars ?? OUTPUT_TAIL_CHARS
   const started = Date.now()
   const done = (r: Omit<CommandResult, 'duration_ms'>): CommandResult => ({ ...r, duration_ms: Date.now() - started })
 
@@ -43,9 +53,13 @@ export function runVerifyCommand(command: string, cwd: string, timeoutS = DEFAUL
 
   return new Promise((resolve) => {
     let output = ''
+    let errors = ''
     let timedOut = false
     const append = (chunk: Buffer) => {
-      output = (output + chunk.toString()).slice(-OUTPUT_TAIL_CHARS)
+      output = (output + chunk.toString()).slice(-tailChars)
+    }
+    const appendErrors = (chunk: Buffer) => {
+      errors = (errors + chunk.toString()).slice(-OUTPUT_TAIL_CHARS)
     }
 
     const child = spawn(command, {
@@ -56,7 +70,7 @@ export function runVerifyCommand(command: string, cwd: string, timeoutS = DEFAUL
       detached: process.platform !== 'win32',
     })
     child.stdout?.on('data', append)
-    child.stderr?.on('data', append)
+    child.stderr?.on('data', opts.stdoutOnly ? appendErrors : append)
 
     const timer = setTimeout(() => {
       timedOut = true
@@ -69,8 +83,8 @@ export function runVerifyCommand(command: string, cwd: string, timeoutS = DEFAUL
     })
     child.on('close', (code) => {
       clearTimeout(timer)
-      if (timedOut) output = `${output}\n[timed out after ${timeoutS}s]`.slice(-OUTPUT_TAIL_CHARS)
-      resolve(done({ passed: !timedOut && code === 0, exit_code: code, output, timed_out: timedOut }))
+      if (timedOut && !opts.stdoutOnly) output = `${output}\n[timed out after ${timeoutS}s]`.slice(-tailChars)
+      resolve(done({ passed: !timedOut && code === 0, exit_code: code, output, timed_out: timedOut, ...(opts.stdoutOnly && { stderr: errors }) }))
     })
   })
 }

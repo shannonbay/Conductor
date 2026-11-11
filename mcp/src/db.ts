@@ -75,7 +75,12 @@ export const nextScheduledRun = (planId: string) => core.nextScheduledRun(db, pl
 export const reviveIfDone = (planId: string) => core.reviveIfDone(db, planId)
 export const applyGoalChanges = (planId: string, changes: core.GoalChanges) => core.applyGoalChanges(db, planId, changes)
 export const reportRunEnd = (runId: string, input: { answer: string; reason?: string; usage?: core.RunUsage }) => core.reportRunEnd(db, runId, input)
-export const todoLists = (workingDir: string) => core.todoLists(db, workingDir)
+export const listWatches = (planId: string) => core.listWatches(db, planId)
+export const checkCommandWatch = (watchId: string) => core.checkCommandWatch(db, watchId)
+export const getWatch = (watchId: string) => core.getWatch(db, watchId)
+export const reportToolWatch = (watchId: string, result: { text: string } | { error: string }) => core.reportToolWatch(db, watchId, result)
+export const queueForWatchEvents = (planId: string) => core.queueForWatchEvents(db, planId)
+export const todoLists =(workingDir: string) => core.todoLists(db, workingDir)
 export const addTodo = (input: Parameters<typeof core.addTodo>[1]) => core.addTodo(db, input)
 export const setTodo = (listId: string, itemId: string, change: core.TodoChange) => core.setTodo(db, listId, itemId, change)
 

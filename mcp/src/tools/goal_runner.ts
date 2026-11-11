@@ -8,11 +8,13 @@ import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
   getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory,
   setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd, deleteGoal,
+  listWatches, checkCommandWatch, getWatch, reportToolWatch, queueForWatchEvents,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
-  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema, DeleteGoalSchema,
+  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema, DeleteGoalSchema, WatchReportSchema,
 } from '../schema.js'
+import type { GoalChanges } from '@quarterdeck/core'
 import { existsSync } from 'fs'
 import { nanoid } from 'nanoid'
 import { record } from '../history.js'
@@ -31,6 +33,7 @@ export async function goals_tick(args: unknown) {
     holder: input.holder,
     trackedRunIds: new Set(input.tracked_run_ids),
     maxConcurrent: input.max_concurrent,
+    toolWatches: input.tool_watches,
   })
   for (const run of pass.claimed) {
     record(run.goal_id, run.goal_id, 'agent_started', { run_id: run.run_id, trigger: run.trigger, holder: input.holder }, { via: 'plugin' })
@@ -121,11 +124,13 @@ export async function create_goal(args: unknown) {
     { objective: input.objective, instructions: input.instructions ?? '', autonomy: input.autonomy ?? {}, one_off: input.one_off ?? false },
   )
   if (input.tool_map && Object.keys(input.tool_map).length) applyGoalChanges(id, { tool_map: input.tool_map })
+  if (input.watches && Object.keys(input.watches).length) applyGoalChanges(id, { watches: input.watches as GoalChanges['watches'] })
   record(id, id, 'plan_created', { kind: 'goal', one_off: input.one_off ?? false }, human)
   const applied = input.schedule ? applySchedule(id, input.schedule) : { schedule: null, next_run_at: null }
   // A one-off runs straight away; a new interval is due now (the next tick starts it)
   const queued = input.one_off ? queueRun(id) : null
-  return { id, ...applied, one_off: input.one_off ?? false, queued_run: queued ? queued.id : null }
+  const watches = await firstChecks(id)
+  return { id, ...applied, one_off: input.one_off ?? false, queued_run: queued ? queued.id : null, ...(watches.length ? { watches } : {}) }
 }
 
 export async function delete_memory(args: unknown) {
@@ -167,10 +172,51 @@ function applySchedule(goalId: string, schedule: Parameters<typeof setSchedule>[
 export async function update_goal(args: unknown) {
   const { goal_id, ...changes } = UpdateGoalSchema.parse(args)
   if (!getGoal(goal_id)) throw new Error(`Goal ${goal_id} not found.`)
-  const changed = applyGoalChanges(goal_id, changes)
+  // The schema has checked each watch is a command or a tool
+  const changed = applyGoalChanges(goal_id, changes as GoalChanges)
   if (changed.length) record(goal_id, goal_id, 'goal_updated', { changes: changed }, human)
+  const watches = await firstChecks(goal_id)
   touchPlan(goal_id)
-  return { goal_id, changed }
+  return { goal_id, changed, ...(watches.length ? { watches } : {}) }
+}
+
+/**
+ * Checks each watch that has never been checked (new, or with a new command),
+ * so whoever set it up learns at once whether the command works. That check
+ * is its baseline: it starts no run.
+ */
+async function firstChecks(goalId: string): Promise<{ name: string; result: string }[]> {
+  const results: { name: string; result: string }[] = []
+  for (const w of listWatches(goalId)) {
+    if (w.last_checked_at !== null) continue
+    if (w.kind === 'tool') {
+      // Only a Claude Code session can call a connector: the one running goals makes the first call at its next pass
+      results.push({ name: w.name, result: `set; the session running goals calls ${w.tool} within a minute, and goal_detail says if that fails` })
+      continue
+    }
+    const r = await checkCommandWatch(w.id)
+    results.push({
+      name: w.name,
+      result: r.error
+        ? `the command failed (${r.error}); it is tried again every ${w.every_minutes} min`
+        : `works: ${r.lines} ${r.lines === 1 ? 'item' : 'items'} there now; a run starts when a new one appears`,
+    })
+  }
+  return results
+}
+
+/**
+ * What a tool watch's call answered (the plugin made the call). Something new
+ * queues a run at once, for the caller's next pass to start.
+ */
+export async function watch_report(args: unknown) {
+  const input = WatchReportSchema.parse(args)
+  const watch = getWatch(input.watch_id)
+  if (!watch) throw new Error(`Watch ${input.watch_id} not found.`)
+  const r = reportToolWatch(watch.id, input.error !== undefined ? { error: input.error } : { text: input.text ?? '' })
+  const goal = getGoal(watch.plan_id)
+  const queued = r.fresh.length && goal?.status === 'active' ? queueForWatchEvents(watch.plan_id) : null
+  return { watch_id: watch.id, baseline: r.baseline, lines: r.lines, new: r.fresh.length, ...(r.error && { error: r.error }), queued_run: queued ? queued.id : null }
 }
 
 /** A run's agent finished a turn (reported by the guard plugin): skips a run that hit the usage limit and holds goal runs. */

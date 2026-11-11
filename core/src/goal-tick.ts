@@ -13,6 +13,7 @@ import { approveTask, isProposal, rejectTask, asksPerson } from './gates.js'
 import { getGoal, getOpenRun, getRun, listGoals, updateGoal, updateRun, insertRun, insertMemory } from './goals.js'
 import { archiveResolved, decideTick, failRun, nextIntervalRun, queueRun, recordSkip, GoalError } from './goal-engine.js'
 import { healthDue, runHealthCheck } from './health.js'
+import { checkCommandWatch, countUnqueuedWatchEvents, listWatches, markWatchEventsQueued, takeDueToolWatches, watchDue, type ToolWatchCall } from './watches.js'
 import type { GoalRun, Task } from './types.js'
 import { getRunHold, type RunHold } from './goal-changes.js'
 import { schemaOutdated } from './migrate.js'
@@ -24,6 +25,8 @@ export const LEASE_MS = 90_000
 export const STALE_GRACE_MS = 5 * 60_000
 /** Runs a pass starts at once across all goals; more wait for the next pass. */
 export const DEFAULT_MAX_CONCURRENT = 3
+/** A pass starts no more watch checks once it has spent this long on them (well inside the lease); the rest stay due. */
+export const WATCH_BUDGET_MS = 45_000
 
 // ── Lease ─────────────────────────────────────────────────────────────────────
 
@@ -67,7 +70,7 @@ export interface ClaimedRun {
 export function goalRunPrompt(p: { goalId: string; runId: string; name: string; workingDir: string; maxRunMinutes: number }): string {
   return [
     `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
-    `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries.`,
+    `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries. Its watch_events, when there are any, are what is new since the last run (one line per new thing, such as an issue number): deal with those first.`,
     'Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal\'s state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category\'s autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.',
     'When you need something only the person can give or do (a choice, details you can\'t find, connecting a service, allowing a site), add_item with ask_person: true and one clear question, and carry on with what you can; don\'t guess. Their answer arrives as memory and the item is completed.',
     'Save anything future runs should know with remember.',
@@ -139,6 +142,40 @@ export async function checkHealth(db: Database, planId: string): Promise<{ passe
   return { passed: result.passed, queuedRun }
 }
 
+// ── Watches ───────────────────────────────────────────────────────────────────
+
+/**
+ * Runs the due command watches of the given goals, one after another, within
+ * `budgetMs`. A watch that can't be run is recorded as a failed check.
+ */
+export async function checkWatches(db: Database, planIds: string[], now: Date = new Date(), budgetMs = WATCH_BUDGET_MS): Promise<number> {
+  const started = Date.now()
+  let checked = 0
+  for (const planId of planIds) {
+    for (const watch of listWatches(db, planId)) {
+      if (watch.kind !== 'command' || !watchDue(watch, now)) continue
+      if (Date.now() - started >= budgetMs) return checked
+      await checkCommandWatch(db, watch.id, now).catch(() => { /* the watch or its goal went away meanwhile */ })
+      checked++
+    }
+  }
+  return checked
+}
+
+/**
+ * Queues a run (trigger 'watch') for a goal whose watches saw something new.
+ * Each event queues at most one run: with a run already queued it rides on
+ * that one, and with a run going it waits for the pass after it ends.
+ */
+export function queueForWatchEvents(db: Database, planId: string, now: Date = new Date()): GoalRun | null {
+  if (countUnqueuedWatchEvents(db, planId) === 0) return null
+  const open = getOpenRun(db, planId)
+  if (open?.status === 'running') return null
+  const run = open ?? queueRun(db, planId, 'watch')
+  markWatchEventsQueued(db, planId, now)
+  return run
+}
+
 // ── The pass ──────────────────────────────────────────────────────────────────
 
 export interface PassResult {
@@ -152,6 +189,8 @@ export interface PassResult {
   hold?: RunHold
   /** Set when a newer Quarterdeck in another session has upgraded the database: this one schedules nothing. */
   outdated?: true
+  /** Tool watches that are due: the caller calls each tool and reports its answer (reportToolWatch). */
+  tool_watches?: ToolWatchCall[]
 }
 
 export interface PassOptions {
@@ -163,9 +202,11 @@ export interface PassOptions {
   trackedRunIds?: Set<string>
   /** Starts runs regardless of the lease (the web app, which is the only scheduler when it runs). */
   ignoreLease?: boolean
+  /** The caller can call tools (the plugin): due tool watches are handed to it in `tool_watches`. */
+  toolWatches?: boolean
 }
 
-/** One scheduler pass: lease, stale runs, health checks, then claim every due run. */
+/** One scheduler pass: lease, stale runs, health checks, watches, then claim every due run. */
 export async function schedulerPass(db: Database, opts: PassOptions): Promise<PassResult> {
   const now = opts.now ?? new Date()
   // Older code leaves scheduling to the session that upgraded the database
@@ -181,9 +222,16 @@ export async function schedulerPass(db: Database, opts: PassOptions): Promise<Pa
     await checkHealth(db, goal.plan_id).catch(() => { /* a broken command is recorded as a failed check */ })
   }
 
+  // Then watches: something new queues a run, which also starts in this pass
+  await checkWatches(db, goals.map(({ plan }) => plan.id), now)
+  for (const { plan } of goals) queueForWatchEvents(db, plan.id, now)
+  // Tool watches are the caller's to check: only a Claude Code session can reach a connector
+  const toolWatches = opts.toolWatches ? takeDueToolWatches(db, goals.map(({ plan }) => plan.id), now) : []
+  const withWatches = (r: PassResult): PassResult => (toolWatches.length ? { ...r, tool_watches: toolWatches } : r)
+
   // While the person's usage limit is reached, due runs wait (they stay due) until the reset
   const hold = getRunHold(db, now)
-  if (hold) return { leader: true, claimed: [], expired, hold }
+  if (hold) return withWatches({ leader: true, claimed: [], expired, hold })
 
   let running = (db.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get() as { n: number }).n
   const max = opts.maxConcurrent ?? DEFAULT_MAX_CONCURRENT
@@ -213,7 +261,7 @@ export async function schedulerPass(db: Database, opts: PassOptions): Promise<Pa
     }
     if (decision.trigger === 'interval' || decision.trigger === 'cron') updateGoal(db, plan.id, { next_run_at: nextIntervalRun(db, plan.id, now) })
   }
-  return { leader: true, claimed, expired }
+  return withWatches({ leader: true, claimed, expired })
 }
 
 // ── Human decisions ───────────────────────────────────────────────────────────

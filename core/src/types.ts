@@ -148,8 +148,56 @@ export interface Goal {
 
 export type NewGoal = Pick<Goal, 'plan_id' | 'objective'> & Partial<Omit<Goal, 'plan_id' | 'objective' | 'limits'>> & { limits?: Partial<GoalLimits> }
 
-/** How a run was started. 'health' = a failing health check queued it. */
-export type TriggerKind = 'manual' | 'interval' | 'cron' | 'event' | 'health'
+/** How a run was started. 'health' = a failing health check queued it; 'watch' = a watch saw something new. */
+export type TriggerKind = 'manual' | 'interval' | 'cron' | 'event' | 'health' | 'watch'
+
+/**
+ * A check whose new lines start a run. A 'command' watch is a shell command
+ * that prints one line per current item (an issue number, a feed guid); a
+ * 'tool' watch is a tool the plugin calls, whose answer `match` turns into lines.
+ */
+export interface Watch {
+  id: string
+  plan_id: string
+  name: string
+  kind: 'command' | 'tool'
+  command: string | null
+  tool: string | null
+  tool_input: Record<string, unknown>
+  /** For a tool watch: a regular expression whose first group (or whole match) is one line. */
+  match: string | null
+  every_minutes: number
+  /** Lines seen so far, newest check first. */
+  seen: string[]
+  /** When the first check that worked recorded what was there; null before it. */
+  baseline_at: string | null
+  last_checked_at: string | null
+  /** For a tool watch: when its call was handed to the plugin, until the answer is reported. */
+  asked_at: string | null
+  last_fired_at: string | null
+  last_error: string | null
+  /** Checks failed in a row. */
+  fail_count: number
+  created_at: string
+}
+
+/** What the person sets on a watch. */
+export type WatchSpec =
+  | { command: string; every_minutes?: number }
+  /** A tool the plugin calls (a connector's search): `match` turns its answer into lines. */
+  | { tool: string; input?: Record<string, unknown>; match?: string; every_minutes?: number }
+
+export interface WatchEvent {
+  id: string
+  watch_id: string
+  plan_id: string
+  line: string
+  created_at: string
+  /** Set once a run has been queued for it. */
+  queued_at: string | null
+  /** The run whose brief carried it. */
+  run_id: string | null
+}
 
 export interface CronConfig {
   /** Five-field cron expression in local time, e.g. "0 9 * * 1-5". */

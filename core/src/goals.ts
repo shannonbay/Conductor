@@ -222,7 +222,7 @@ export function deleteMemory(db: Database, id: string): void {
 
 /** The tables that hold a goal's rows, children before the plan itself. */
 const GOAL_TABLES = [
-  'goal_tool_calls', 'goal_health', 'goal_memory', 'goal_runs', 'goal_triggers', 'verifications',
+  'goal_watch_events', 'goal_watches', 'goal_tool_calls', 'goal_health', 'goal_memory', 'goal_runs', 'goal_triggers', 'verifications',
   'events', 'transcript_messages', 'agent_sessions', 'tasks', 'goals',
 ]
 

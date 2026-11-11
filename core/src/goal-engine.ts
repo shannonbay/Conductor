@@ -10,6 +10,7 @@ import {
 } from './goals.js'
 import { getSchedule, nextScheduledRun } from './schedule.js'
 import { listHealth } from './health.js'
+import { releaseWatchEvents, takeWatchEvents, type WatchNews } from './watches.js'
 import type { AutonomyMode, Goal, GoalRun, Task, TriggerKind } from './types.js'
 
 export class GoalError extends Error {}
@@ -152,6 +153,8 @@ export interface GoalBrief {
   counts: { open: number; awaiting_review: number; approved_to_execute: number; resolved_last_24h: number }
   /** Latest goal health check, if the goal has one. */
   health: { passed: boolean; value: number | null; at: string; output?: string } | null
+  /** What the goal's watches saw that no earlier run was told: one line per new thing. */
+  watch_events: WatchNews[]
 }
 
 /** Everything a fresh agent needs to work on a goal, in one compact object. */
@@ -229,6 +232,7 @@ export function buildBrief(db: Database, planId: string, runId?: string): GoalBr
       const [h] = listHealth(db, planId, 1)
       return h ? { passed: h.passed, value: h.value, at: h.created_at, ...(!h.passed && h.output && { output: h.output.slice(-500) }) } : null
     })(),
+    watch_events: takeWatchEvents(db, planId, runId),
   }
 }
 
@@ -284,6 +288,8 @@ export function failRun(db: Database, runId: string, status: 'failed' | 'timed_o
   const run = getRun(db, runId)
   if (!run || (run.status !== 'running' && run.status !== 'queued')) return
   updateRun(db, runId, { status, ended_at: new Date().toISOString(), summary: run.summary ?? reason })
+  // What its watches reported goes to the next run instead
+  releaseWatchEvents(db, runId)
 }
 
 /** Hides resolved items older than the goal's retention period. Returns how many were archived. */

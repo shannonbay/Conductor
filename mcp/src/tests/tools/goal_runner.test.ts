@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory, set_schedule, update_goal, report_run_end,
+  create_goal, delete_memory, set_schedule, update_goal, report_run_end, watch_report,
 } from '../../tools/goal_runner.js'
 import { add_item, get_goal_brief, end_run, run_goal } from '../../tools/goals.js'
 import { create_plan } from '../../tools/create_plan.js'
@@ -230,6 +230,71 @@ describe('update_goal and report_run_end', () => {
     expect(getRun(run.run_id)!.status).toBe('skipped')
     queueRun(id)
     expect(await tick('session-A')).toMatchObject({ claimed: [], hold: expect.anything() })
+  })
+})
+
+describe('watches', () => {
+  const PRINT = (...lines: string[]) => `node -e "console.log('${lines.join('\\n')}')"`
+
+  it('update_goal sets a watch, checks it once and says whether the command works', async () => {
+    const { id } = await create_goal({ name: 'Issues', objective: 'Triage new issues', working_dir: tmpdir() })
+    const r = await update_goal({ goal_id: id, watches: { 'new issues': { command: PRINT('7', '9') }, broken: { command: 'node -e "process.exit(2)"', every_minutes: 30 } } })
+    expect(r.changed).toHaveLength(2)
+    expect(r.watches).toEqual([
+      { name: 'broken', result: expect.stringMatching(/^the command failed \(Exit code 2\); it is tried again every 30 min$/) },
+      { name: 'new issues', result: 'works: 2 items there now; a run starts when a new one appears' },
+    ])
+    // The first check is the baseline: nothing starts
+    expect((await tick('session-A')).claimed).toEqual([])
+    // Changing only how often it checks doesn't check again
+    expect((await update_goal({ goal_id: id, watches: { 'new issues': { command: PRINT('7', '9'), every_minutes: 10 } } })).watches).toBeUndefined()
+    expect((await update_goal({ goal_id: id, watches: { broken: null } })).changed).toEqual(['watch "broken" removed'])
+    await expect(update_goal({ goal_id: id, watches: { x: { command: 'echo 1', every_minutes: 0 } } })).rejects.toThrow()
+  })
+
+  it('create_goal takes watches too, and the brief and the overview carry them', async () => {
+    const r = await create_goal({ name: 'Issues', objective: 'Triage new issues', working_dir: tmpdir(), watches: { 'new issues': { command: PRINT('7') } } })
+    expect(r.watches).toEqual([{ name: 'new issues', result: 'works: 1 item there now; a run starts when a new one appears' }])
+    const run = await claim(r.id)
+    const brief = await withScope({ planId: r.id, runId: run.run_id }, () => get_goal_brief({ goal_id: r.id, run_id: run.run_id })) as { watch_events: unknown[] }
+    expect(brief.watch_events).toEqual([])
+    const overview = await goals_overview({}) as unknown as { goals: { id: string; watches: { name: string; runs: string }[] }[] }
+    expect(overview.goals.find((g) => g.id === r.id)!.watches).toMatchObject([{ name: 'new issues', runs: PRINT('7'), failing: false }])
+  })
+})
+
+describe('tool watches', () => {
+  const SEARCH = 'mcp__claude_ai_Gmail__search_threads'
+  const answer = (...ids: string[]) => JSON.stringify({ threads: ids.map((id) => ({ id })) })
+
+  it('goals_tick hands a due tool watch to the plugin, and watch_report queues a run for what is new', async () => {
+    const { id } = await create_goal({ name: 'Mail', objective: 'Answer new mail', working_dir: tmpdir() })
+    const r = await update_goal({ goal_id: id, watches: { mail: { tool: SEARCH, input: { query: 'is:unread' }, every_minutes: 1 } } })
+    expect(r.watches).toEqual([{ name: 'mail', result: expect.stringContaining(`calls ${SEARCH} within a minute`) }])
+    // Only a caller that says it checks tool watches is given them
+    expect(await tick('session-A')).not.toHaveProperty('tool_watches')
+    const pass = await goals_tick({ holder: 'session-A', tool_watches: true }) as PassResult
+    expect(pass.tool_watches).toMatchObject([{ goal_id: id, name: 'mail', tool: SEARCH, input: { query: 'is:unread' } }])
+    const watchId = pass.tool_watches![0]!.watch_id
+
+    expect(await watch_report({ watch_id: watchId, text: answer('1a') })).toMatchObject({ baseline: true, lines: 1, new: 0, queued_run: null })
+    const fresh = await watch_report({ watch_id: watchId, text: answer('2b', '1a') })
+    expect(fresh).toMatchObject({ baseline: false, new: 1, queued_run: expect.any(String) })
+    const run = (await tick('session-A')).claimed[0]!
+    expect(run).toMatchObject({ run_id: fresh.queued_run, trigger: 'watch' })
+    const brief = await withScope({ planId: id, runId: run.run_id }, () => get_goal_brief({ goal_id: id, run_id: run.run_id })) as { watch_events: unknown[] }
+    expect(brief.watch_events).toEqual([{ watch: 'mail', new: ['2b'], omitted: 0 }])
+
+    expect(await watch_report({ watch_id: watchId, error: 'refused' })).toMatchObject({ new: 0, error: 'refused', queued_run: null })
+    await expect(watch_report({ watch_id: watchId })).rejects.toThrow()
+    await expect(watch_report({ watch_id: 'nope', text: '' })).rejects.toThrow(/not found/)
+  })
+
+  it('a watch is a command or a tool, and not a tool the goal would have to ask for', async () => {
+    const { id } = await create_goal({ name: 'Mail', objective: 'x', working_dir: tmpdir(), tool_map: { 'mcp__*Gmail*__send_message': 'email.send' } })
+    await expect(update_goal({ goal_id: id, watches: { x: { command: 'echo 1', tool: SEARCH } } })).rejects.toThrow()
+    await expect(update_goal({ goal_id: id, watches: { x: {} } })).rejects.toThrow()
+    await expect(update_goal({ goal_id: id, watches: { x: { tool: 'mcp__claude_ai_Gmail__send_message' } } })).rejects.toThrow(/may only read/)
   })
 })
 

@@ -94,6 +94,54 @@ test('update_goal applies confirmed changes', async ($, on) => {
   expect(fake.of('update_goal')[0]?.input).toEqual({ goal_id: 'g1', autonomy: { 'email.delete': 'off' } })
 })
 
+test('update_goal shows a new watch\'s whole command before it is set, and says how its first check went', async ($, on) => {
+  const asked = engine(on, { answer: 'Apply changes' })
+  const fake = fakeQuarterdeck(on, [failed()])
+  await $.session.start(START)
+  const command = `gh issue list --repo octo/site --state open --limit 100 --json number --jq ".[].number" ${'# '.padEnd(400, 'x')}`
+  const r = await $.tool.call({ tool: 'mcp__quarterdeck-goals__update_goal', goal: 'unsub', watches: { 'new issues': { command } } } as never)
+  // Every character of what will run unattended, however long
+  expect(asked.asked[0]).toBe(`Change the goal "Unsubscribe"?\n• New watch "new issues": every 5 min this command runs on your computer, and a run starts when it prints a line it hasn't before: ${command}`)
+  expect(fake.of('update_goal')[0]?.input).toEqual({ goal_id: 'g1', watches: { 'new issues': { command } } })
+  expect(String(r.result)).toContain('Watch "new issues": works: 3 items there now; a run starts when a new one appears.')
+
+  // goal_detail lists it, and changing or removing it says so
+  expect(String((await $.tool.call({ tool: 'mcp__quarterdeck-goals__goal_detail', goal: 'unsub' } as never)).result)).toContain('- new issues: every 5 min, runs gh issue list')
+  await $.tool.call({ tool: 'mcp__quarterdeck-goals__update_goal', goal: 'unsub', watches: { 'new issues': { command: 'gh pr list', every_minutes: 15 }, old: null } } as never)
+  expect(asked.asked[1]).toBe('Change the goal "Unsubscribe"?\n• Watch changed "new issues": every 15 min this command runs on your computer, and a run starts when it prints a line it hasn\'t before: gh pr list\n• Watch removed: old')
+})
+
+test('update_goal shows a tool watch\'s tool and whole input before it is set', async ($, on) => {
+  const asked = engine(on, { answer: 'Apply changes' })
+  const fake = fakeQuarterdeck(on, [failed()])
+  await $.session.start(START)
+  const watch = { tool: 'mcp__claude_ai_Gmail__search_threads', input: { query: 'is:unread in:inbox', view: 'THREAD_VIEW_IDS_ONLY' }, every_minutes: 10 }
+  await $.tool.call({ tool: 'mcp__quarterdeck-goals__update_goal', goal: 'unsub', watches: { 'new mail': watch } } as never)
+  expect(asked.asked[0]).toBe('Change the goal "Unsubscribe"?\n• New watch "new mail": every 10 min this tool is called without asking you, and a run starts when its answer has something it hasn\'t before: mcp__claude_ai_Gmail__search_threads {"query":"is:unread in:inbox","view":"THREAD_VIEW_IDS_ONLY"}')
+  expect(fake.of('update_goal')[0]?.input).toEqual({ goal_id: 'g1', watches: { 'new mail': watch } })
+})
+
+test('a goal shows its watches when expanded, and one that cannot check keeps its card', async ($, on) => {
+  engine(on)
+  const watch = (failing: boolean) => [{ name: 'new issues', every_minutes: 5, runs: 'gh issue list', last_fired_at: failing ? null : '2026-11-07T07:00:00Z', failing, error: failing ? 'Exit code 4: gh: not logged in' : null }]
+  fakeQuarterdeck(on, [
+    goal({ id: 'g1', name: 'Issues', watches: watch(false) }),
+    goal({ id: 'g2', name: 'Pulls', watches: watch(true) }),
+  ])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  // Working: one quiet line until expanded
+  expect(await ui.find({ key: 'pause-g1' })).toBeUndefined()
+  await ui.press({ key: 'toggle-g1' })
+  expect(await ui.find({ type: 'Text', text: /Also runs when "new issues" sees something new \(checked every 5 min, last .* ago\)/ })).toBeDefined()
+  // Failing: the card stays, and says so
+  expect(await ui.find({ key: 'pause-g2' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^a watch can't check: expand the goal to see why$/ })).toBeDefined()
+  await ui.press({ key: 'toggle-g2' })
+  expect(await ui.find({ type: 'Text', text: /can't check: Exit code 4: gh: not logged in/ })).toBeDefined()
+  await ui.unmount()
+})
+
 test('while the usage limit holds runs, the pane says so', async ($, on) => {
   engine(on)
   fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })], { hold: { until: '2026-11-07T20:10:00Z', reason: "You've hit your 5-hour limit" } })

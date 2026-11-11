@@ -7,7 +7,8 @@ import type { Database } from './sqlite.js'
 import { getPlan, updatePlan } from './queries.js'
 import { getGoal, getMemory, getRun, insertMemory, updateGoal, updateMemory, updateRun } from './goals.js'
 import { failRun, GoalError } from './goal-engine.js'
-import type { AutonomyMode, MemoryKind } from './types.js'
+import type { AutonomyMode, MemoryKind, WatchSpec } from './types.js'
+import { describeWatch, listWatches, releaseWatchEvents, removeWatch, setWatch } from './watches.js'
 
 // ── Goal changes ──────────────────────────────────────────────────────────────
 
@@ -22,6 +23,8 @@ export interface GoalChanges {
   add_memory?: { kind: MemoryKind; text: string; pinned?: boolean }[]
   /** Memory ids to deactivate. */
   forget_memory?: string[]
+  /** Watch name → what it runs; null removes the watch. */
+  watches?: Record<string, WatchSpec | null>
   status?: 'active' | 'paused'
 }
 
@@ -79,6 +82,17 @@ export function applyGoalChanges(db: Database, planId: string, changes: GoalChan
     for (const id of changes.forget_memory ?? []) {
       updateMemory(db, id, { active: false })
       done.push(`forgot memory ${id}`)
+    }
+    const watches = listWatches(db, planId)
+    for (const [name, spec] of Object.entries(changes.watches ?? {})) {
+      if (spec === null) {
+        if (removeWatch(db, planId, name)) done.push(`watch "${name.trim()}" removed`)
+        continue
+      }
+      const before = watches.find((w) => w.name === name.trim())
+      const after = setWatch(db, planId, name, spec) // throws on a watch with no command
+      if (before && describeWatch(before) === describeWatch(after) && before.every_minutes === after.every_minutes) continue
+      done.push(`watch "${after.name}" ${before ? 'changed' : 'added'}: every ${after.every_minutes} min, ${after.kind === 'tool' ? 'calls' : 'runs'} ${describeWatch(after)}`)
     }
     if (changes.status && changes.status !== goal.status) {
       if (goal.status === 'retired') throw new GoalError('This goal is done; run it again first.')
@@ -172,6 +186,8 @@ export function reportRunEnd(
     const until = (parseLimitReset(answer, now) ?? new Date(now.getTime() + DEFAULT_HOLD_MS)).toISOString()
     const hold = { until, reason: answer.split('\n')[0]!.slice(0, 200) }
     updateRun(db, runId, { status: 'skipped', skip_reason: `usage limit reached: ${hold.reason}`, ended_at: now.toISOString() })
+    // The run never got to its watches' news: it queues a run again once the hold is over
+    releaseWatchEvents(db, runId, { requeue: true })
     setRunHold(db, hold)
     return { outcome: 'held', hold }
   }

@@ -62,6 +62,51 @@ test('a run past its time limit is stopped and marked timed out', async ($, on) 
   expect(fake.ended).toEqual({ r1: 'timed_out' })
 })
 
+test('a due tool watch is called from the tick with nobody asked, and something new starts a run at once', async ($, on) => {
+  const { spawned, clock } = engine(on)
+  settle = () => clock.settle()
+  const SEARCH = 'mcp__claude_ai_Gmail__search_threads'
+  const searched: Record<string, unknown>[] = []
+  on('tool.call', { tool: SEARCH as never }, (_, e) => {
+    const { tool: _t, tool_use_id: _u, agentId: _a, ...input } = e as unknown as Record<string, unknown>
+    searched.push(input)
+    return { result: '{"threads":[{"id":"1a"}]}' } as never
+  })
+  const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Mail' })], {
+    toolWatches: [{ watch_id: 'w-g1', goal_id: 'g1', name: 'new mail', tool: SEARCH, input: { query: 'is:unread', view: 'THREAD_VIEW_IDS_ONLY' } }],
+  })
+  await $.session.start(START)
+  await settle()
+
+  expect(fake.of('goals_tick')[0]?.input).toMatchObject({ tool_watches: true })
+  expect(searched).toEqual([{ query: 'is:unread', view: 'THREAD_VIEW_IDS_ONLY' }])
+  expect(fake.of('watch_report').map((c) => c.input)).toEqual([{ watch_id: 'w-g1', text: '{"threads":[{"id":"1a"}]}' }])
+  // The run it queued is claimed by a second pass straight away (which asks for no more watches)
+  expect(fake.of('goals_tick')[1]?.input).not.toHaveProperty('tool_watches')
+  expect(spawned).toMatchObject([{ prompt: 'Run Mail' }])
+})
+
+test('a tool watch whose call is refused or fails is reported as a failed check', async ($, on) => {
+  const { spawned, clock } = engine(on)
+  settle = () => clock.settle()
+  on('tool.call', { tool: 'mcp__mail__search' as never }, () => ({ deny: 'denied by a permission rule' }) as never)
+  on('tool.call', { tool: 'mcp__files__list' as never }, () => ({ result: 'Not signed in', isError: true }) as never)
+  const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Mail' })], {
+    toolWatches: [
+      { watch_id: 'w-1', goal_id: 'g1', name: 'mail', tool: 'mcp__mail__search', input: {} },
+      { watch_id: 'w-2', goal_id: 'g1', name: 'files', tool: 'mcp__files__list', input: {} },
+    ],
+  })
+  await $.session.start(START)
+  await settle()
+  expect(fake.of('watch_report').map((c) => c.input)).toEqual([
+    { watch_id: 'w-1', error: 'Claude Code refused the call: denied by a permission rule' },
+    { watch_id: 'w-2', error: 'Not signed in' },
+  ])
+  expect(fake.of('goals_tick')).toHaveLength(1)
+  expect(spawned).toEqual([])
+})
+
 test('without the guard plugin no run is claimed or started, and the pane says why', async ($, on) => {
   const { spawned, clock } = engine(on, { guarded: false })
   settle = () => clock.settle()

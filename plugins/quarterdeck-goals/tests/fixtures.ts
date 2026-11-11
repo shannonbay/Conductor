@@ -49,6 +49,7 @@ type FakeGoal = {
   health: { passed: boolean; value: number | null }[]
   memory: { id: string; kind: string; text: string; pinned: boolean }[]
   suggestions: { category: string; approved_in_a_row: number }[]
+  watches?: { name: string; every_minutes: number; runs: string; last_fired_at: string | null; failing: boolean; error: string | null }[]
 }
 
 export function goal(over: Partial<FakeGoal> & { id: string; name: string }): FakeGoal {
@@ -82,7 +83,7 @@ export type Call = { tool: string; input: Record<string, unknown> }
 
 const TOOLS = [
   'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'create_goal',
-  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set', 'update_goal', 'delete_goal',
+  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set', 'update_goal', 'delete_goal', 'watch_report',
 ] as const
 
 /**
@@ -91,7 +92,7 @@ const TOOLS = [
  */
 type FakeTodoList = { id: string; name: string; items: { id: string; text: string; status: string; depth: number; notes: string | null }[] }
 
-export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string }; outdated?: boolean; standing?: boolean; update?: { installed: string; latest: string }; prefix?: string } = {}) {
+export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string }; outdated?: boolean; standing?: boolean; update?: { installed: string; latest: string }; prefix?: string; /** Tool watches the next pass hands out, once. A report with text for watch `w-<goal id>` queues that goal's run. */ toolWatches?: { watch_id: string; goal_id: string; name: string; tool: string; input: Record<string, unknown> }[] } = {}) {
   const prefix = opts.prefix ?? 'mcp__quarterdeck__'
   const lists: FakeTodoList[] = opts.todos ?? []
   const listView = () => lists.map((l) => {
@@ -171,7 +172,18 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
             return { run_id: x.open_run.id, goal_id: x.id, name: x.name, working_dir: '/work/project', trigger: 'manual', max_run_minutes: 15, prompt: `Run ${x.name}` }
           })
           if (claimed.length) version++
-          return ok({ leader: true, claimed, expired: [] }) as never
+          const due = input.tool_watches === true ? (opts.toolWatches ?? []).splice(0) : []
+          return ok({ leader: true, claimed, expired: [], ...(due.length ? { tool_watches: due } : {}) }) as never
+        }
+        case 'watch_report': {
+          // As the server does: an answer with text is something new, and queues the goal's run
+          const watched = goals.find((x) => `w-${x.id}` === input.watch_id)
+          const fresh = typeof input.text === 'string' && watched !== undefined && !watched.open_run
+          if (fresh) {
+            watched!.open_run = { id: `r${++runs}`, status: 'queued' }
+            version++
+          }
+          return ok({ watch_id: input.watch_id, queued_run: fresh ? watched!.open_run!.id : null }) as never
         }
         case 'attach_agent':
           return ok(input) as never
@@ -200,8 +212,17 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
             changed.push(`${cat}: ${mode ?? 'back to propose'}`)
           }
           if (input.status) { g!.status = String(input.status); changed.push(String(input.status)) }
+          // As the server does: each new watch is checked once, and the answer says how that went
+          const checked: { name: string; result: string }[] = []
+          for (const [name, w] of Object.entries((input.watches ?? {}) as Record<string, { command: string; every_minutes?: number } | null>)) {
+            const rest = (g!.watches ?? []).filter((x) => x.name !== name)
+            if (w === null) { g!.watches = rest; changed.push(`watch "${name}" removed`); continue }
+            g!.watches = [...rest, { name, every_minutes: w.every_minutes ?? 5, runs: w.command, last_fired_at: null, failing: false, error: null }]
+            changed.push(`watch "${name}" added: every ${w.every_minutes ?? 5} min, runs ${w.command}`)
+            checked.push({ name, result: 'works: 3 items there now; a run starts when a new one appears' })
+          }
           version++
-          return ok({ goal_id: g!.id, changed }) as never
+          return ok({ goal_id: g!.id, changed, ...(checked.length ? { watches: checked } : {}) }) as never
         }
         case 'todo_list':
           return ok({ lists: listView() }) as never
