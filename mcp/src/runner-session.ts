@@ -208,7 +208,7 @@ const dir = dirname(fileURLToPath(import.meta.url))
 let out
 try {
   const cli = readFileSync(join(dir, 'cli-path'), 'utf8').trim()
-  out = execFileSync(process.execPath, ['--disable-warning=ExperimentalWarning', cli, 'runner', 'ensure'], { encoding: 'utf8', windowsHide: true })
+  out = execFileSync(process.execPath, [cli, 'runner', 'ensure'], { encoding: 'utf8', windowsHide: true })
 } catch (err) {
   out = 'failed: ' + (err && err.stderr ? String(err.stderr) : '') + (err && err.message ? err.message : String(err))
 }

@@ -30,8 +30,15 @@ await build({
   format: 'esm',
   // Use core's sources, so the bundle never picks up a stale core/dist
   alias: { '@quarterdeck/core': join(repoRoot, 'core', 'src', 'index.ts') },
-  // CommonJS dependencies inside an ES module still call require()
-  banner: { js: `// Quarterdeck MCP server ${version}, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.\nimport { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);` },
+  // CommonJS dependencies inside an ES module still call require().
+  // The warning filter runs before core loads node:sqlite (at run time, core/src/sqlite.ts), so .mcp.json
+  // starts the server with the script alone, the form the plugin directory asks for, and no --disable-warning flag
+  banner: { js: [
+    `// Quarterdeck MCP server ${version}, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.`,
+    `import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);`,
+    `// Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other`,
+    `const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };`,
+  ].join('\n') },
   logLevel: 'warning',
 })
 

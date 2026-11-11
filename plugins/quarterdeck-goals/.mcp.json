@@ -2,7 +2,7 @@
   "mcpServers": {
     "quarterdeck": {
       "command": "node",
-      "args": ["--disable-warning=ExperimentalWarning", "${CLAUDE_PLUGIN_ROOT}/server/quarterdeck-mcp.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/server/quarterdeck-mcp.mjs"]
     }
   }
 }
