@@ -13,7 +13,7 @@
     {
       "name": "quarterdeck-guard",
       "source": "./plugins/quarterdeck-guard",
-      "description": "Holds each Quarterdeck goal run to what you have allowed: it refuses the kinds of action you turned off, makes the rest wait for your approval, and keeps run reports out of your chat. Required by quarterdeck-goals."
+      "description": "Part of Quarterdeck: install Quarterdeck (quarterdeck-goals), not this on its own. It holds each goal run to what you have allowed: it refuses the kinds of action you turned off, makes the rest wait for your approval, and keeps run reports out of your chat."
     }
   ]
 }
