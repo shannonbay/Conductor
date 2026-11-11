@@ -5,7 +5,9 @@
  * 1. Checks main is clean, then runs every test (workspaces and both plugins).
  * 2. Sets the version in both plugin.json files and commits that on main.
  * 3. Builds, then commits the installable marketplace (marketplace.json, the
- *    plugins with the bundled server, README, LICENSE) to the `release`
+ *    plugins with the bundled server and each plugin's hooks in one file
+ *    (bundle-hooks.mjs: the plugin directory reads `$` in one file only),
+ *    README, LICENSE) to the `release`
  *    branch, and tags it v<version>, quarterdeck-goals--v<version> and
  *    quarterdeck-guard--v<version>.
  * 4. With --push, pushes main, release and the tags.
@@ -19,6 +21,8 @@ import { cpSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, wri
 import { tmpdir } from 'os'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
+
+import { bundleHooks } from './bundle-hooks.mjs'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PLUGINS = ['quarterdeck-goals', 'quarterdeck-guard']
@@ -107,6 +111,11 @@ try {
         return !/^\/(tests|node_modules|tsconfig\.json)(\/|$)/.test(rel) && !/^\/\.claude-plugin\/types(\/|$)/.test(rel)
       },
     })
+  }
+  // The hooks in one file, then the engine's own check that it still reads them
+  for (const p of PLUGINS) {
+    if (await bundleHooks(join(work, 'plugins', p))) console.log(`release: bundled the hooks of ${p}`)
+    execSync(`claude plugin validate "${join(work, 'plugins', p)}"`, { cwd: root, stdio: 'inherit' })
   }
   cpSync(join(root, 'README.md'), join(work, 'README.md'))
   cpSync(join(root, 'LICENSE'), join(work, 'LICENSE'))
