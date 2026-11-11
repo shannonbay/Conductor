@@ -65,7 +65,7 @@ export function toCard(g: OverviewGoal): GoalCard {
     autonomy: g.autonomy ?? {},
     toolMap: g.tool_map ?? {},
     health: latest ? { passed: latest.passed, value: latest.value } : null,
-    trend: g.health.map((h) => h.value).filter((v): v is number => v !== null).reverse(),
+    trend: g.health.map((check) => check.value).filter((v): v is number => v !== null).reverse(),
     memory: g.memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, pinned: m.pinned })),
     suggestions: g.suggestions.map((s) => ({ category: s.category, approvedInARow: s.approved_in_a_row })),
     watches: (g.watches ?? []).map((w) => ({ name: w.name, everyMinutes: w.every_minutes, runs: w.runs, lastFiredAt: w.last_fired_at, failing: w.failing, error: w.error })),
@@ -270,7 +270,7 @@ export function parseSchedule(text: string): { schedule: Schedule | null; oneOff
   if (m[3] !== undefined) {
     const hours = [Number(m[3]), Number(m[5])]
     const mins = [Number(m[4]), Number(m[6])]
-    if (hours.some((h) => h > 23) || mins.some((x) => x > 59)) return { error: 'Use 24-hour times, e.g. "between 08:00-20:00".' }
+    if (hours.some((hour) => hour > 23) || mins.some((x) => x > 59)) return { error: 'Use 24-hour times, e.g. "between 08:00-20:00".' }
     const pad = (n: number) => String(n).padStart(2, '0')
     schedule.active_hours = `${pad(hours[0]!)}:${pad(mins[0]!)}-${pad(hours[1]!)}:${pad(mins[1]!)}`
   }
