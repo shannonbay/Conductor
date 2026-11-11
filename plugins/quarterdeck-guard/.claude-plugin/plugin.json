@@ -1,7 +1,7 @@
 {
   "name": "quarterdeck-guard",
   "displayName": "Quarterdeck Guard",
-  "version": "0.17.0",
+  "version": "0.17.1",
   "license": "Apache-2.0",
   "description": "Holds each Quarterdeck goal run to what you have allowed: it refuses the kinds of action you turned off, makes the rest wait for your approval, and keeps run reports out of your chat. Required by quarterdeck-goals.",
   "author": {
