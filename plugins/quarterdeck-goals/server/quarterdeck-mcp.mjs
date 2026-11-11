@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.15.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.16.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
@@ -22449,15 +22449,17 @@ function standingSessionId(dir = runnerDir()) {
 var RUNNER_USAGE = [
   "Usage: quarterdeck runner <command>",
   "",
-  "The standing session: a Claude Code session in a hidden console with Remote Control on, which runs",
-  "goals while no Claude Code window is open (the computer must be on and you logged in).",
+  "The standing session: a Claude Code session with Remote Control on, in a hidden console (Windows) or a",
+  "tmux session (Linux), which runs goals while no Claude Code window is open (the computer must be on",
+  "and you logged in).",
   "",
-  "  install [--permission-mode <mode>]   Start it, and keep it running with a scheduled task",
-  "  uninstall                            Stop it and delete the scheduled task",
+  "  install [--permission-mode <mode>]   Start it, and keep it running (a scheduled task; on Linux a systemd timer)",
+  "  uninstall                            Stop it and delete the scheduled task or timer",
   "  start [--permission-mode <mode>]     Start it now",
   "  stop                                 Stop it",
   "  status                               Whether it is running and starting goal runs",
-  "  ensure                               Start it if it is missing; restart it after an update"
+  "  ensure                               Start it if it is missing; restart it after an update",
+  "  attach                               Linux: open its terminal (to answer a question); Ctrl-b d leaves it running"
 ].join("\n");
 
 // src/tools/goal_runner.ts
