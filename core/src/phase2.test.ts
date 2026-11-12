@@ -6,7 +6,7 @@ import {
   parseCron, cronNext, getSchedule, setSchedule, nextScheduledRun, decideTick,
   enableEventTrigger, disableEventTrigger, verifyEventSecret,
   runHealthCheck, listHealth, healthDue, parseHealthValue, buildBrief,
-  matchToolCategory, guardToolCallForRun, listToolCalls,
+  matchToolCategory, guardToolCallForRun, listToolCalls, standingAllowRules, usableAsAllowRule,
 } from './index.js'
 
 let db: Database
@@ -175,6 +175,28 @@ describe('goal guard', () => {
     db.prepare("UPDATE goal_runs SET status = 'completed' WHERE id = ?").run(run.id)
     expect(guardToolCallForRun(db, run.id, 'mcp__gmail__delete_message')).toEqual({ decision: 'allow' })
     expect(getTask(db, 'g1', '1')).toBeUndefined()
+  })
+
+  it("gives the standing session allow rules for each active goal's tools that aren't off", () => {
+    expect(usableAsAllowRule('mcp__gmail__send_message')).toBe(true)
+    expect(usableAsAllowRule('mcp__claude-in-chrome__*')).toBe(true)
+    expect(usableAsAllowRule('mcp__gmail__archive*')).toBe(false)
+    expect(usableAsAllowRule('mcp__*Gmail*__trash_*')).toBe(false)
+    expect(usableAsAllowRule('mcp__*')).toBe(false)
+
+    updateGoal(db, 'g1', { tool_map: { ...MAP, 'mcp__*Gmail*__trash_*': 'email.trash', 'mcp__browser__*': 'web', 'mcp__quarterdeck__forget': 'memory' } })
+    // send and web are propose (unlisted), delete is off; the archive and trash globs can't be rules as they stand
+    expect(standingAllowRules(db)).toEqual(['mcp__browser__*', 'mcp__gmail__send_message'])
+
+    // Once a run has called a tool a glob matches, that name becomes a rule
+    const run = insertRun(db, 'g1', 'manual', 'running')
+    guardToolCallForRun(db, run.id, 'mcp__claude_ai_Gmail__trash_thread')
+    guardToolCallForRun(db, run.id, 'mcp__gmail__archive_thread')
+    guardToolCallForRun(db, run.id, 'mcp__gmail__delete_message') // off: recorded, never a rule
+    expect(standingAllowRules(db)).toEqual(['mcp__browser__*', 'mcp__claude_ai_Gmail__trash_thread', 'mcp__gmail__archive_thread', 'mcp__gmail__send_message'])
+
+    updateGoal(db, 'g1', { status: 'paused' })
+    expect(standingAllowRules(db)).toEqual([])
   })
 
 })

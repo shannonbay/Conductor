@@ -80,6 +80,8 @@ export interface RunnerState {
   build: string
   /** `--permission-mode` for the session, kept so a restart uses it again. */
   permissionMode?: string
+  /** The goals' allow rules it started with (standingAllowRules); a different list now means restart. */
+  allowed?: string[]
 }
 
 export interface RunnerDeps {
@@ -102,6 +104,8 @@ export interface RunnerDeps {
   sleep(ms: number): void
   /** Goal runs going now: no restart while one is. */
   runsRunning(): number
+  /** The allow rules the goals' tool maps call for now (standingAllowRules in core), sorted. */
+  allowRules?(): string[]
   /** The session id holding the scheduler lease, or null. */
   leaseHolder(): string | null
   readState(): RunnerState | null
@@ -142,7 +146,7 @@ export function status(deps: RunnerDeps): RunnerStatus {
     sessionId: live?.sessionId ?? null,
     holdsLease: live !== null && holder === live.sessionId,
     leaseElsewhere: holder !== null && holder !== live?.sessionId,
-    stale: live !== null && live.build !== deps.build,
+    stale: live !== null && (live.build !== deps.build || rulesChanged(deps, live)),
     waiting: live ? waitingOn(deps.screenText?.(live.pid)) : null,
   }
 }
@@ -158,12 +162,27 @@ export function statusText(s: RunnerStatus): string {
       ? 'another session holds the goal runs (an open Claude Code window, or a session that just stopped); it takes over within 90 seconds of that one going quiet'
       : 'no session has started goal runs in the last minutes (it takes over within 90 seconds)'
   if (s.waiting) return `The standing session is running (${s.sessionId}) but waiting to be told its folder is safe, so no goal runs in it yet. ${ATTACH_HINT}`
-  return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? ' It started with an older Quarterdeck and restarts at the next check with no run going.' : ''}`
+  return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? ' It started with an older Quarterdeck or other goal tool rules, and restarts at the next check with no run going.' : ''}`
 }
 
-/** The `claude` arguments that start the standing session: a new one with this id, or (`resume`) the earlier one that has it. */
-export function startArgs(sessionId: string, permissionMode?: string, resume = false): string[] {
-  return ['--remote-control', SESSION_NAME, '--name', SESSION_NAME, resume ? '--resume' : '--session-id', sessionId, '--allowedTools', OWN_TOOL_RULES.join(','), ...(permissionMode ? ['--permission-mode', permissionMode] : [])]
+/**
+ * The `claude` arguments that start the standing session: a new one with this
+ * id, or (`resume`) the earlier one that has it. `allowed` adds the goals'
+ * allow rules to Quarterdeck's own (see standingAllowRules): nobody is at this
+ * session to answer a prompt, and auto mode refuses what looks like a write
+ * elsewhere (seen Nov 2026: Gmail trash_thread after the person approved it).
+ */
+export function startArgs(sessionId: string, permissionMode?: string, resume = false, allowed: readonly string[] = []): string[] {
+  return ['--remote-control', SESSION_NAME, '--name', SESSION_NAME, resume ? '--resume' : '--session-id', sessionId, '--allowedTools', [...OWN_TOOL_RULES, ...allowed].join(','), ...(permissionMode ? ['--permission-mode', permissionMode] : [])]
+}
+
+function allowRulesNow(deps: RunnerDeps): string[] {
+  return deps.allowRules?.() ?? []
+}
+
+/** The goals call for other allow rules than the running session started with. */
+function rulesChanged(deps: RunnerDeps, live: RunnerState): boolean {
+  return (live.allowed ?? []).join(',') !== allowRulesNow(deps).join(',')
 }
 
 /** The earlier session's id when a start should resume it: its transcript is there and not too long. */
@@ -195,18 +214,20 @@ export function start(deps: RunnerDeps, opts: { permissionMode?: string } = {}):
   checkMode(permissionMode)
   const live = liveState(deps)
   if (live) return { started: false, sessionId: live.sessionId, text: `The standing session is already running (${live.sessionId}).` }
+  const allowed = allowRulesNow(deps)
+  const extra = allowed.length > 0 ? { allowed } : {}
   const earlier = resumableId(deps, previous)
   if (earlier) {
-    const pid = deps.spawnSession(startArgs(earlier, permissionMode, true))
+    const pid = deps.spawnSession(startArgs(earlier, permissionMode, true, allowed))
     if (stayedUp(deps, pid)) {
-      deps.writeState({ sessionId: earlier, pid, build: deps.build, ...(permissionMode ? { permissionMode } : {}) })
+      deps.writeState({ sessionId: earlier, pid, build: deps.build, ...(permissionMode ? { permissionMode } : {}), ...extra })
       return { started: true, sessionId: earlier, text: `Started the standing session again (${earlier}). It goes on in its chat "${SESSION_NAME}" in the Claude app and at claude.ai/code.` }
     }
     // It couldn't resume: a new session
   }
   const sessionId = deps.newId()
-  const pid = deps.spawnSession(startArgs(sessionId, permissionMode))
-  deps.writeState({ sessionId, pid, build: deps.build, ...(permissionMode ? { permissionMode } : {}) })
+  const pid = deps.spawnSession(startArgs(sessionId, permissionMode, false, allowed))
+  deps.writeState({ sessionId, pid, build: deps.build, ...(permissionMode ? { permissionMode } : {}), ...extra })
   return { started: true, sessionId, text: `Started the standing session (${sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` }
 }
 
@@ -229,11 +250,13 @@ export type EnsureAction = 'running' | 'started' | 'restarted' | 'restart-waits'
 export function ensure(deps: RunnerDeps): { action: EnsureAction; text: string } {
   const live = liveState(deps)
   if (!live) return { action: 'started', text: start(deps).text }
-  if (live.build === deps.build) return { action: 'running', text: `The standing session is running (${live.sessionId}).` }
-  if (deps.runsRunning() > 0) return { action: 'restart-waits', text: 'Quarterdeck was updated; the standing session restarts once no goal run is going.' }
+  const updated = live.build !== deps.build
+  if (!updated && !rulesChanged(deps, live)) return { action: 'running', text: `The standing session is running (${live.sessionId}).` }
+  const why = updated ? 'Quarterdeck was updated' : "The goals' tool rules changed"
+  if (deps.runsRunning() > 0) return { action: 'restart-waits', text: `${why}; the standing session restarts once no goal run is going.` }
   stop(deps)
   const r = start(deps)
-  return { action: 'restarted', text: `Quarterdeck was updated: restarted the standing session (${r.sessionId}).` }
+  return { action: 'restarted', text: `${why}: restarted the standing session (${r.sessionId}).` }
 }
 
 // ── Keeping it alive: a scheduled task (Windows), a systemd timer (Linux) ─────
@@ -674,6 +697,7 @@ export async function realDeps(): Promise<InstallDeps> {
     },
     runsRunning: () => withDb((db) => (db.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get() as { n: number }).n),
     leaseHolder: () => withDb((db) => core.leaseHolder(db)),
+    allowRules: () => withDb((db) => core.standingAllowRules(db)),
     readState: () => {
       try { return JSON.parse(readStateText(stateFile)) as RunnerState } catch { return null }
     },

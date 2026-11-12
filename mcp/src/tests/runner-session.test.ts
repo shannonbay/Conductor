@@ -134,6 +134,24 @@ describe('the standing session', () => {
     expect(ensure(updated).action).toBe('running')
   })
 
+  it("starts with the goals' allow rules, and restarts when they change, never during a run", () => {
+    let rules = ['mcp__claude_ai_Gmail__trash_thread']
+    const { deps, world } = fake({ allowRules: () => rules })
+    ensure(deps)
+    expect(world.spawned[0]).toContain('mcp__plugin_quarterdeck-goals_quarterdeck,mcp__quarterdeck,mcp__claude_ai_Gmail__trash_thread')
+    expect(world.state).toMatchObject({ allowed: rules })
+    expect(ensure(deps).action).toBe('running')
+
+    rules = [...rules, 'mcp__claude-in-chrome__*']
+    expect(status(deps).stale).toBe(true)
+    world.running = 1
+    expect(ensure(deps)).toMatchObject({ action: 'restart-waits', text: expect.stringMatching(/tool rules changed/) })
+    world.running = 0
+    expect(ensure(deps)).toMatchObject({ action: 'restarted', text: expect.stringMatching(/tool rules changed/) })
+    expect(world.spawned[1]).toContain('mcp__plugin_quarterdeck-goals_quarterdeck,mcp__quarterdeck,mcp__claude_ai_Gmail__trash_thread,mcp__claude-in-chrome__*')
+    expect(ensure(deps).action).toBe('running')
+  })
+
   it('a restart resumes the earlier session, so it stays one chat in the Claude app', () => {
     const { deps, world } = fake()
     start(deps, { permissionMode: 'auto' })

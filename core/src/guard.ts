@@ -100,6 +100,45 @@ function guardRun(db: Database, run: GoalRun, toolName: string): GuardDecision {
   return { decision: 'deny', category, run_id: run.id, reason }
 }
 
+/**
+ * Whether the standing session can start with a tool pattern as an allow rule
+ * as it stands: a plain name, or a whole server (`mcp__<server>__*`), the
+ * forms Claude Code documents. A glob inside a tool's name (`trash_*`) is left
+ * to the names seen, as a rule Claude Code refuses could keep the session from
+ * starting at all.
+ */
+export function usableAsAllowRule(pattern: string): boolean {
+  return !pattern.includes('*') || /^mcp__[^*]+?__\*$/.test(pattern)
+}
+
+/**
+ * The allow rules the standing session starts with besides Quarterdeck's own:
+ * the tools every active goal maps to a category that isn't `off`. The guard
+ * still refuses a `propose` one until its item is approved, so allowing them
+ * here only stops Claude Code asking (or auto mode refusing) a second time,
+ * where nobody is there to answer. A pattern Claude Code can't take
+ * (`mcp__*Gmail*__trash_*`) becomes the names the guard has seen it match in
+ * that goal's runs. Quarterdeck's own tools are left out (OWN_TOOL_RULES).
+ */
+export function standingAllowRules(db: Database): string[] {
+  const rules = new Set<string>()
+  const goals = db.prepare("SELECT g.plan_id FROM goals g JOIN plans p ON p.id = g.plan_id WHERE g.status = 'active'").all() as { plan_id: string }[]
+  for (const { plan_id } of goals) {
+    const goal = getGoal(db, plan_id)
+    if (!goal) continue
+    const allowed = (category: string | null) => category !== null && autonomyFor(goal, category) !== 'off'
+    for (const [pattern, category] of Object.entries(goal.tool_map)) {
+      if (allowed(category) && usableAsAllowRule(pattern)) rules.add(pattern)
+    }
+    const seen = db.prepare('SELECT DISTINCT tool_name FROM goal_tool_calls WHERE plan_id = ?').all(plan_id) as { tool_name: string }[]
+    for (const { tool_name } of seen) {
+      if (allowed(matchToolCategory(goal.tool_map, tool_name))) rules.add(tool_name)
+    }
+  }
+  const own = [QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX]
+  return [...rules].filter((r) => !own.some((p) => r.startsWith(p))).sort()
+}
+
 export function listToolCalls(db: Database, planId: string, limit = 50): ToolCallRecord[] {
   return db.prepare('SELECT * FROM goal_tool_calls WHERE plan_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?')
     .all(planId, limit) as ToolCallRecord[]
