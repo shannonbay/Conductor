@@ -14,10 +14,10 @@ import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, readModelAnswer, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
+import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, readModelAnswer, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
-import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
+import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getRuns, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, editFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
@@ -41,6 +41,10 @@ type View = {
   first: string | null
   /** The goal n runs. */
   runnable: string | null
+  /** Goals whose open run this session started (its permission prompts show here). */
+  mine: string[]
+  /** The standing session holds the scheduler lease (so it started the other runs). */
+  standing: boolean
 }
 
 /** The colour of every action you can press that is drawn as plain words: the theme's own, so it follows the person's theme. */
@@ -123,6 +127,8 @@ export async function renderPane($: Engine, e: E) {
     first: firstWithProposal ? `${firstWithProposal.id}/${firstWithProposal.needsYou[0]!.id}` : null,
     // Only a full card has Run now to carry the hotkey
     runnable: current.find((g, i) => canRun(g) && !oneLine[i])?.id ?? null,
+    mine: Object.values(await getRuns($)).map((r) => r.goalId),
+    standing: s.standing === true,
   }
 
   return (
@@ -300,7 +306,8 @@ function activityLine($: Engine, e: E, view: View, g: GoalCard) {
           <Text color="yellow">⏸ {clip(text, Math.max(view.columns - 2 - age.length, 10))}</Text>
           <Text dimColor>{age}</Text>
         </Text>
-        <Text dimColor>{clip("Answer Claude Code's permission prompt for this run: in its window, the Claude app or claude.ai/code.", Math.max(view.columns - 2, 10))}</Text>
+        {/* Wraps rather than clips: where to answer is the point of the line */}
+        <Text dimColor>{permissionWhere(view.mine.includes(g.id), view.standing)}</Text>
       </Box>
     )
   }

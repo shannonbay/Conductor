@@ -82,9 +82,26 @@ test('a run waiting for a permission answer says so, on which call, and where to
   for (const surface of SURFACES) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect((await ui.find({ type: 'Text', text: /^⏸ Waiting/ }))?.text).toBe('⏸ Waiting for your permission: Bash: rm old.zip · 2m ago')
-    expect(await ui.find({ type: 'Text', text: /permission prompt for this run/ })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: /^Answer it/ }))?.text).toBe('Answer it in the window running this goal (or the Claude app), or Cancel run.')
     await ui.unmount()
   }
+})
+
+test('a run the standing session started points to its chat for the permission answer', async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [
+    goal({
+      id: 'g1',
+      name: 'Inbox',
+      open_run: { id: 'r1', status: 'running' },
+      activity: { state: 'running', text: 'Waiting for your permission: Gmail trash_thread', at: '2026-11-07T07:58:00Z', waiting: { tool: 'Gmail trash_thread', since: '2026-11-07T07:58:00Z' } },
+    }),
+  ], { standing: true })
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: SURFACES[0]! })
+  expect((await ui.find({ type: 'Text', text: /^Answer it/ }))?.text).toBe('Answer it in the "Quarterdeck goals" chat (Claude app or claude.ai/code), or Cancel run.')
+  expect(await ui.find({ type: 'Button', label: 'Cancel run' })).toBeDefined()
+  await ui.unmount()
 })
 
 test("Reject opens a feedback box and shows Quarterdeck's error", async ($, on) => {

@@ -88,6 +88,20 @@ export function isFailed(status: string): boolean {
 }
 
 /**
+ * Where to answer a run's permission prompt. Claude Code asks only in the
+ * session that runs the call, and nothing in the pane can answer it (a plugin
+ * may not make permission decisions), so say which session that is: this one
+ * (`mine`: this session started the run), the standing session (`standing`:
+ * it holds the scheduler lease, so it started the run), or another window.
+ * Cancel run, below on the card, is the one way to turn it down from here.
+ */
+export function permissionWhere(mine: boolean, standing: boolean): string {
+  if (mine) return 'Answer the prompt in this window, or Cancel run.'
+  if (standing) return 'Answer it in the "Quarterdeck goals" chat (Claude app or claude.ai/code), or Cancel run.'
+  return 'Answer it in the window running this goal (or the Claude app), or Cancel run.'
+}
+
+/**
  * Nothing here needs the person: nothing waiting for them, no run going, the
  * last run didn't fail, the health check and the watches aren't failing and
  * there is no suggestion. The pane draws such a goal as one line until it is expanded.
