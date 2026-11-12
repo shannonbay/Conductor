@@ -294,12 +294,13 @@ export const register: Register = (on) => {
 
   // A run's call is about to be put to the person (a permission prompt in the
   // window, the Claude app or claude.ai/code): the pane says the run waits on them.
+  // The decision stays the person's: the hook always passes the request on as it came
+  // (the directory checks for `return next(e)`). If a settings hook answers it instead,
+  // the wait clears as soon as the call settles.
   on('classic.PermissionRequest', async ($, e, next) => {
-    const r = await next(e)
     const runId = await runIdFor($, e.agent_id)
-    // A settings hook that answered leaves nothing for the person to answer
-    if (runId && !(r as { decision?: unknown } | undefined)?.decision) void reportProgress($, runId, 'waiting', toolLabel(e.tool_name, e.tool_input))
-    return r
+    if (runId) void reportProgress($, runId, 'waiting', toolLabel(e.tool_name, e.tool_input))
+    return next(e)
   }).catch(($, e, next) => next(e))
 
   on('turn.complete', async ($, e, next) => {

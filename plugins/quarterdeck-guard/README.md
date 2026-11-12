@@ -47,7 +47,7 @@ Everything else goes on to your permission rules unchanged.
 
 **Other hooks:**
 
-- `classic.PermissionRequest`: when Claude Code is about to ask you about a run agent's tool call (and no settings hook has answered), sends `run_progress` that the run waits for your answer. It never answers the request itself; Claude Code asks you as usual.
+- `classic.PermissionRequest`: when Claude Code is about to ask you about a run agent's tool call, sends `run_progress` that the run waits for your answer, then passes the request on unchanged (`return next(e)`). It never answers the request itself; Claude Code asks you as usual.
 - `turn.complete`: for a run agent, sends `report_run_end` as above. Other turns are passed on untouched.
 - `session.send`: stops a run agent's messages to your conversation (the run reports through `end_run`). Other messages go on.
 - `session.receive`: reads a message arriving in your conversation only to recognise a run's handed-back report (by the sending agent, or by matching a run agent's last answer) and keep it out of your chat. Everything else goes on unchanged.
