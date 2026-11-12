@@ -6,6 +6,7 @@
  * connectors named in `needs`.
  */
 import type { Schedule } from '../types'
+import type { ModelTier } from './model'
 
 export type Template = {
   /** The choice in /goal-new's question (keep it short). */
@@ -14,6 +15,13 @@ export type Template = {
   objective: string
   instructions: string
   schedule: Schedule
+  /**
+   * The model its runs use: haiku to check and report, sonnet to triage and
+   * propose, opus to write for a reader or judge what's hard to undo.
+   */
+  model: ModelTier
+  /** Why that model, said once it's created. */
+  modelReason: string
   autonomy: Record<string, 'off' | 'propose' | 'auto'>
   tool_map: Record<string, string>
   /** What the goal needs in Claude Code, said once it's created. */
@@ -53,6 +61,8 @@ export const TEMPLATES: Template[] = [
       "Delete means move to the bin, never delete permanently. When a sender's unsubscribe and clean-up are done, complete its item.",
     ].join(' '),
     schedule: { kind: 'interval', minutes: DAY },
+    model: 'sonnet',
+    modelReason: 'it sorts senders and you approve each unsubscribe',
     autonomy: { 'email.unsubscribe': 'propose', 'email.delete': 'propose', 'email.send': 'off' },
     tool_map: {
       'mcp__quarterdeck__unsubscribe_one_click': 'email.unsubscribe',
@@ -67,6 +77,8 @@ export const TEMPLATES: Template[] = [
     objective: "Once a week, find new job ads that match what I'm looking for and tell me the top three",
     instructions: '',
     schedule: { kind: 'interval', minutes: 7 * DAY },
+    model: 'sonnet',
+    modelReason: 'it ranks ads against what you want',
     autonomy: { 'email.send': 'propose' },
     tool_map: gmail({ send_message: 'email.send', reply: 'email.send', forward: 'email.send' }),
     needs: 'Claude in Chrome or web access to search job sites; the Gmail connector only if you want the top 3 emailed',
@@ -95,6 +107,8 @@ export const TEMPLATES: Template[] = [
       "Leave anything that isn't an installer alone.",
     ].join(' '),
     schedule: { kind: 'interval', minutes: 7 * DAY },
+    model: 'haiku',
+    modelReason: 'it applies a simple rule to files',
     autonomy: { 'file.delete': 'propose' },
     tool_map: {},
     needs: 'nothing extra',
@@ -110,6 +124,8 @@ export const TEMPLATES: Template[] = [
       'In your end_run summary, list what looks like it needs a reply or action from me, with sender and subject.',
     ].join(' '),
     schedule: { kind: 'interval', minutes: 360 },
+    model: 'sonnet',
+    modelReason: 'it sorts mail and you approve what it archives',
     autonomy: { 'email.archive': 'propose', 'email.delete': 'off', 'email.send': 'off' },
     tool_map: gmail({
       'label_*': 'email.archive', 'unlabel_*': 'email.archive', update_message_labels: 'email.archive',
@@ -124,6 +140,8 @@ export const TEMPLATES: Template[] = [
     objective: "Keep my GitHub profile README up to date with what I've been building",
     instructions: '', // set below: GITHUB_PROFILE
     schedule: { kind: 'interval', minutes: 7 * DAY },
+    model: 'opus',
+    modelReason: 'it writes your public profile',
     autonomy: { 'profile.readme_edit': 'propose' },
     tool_map: {},
     needs: "the GitHub CLI, gh (the first run installs it if it's missing; you sign in once with gh auth login)",

@@ -305,7 +305,16 @@ export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt'
 
 export type ChoiceKey = 'hourly' | '6h' | 'daily' | 'weekly' | 'one-off' | 'on-demand' | 'custom'
 export type ScheduleChoice = { key: ChoiceKey; label: string; schedule: Schedule | null; oneOff: boolean; /** How a typed answer was read, when a model read it. */ read?: string }
-export type Suggestion = { choice: Exclude<ChoiceKey, 'on-demand'>; reason: string; /** A short name for a goal created without one. */ title?: string }
+export type ModelTier = 'haiku' | 'sonnet' | 'opus'
+export type Suggestion = {
+  choice: Exclude<ChoiceKey, 'on-demand'>
+  reason: string
+  /** A short name for a goal created without one. */
+  title?: string
+  /** The model its runs should use, and why; absent when the small model gave none (new goals then get NEW_GOAL_MODEL). */
+  model?: ModelTier
+  modelReason?: string
+}
 
 /** The choices offered when a goal is created or given a schedule. */
 export const SCHEDULE_CHOICES: readonly ScheduleChoice[] = [
@@ -365,17 +374,26 @@ export function suggestByKeywords(name: string, objective: string): Suggestion {
   return { choice: 'daily', reason: 'goals are ongoing unless they are clearly one-offs' }
 }
 
-/** The small model's answer: {"choice": ..., "reason": ...}, possibly wrapped in prose or a code fence. */
+const MODEL_TIERS: readonly ModelTier[] = ['haiku', 'sonnet', 'opus']
+
+/**
+ * The small model's answer: {"choice": ..., "reason": ..., "model": ..., "model_reason": ...},
+ * possibly wrapped in prose or a code fence. A missing or unknown model is left out, not a failure.
+ */
 export function parseSuggestion(text: string): Suggestion | null {
   const json = /\{[\s\S]*\}/.exec(text)?.[0]
   if (!json) return null
   try {
-    const v = JSON.parse(json) as { choice?: unknown; reason?: unknown; title?: unknown }
+    const v = JSON.parse(json) as { choice?: unknown; reason?: unknown; title?: unknown; model?: unknown; model_reason?: unknown }
     const choice = SCHEDULE_CHOICES.find((c) => c.key === v.choice && c.key !== 'on-demand')
     if (!choice) return null
-    const reason = typeof v.reason === 'string' && v.reason.trim() ? v.reason.trim().replace(/\.$/, '') : 'suggested from its objective'
+    const sentence = (s: unknown) => (typeof s === 'string' && s.trim() ? s.trim().replace(/\.$/, '') : '')
+    const reason = sentence(v.reason) || 'suggested from its objective'
     const title = typeof v.title === 'string' ? cleanTitle(v.title) : ''
-    return { choice: choice.key as Suggestion['choice'], reason, ...(title && { title }) }
+    const named = typeof v.model === 'string' ? v.model.trim().toLowerCase() : ''
+    const model = MODEL_TIERS.find((m) => m === named)
+    const modelReason = model ? sentence(v.model_reason) : ''
+    return { choice: choice.key as Suggestion['choice'], reason, ...(title && { title }), ...(model && { model }), ...(modelReason && { modelReason }) }
   } catch {
     return null
   }
@@ -591,8 +609,17 @@ export const MODEL_CHOICES: { label: string; model: string | null }[] = [
   { label: 'Opus', model: 'opus' },
 ]
 
-/** The model new goals get: routine runs don't need the largest model, and a goal can be changed when one does. */
-export const NEW_GOAL_MODEL = 'sonnet'
+/**
+ * The model a new goal gets when nothing suggests another (the small model
+ * gave none, or wasn't there): routine runs don't need the largest model, and
+ * a goal can be changed when one does.
+ */
+export const NEW_GOAL_MODEL: ModelTier = 'sonnet'
+
+/** " Its runs use Haiku (it only checks and reports)." for the message after a goal is created. */
+export function newGoalModelText(model: string, reason?: string): string {
+  return ` Its runs use ${modelName(model)}${reason ? ` (${reason})` : ''}; change that in the Goals pane.`
+}
 
 /**
  * The person's answer to the model question: a choice, or a model id typed

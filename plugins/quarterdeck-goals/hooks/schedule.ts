@@ -2,7 +2,9 @@
  * Choosing a goal's schedule. Goals lean towards running on a schedule: a
  * small model reads the goal's name and objective and suggests how often it
  * should run (or that it's a one-off), keyword rules stand in when it can't,
- * and the person picks from a short list with the suggestion first.
+ * and the person picks from a short list with the suggestion first. The same
+ * call suggests the model a new goal's runs use (no question: the creation
+ * message names it, and the pane changes it).
  */
 import type { EngineInterface } from 'claude-code'
 
@@ -12,9 +14,10 @@ import { choiceOptions, readAnswer, fallbackTitle, parseSuggestion, SCHEDULE_CHO
 
 type Engine = EngineInterface
 
-const SYSTEM = `You choose how often a standing goal for an AI agent should run. Most goals are ongoing work (keeping, maintaining, monitoring, triaging, checking, tidying) and should run on a schedule; pick a one-off only when the goal is clearly a single task that is finished once done (install, set up, migrate, fix this one thing).
-Answer with JSON only: {"choice": "hourly" | "6h" | "daily" | "weekly" | "one-off", "reason": "<one short sentence>"}, adding "title": "<2-5 word name, Title Case>" when the goal has no name yet.
-Guide: inboxes, alerts and triage hourly; monitoring and watching every 6 hours; maintaining, keeping current and checking daily; reports, digests and reviews weekly.`
+const SYSTEM = `You set up a standing goal for an AI agent: how often it runs, and which model its runs use.
+Schedule: most goals are ongoing work (keeping, maintaining, monitoring, triaging, checking, tidying) and should run on a schedule; pick a one-off only when the goal is clearly a single task that is finished once done (install, set up, migrate, fix this one thing). Inboxes, alerts and triage hourly; monitoring and watching every 6 hours; maintaining, keeping current and checking daily; reports, digests and reviews weekly.
+Model: "haiku" when a run only checks something and reports or notifies (a release watch, a price check, a status check, a simple rule applied to files). "sonnet" when it triages, sorts or classifies and proposes actions for the person to approve; this is the usual choice. "opus" when it writes something a person will read (drafts, replies, reports, a README, cover letters) or makes hard judgement calls with real consequences. A goal that runs hourly or more often runs many times a day: prefer a smaller model there unless the writing or judgement clearly needs it.
+Answer with JSON only: {"choice": "hourly" | "6h" | "daily" | "weekly" | "one-off", "reason": "<one short sentence>", "model": "haiku" | "sonnet" | "opus", "model_reason": "<a few words, e.g. it only checks and reports>"}, adding "title": "<2-5 word name, Title Case>" when the goal has no name yet.`
 
 /**
  * How often the goal should run (and, for a goal with no name, a title), from
@@ -25,7 +28,7 @@ export async function suggestSchedule($: Engine, name: string | null, objective:
   let suggestion: Suggestion | null = null
   try {
     const prompt = `Goal name: ${name ?? '(none yet: suggest a title)'}\nObjective: ${objective}`
-    const r = await $.model.complete({ model: 'haiku', system: SYSTEM, prompt, maxTokens: 120, timeoutMs: 15_000 })
+    const r = await $.model.complete({ model: 'haiku', system: SYSTEM, prompt, maxTokens: 200, timeoutMs: 15_000 })
     if (r.isAnswered) suggestion = parseSuggestion(r.text)
   } catch {
     // a blocked model or a host without one: the rules below

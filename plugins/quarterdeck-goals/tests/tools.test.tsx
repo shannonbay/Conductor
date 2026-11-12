@@ -66,6 +66,8 @@ test('/goal-new creates a goal in the session directory; /goal-pause pauses it',
     name: 'Inbox', objective: 'keep my inbox under 20 unread', working_dir: '/work/project',
     schedule: { kind: 'interval', minutes: 1440 }, one_off: false, model: 'sonnet',
   })
+  // The small model named no model, so the default stands, with no reason given
+  expect(made.text).toContain('Its runs use Sonnet; change that in the Goals pane.')
 
   const paused = await $.command.run(typed('goal-pause', 'inbox'))
   expect(paused.text).toBe('Inbox is paused.')
@@ -142,10 +144,20 @@ test('/goal-new offers the choices with the suggestion first; a one-off runs at 
 
 test('/goal-new falls back to keyword rules when the model is unavailable', async ($, on) => {
   const { asked } = engine(on, { suggestion: null })
-  fakeQuarterdeck(on, [])
+  const fake = fakeQuarterdeck(on, [])
   await $.session.start(START)
   await $.command.run(typed('goal-new', 'maintain-github-profile: monitor my github for contributions'))
   expect(asked[0]).toContain('Suggested: every 6 hours (it watches for changes)')
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({ model: 'sonnet' })
+})
+
+test('/goal-new gives the goal the model the small model suggests, and says why', async ($, on) => {
+  engine(on, { suggestion: '{"choice": "6h", "reason": "it watches for changes", "model": "haiku", "model_reason": "it only checks and reports"}' })
+  const fake = fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', 'Releases: tell me when a new Claude Code version is out'))
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({ model: 'haiku' })
+  expect(made.text).toContain('Its runs use Haiku (it only checks and reports)')
 })
 
 test('/goal-new without a name takes the title the model suggests, or one from the objective', async ($, on) => {
@@ -183,8 +195,9 @@ test('/goal-new alone offers ready-made goals, each with its rules and schedule'
   expect(asked[0]).toContain('What should I look after?')
   expect(made.text).toContain('Created the goal "Tidy Downloads"')
   expect(made.text).toContain('running every 7d')
+  expect(made.text).toContain('Its runs use Haiku (it applies a simple rule to files)')
   expect(fake.of('create_goal')[0]?.input).toMatchObject({
-    name: 'Tidy Downloads', working_dir: '/work/project', schedule: { kind: 'interval', minutes: 10080 },
+    name: 'Tidy Downloads', working_dir: '/work/project', schedule: { kind: 'interval', minutes: 10080 }, model: 'haiku',
     autonomy: { 'file.delete': 'propose' }, instructions: expect.stringContaining('Recycle Bin'),
   })
 })

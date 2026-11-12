@@ -4,7 +4,8 @@ import { phoneText } from '../hooks/alerts'
 
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
-  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet, allowRules, allowRulesPrompt, describe, describeGoalChanges, modelName, readModelAnswer } from '../hooks/model'
+  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet, allowRules, allowRulesPrompt, describe, describeGoalChanges, modelName, newGoalModelText, readModelAnswer } from '../hooks/model'
+import { TEMPLATES } from '../hooks/templates'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -95,6 +96,24 @@ test('the model suggestion is read from JSON, and anything else falls through', 
   expect(parseSuggestion('{"choice": "on-demand"}')).toBeNull()
   expect(parseSuggestion('daily, I think')).toBeNull()
   expect(parseSchedule('one-off')).toEqual({ schedule: null, oneOff: true })
+})
+
+test('the suggestion carries the model for the goal\'s runs; an unknown or missing one is left out', async () => {
+  expect(parseSuggestion('{"choice": "6h", "reason": "x", "model": "Haiku", "model_reason": "it only checks and reports."}'))
+    .toEqual({ choice: '6h', reason: 'x', model: 'haiku', modelReason: 'it only checks and reports' })
+  expect(parseSuggestion('{"choice": "daily", "reason": "x", "model": "opus"}')).toEqual({ choice: 'daily', reason: 'x', model: 'opus' })
+  expect(parseSuggestion('{"choice": "daily", "reason": "x", "model": "gpt-5", "model_reason": "y"}')).toEqual({ choice: 'daily', reason: 'x' })
+  expect(newGoalModelText('haiku', 'it only checks and reports')).toBe(' Its runs use Haiku (it only checks and reports); change that in the Goals pane.')
+  expect(newGoalModelText('sonnet')).toBe(' Its runs use Sonnet; change that in the Goals pane.')
+})
+
+test('every template names a model and why', async () => {
+  for (const t of TEMPLATES) {
+    expect(['haiku', 'sonnet', 'opus']).toContain(t.model)
+    expect(t.modelReason).toBeTruthy()
+  }
+  expect(TEMPLATES.find((t) => t.name === 'GitHub Profile')?.model).toBe('opus')
+  expect(TEMPLATES.find((t) => t.name === 'Tidy Downloads')?.model).toBe('haiku')
 })
 
 test('choices put the suggestion first, and answers map back to choices', async () => {

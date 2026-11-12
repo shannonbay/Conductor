@@ -7,7 +7,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
 import { addTodo, answerItem, approve, createGoal, fetchOverview, editTodo, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
-import { ago, clip, describe, NEW_GOAL_MODEL, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, soundsEventDriven, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
+import { ago, clip, describe, NEW_GOAL_MODEL, newGoalModelText, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, soundsEventDriven, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
 import { kick } from './runner'
 import { askSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
@@ -348,7 +348,7 @@ async function newFromTemplate($: Engine): Promise<string> {
   const cwd = await $.session.root()
   try {
     await createGoal($, {
-      name: template.name, objective: template.objective, working_dir: cwd, schedule: template.schedule, model: NEW_GOAL_MODEL,
+      name: template.name, objective: template.objective, working_dir: cwd, schedule: template.schedule, model: template.model,
       instructions, autonomy: template.autonomy, tool_map: template.tool_map,
     })
   } catch (err) {
@@ -356,7 +356,7 @@ async function newFromTemplate($: Engine): Promise<string> {
   }
   await kick($)
   await refresh($)
-  return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute. It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`
+  return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute.${newGoalModelText(template.model, template.modelReason)} It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`
 }
 
 /**
@@ -370,20 +370,22 @@ export async function newGoal($: Engine, args: string): Promise<string> {
   const suggestion = await suggestSchedule($, given, objective)
   const name = given ?? suggestion.title ?? fallbackTitle(objective)
   const choice = await askSchedule($, name, suggestion)
+  const model = suggestion.model ?? NEW_GOAL_MODEL
   let created
   try {
-    created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff, model: NEW_GOAL_MODEL })
+    created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff, model })
   } catch (err) {
     return `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}`
   }
   await kick($) // a new interval or a one-off has a run due now
   await refresh($)
   const where = `in ${cwd}`
-  if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${await phoneHint($)}`
+  const runsOn = newGoalModelText(model, suggestion.model && suggestion.modelReason)
+  if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${runsOn}${await phoneHint($)}`
   // A goal about things happening can also start when they do, not only on its timer
   const watch = soundsEventDriven(objective) ? ` To start a run as soon as something happens, not only on a timer, ask Claude to add a watch to "${name}".` : ''
-  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${watch}${await phoneHint($)}`
-  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${watch}${await phoneHint($)}`
+  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${runsOn}${watch}${await phoneHint($)}`
+  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${runsOn}${watch}${await phoneHint($)}`
 }
 
 /** Sets the schedule through the pane's action wrapper and says what happens next. */
