@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, getGoal, getPlan, listMemory, insertMemory, queueRun, getRun, claimRun, schedulerPass, buildOverview,
-  applyGoalChanges, reportRunEnd, reportRunProgress, insertEvent, getRunHold, setRunHold, parseLimitReset, isUsageLimit,
+  applyGoalChanges, normalizeModel, reportRunEnd, reportRunProgress, insertEvent, getRunHold, setRunHold, parseLimitReset, isUsageLimit,
 } from './index.js'
 
 let db: Database
@@ -12,6 +12,38 @@ const plan = { id: 'g1', name: 'Inbox', description: null, status: 'active' as c
 beforeEach(() => {
   db = openDatabase(':memory:')
   createGoal(db, plan, { objective: 'Inbox zero', instructions: '', autonomy: { 'email.archive': 'auto' } })
+})
+
+describe('goal model', () => {
+  it("is null (the session's) by default; set, it goes with each claimed run and into the overview", () => {
+    createGoal(db, { ...plan, id: 'g2', name: 'Feeds' }, { objective: 'Feeds' })
+    expect(getGoal(db, 'g2')!.model).toBeNull()
+    expect(claimRun(db, 'g2', { holder: 'A' })!.model).toBeNull()
+    expect(applyGoalChanges(db, 'g1', { model: 'Haiku' })).toEqual(['runs use haiku'])
+    expect(getGoal(db, 'g1')!.model).toBe('haiku')
+    expect(buildOverview(db).goals.find((g) => g.id === 'g1')).toMatchObject({ model: 'haiku' })
+    const q = queueRun(db, 'g1')
+    expect(claimRun(db, 'g1', { holder: 'A', queuedRunId: q.id })!.model).toBe('haiku')
+  })
+
+  it("changes to a full id, back to the session's with null, and says nothing when unchanged", () => {
+    expect(applyGoalChanges(db, 'g1', { model: 'claude-opus-5-5' })).toEqual(['runs use claude-opus-5-5'])
+    expect(applyGoalChanges(db, 'g1', { model: 'claude-opus-5-5' })).toEqual([])
+    expect(applyGoalChanges(db, 'g1', { model: null })).toEqual(["runs use the session's model"])
+    expect(getGoal(db, 'g1')!.model).toBeNull()
+  })
+
+  it("refuses a name that can't be a model, changing nothing", () => {
+    expect(() => applyGoalChanges(db, 'g1', { model: 'rm -rf /', name: 'Other' })).toThrow(/isn't a model/)
+    expect(getPlan(db, 'g1')!.name).toBe('Inbox')
+    expect(normalizeModel('inherit')).toBeNull()
+    expect(normalizeModel(' OPUS ')).toBe('opus')
+  })
+
+  it('can be given when the goal is made', () => {
+    createGoal(db, { ...plan, id: 'g2' }, { objective: 'Feeds', model: 'sonnet' })
+    expect(getGoal(db, 'g2')!.model).toBe('sonnet')
+  })
 })
 
 describe('applyGoalChanges', () => {

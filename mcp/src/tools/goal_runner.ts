@@ -15,7 +15,7 @@ import {
   FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema, DeleteGoalSchema, WatchReportSchema,
   RunProgressSchema,
 } from '../schema.js'
-import type { GoalChanges } from '@quarterdeck/core'
+import { normalizeModel, type GoalChanges } from '@quarterdeck/core'
 import { existsSync } from 'fs'
 import { nanoid } from 'nanoid'
 import { record } from '../history.js'
@@ -122,7 +122,7 @@ export async function create_goal(args: unknown) {
   const id = `plan_${nanoid(10)}`
   createGoal(
     { id, name: input.name, description: input.objective, status: 'active', working_dir: input.working_dir, created_at: now, updated_at: now },
-    { objective: input.objective, instructions: input.instructions ?? '', autonomy: input.autonomy ?? {}, one_off: input.one_off ?? false },
+    { objective: input.objective, instructions: input.instructions ?? '', autonomy: input.autonomy ?? {}, one_off: input.one_off ?? false, model: normalizeModel(input.model) },
   )
   if (input.tool_map && Object.keys(input.tool_map).length) applyGoalChanges(id, { tool_map: input.tool_map })
   if (input.watches && Object.keys(input.watches).length) applyGoalChanges(id, { watches: input.watches as GoalChanges['watches'] })
@@ -131,7 +131,7 @@ export async function create_goal(args: unknown) {
   // A one-off runs straight away; a new interval is due now (the next tick starts it)
   const queued = input.one_off ? queueRun(id) : null
   const watches = await firstChecks(id)
-  return { id, ...applied, one_off: input.one_off ?? false, queued_run: queued ? queued.id : null, ...(watches.length ? { watches } : {}) }
+  return { id, ...applied, one_off: input.one_off ?? false, model: getGoal(id)?.model ?? null, queued_run: queued ? queued.id : null, ...(watches.length ? { watches } : {}) }
 }
 
 export async function delete_memory(args: unknown) {

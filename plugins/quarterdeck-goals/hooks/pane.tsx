@@ -14,7 +14,7 @@ import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, holdUntilText, isFailed, isQuiet, lastRun, nextRunText, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
+import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, readModelAnswer, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
 import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
@@ -485,6 +485,7 @@ function details($: Engine, e: E, view: View, g: GoalCard) {
     <Box key={`details-${g.id}`} flexDirection="column" marginTop={1}>
       <Text dimColor>{g.objective}</Text>
       <Text dimColor>Runs {scheduleLabel(g.schedule)}{g.schedule ? '' : ' (set one with /goal-schedule)'}</Text>
+      {modelLine($, e, view, g)}
       {g.watches.map((w) => (
         <Text key={`watch-${g.id}/${w.name}`} dimColor>
           Also runs when "{w.name}" sees something new (checked every {w.everyMinutes} min{w.lastFiredAt ? `, last ${ago(w.lastFiredAt, view.now)}` : ''})
@@ -706,6 +707,51 @@ function todoSection($: Engine, e: E, view: View, todos: Todos, addingTo: string
  * one (unless the session is in auto mode). Claude adds them only after the
  * person's yes: the mod itself never writes settings.
  */
+/**
+ * "Model: Sonnet · Change…". When the last run used another model (the
+ * setting changed since, or CLAUDE_CODE_SUBAGENT_MODEL overrides every
+ * subagent's), it says which, so the setting never claims more than it does.
+ */
+function modelLine($: Engine, e: E, view: View, g: GoalCard) {
+  const { Box, Text } = $.ui.resolve(e)
+  const used = lastRun(g)?.model ?? null
+  const differs = used !== null && g.model !== null && !sameModel(g.model, used)
+  return (
+    <Box key={`model-${g.id}`}>
+      <Text dimColor>{`Model: ${goalModelLabel(g.model)} · `}</Text>
+      {action($, e, { key: `model-change-${g.id}`, label: view.doing === `model:${g.id}` ? 'Choosing…' : 'Change…', onPress: () => void act($, `model:${g.id}`, 'change the model', () => chooseModel($, g)) })}
+      {differs && <Text color="yellow"> (last run used {modelName(used)})</Text>}
+    </Box>
+  )
+}
+
+/** A goal's model setting (an alias or an id) and the id a run reported, as the same model. */
+function sameModel(setting: string, used: string): boolean {
+  const s = setting.toLowerCase()
+  const u = used.toLowerCase()
+  return s === u || (!s.includes('-') && u.includes(s)) || u.startsWith(s)
+}
+
+/** The pane's model picker: four choices, or a full id typed under Other. A dismissed question changes nothing. */
+async function chooseModel($: Engine, g: GoalCard): Promise<void> {
+  let answer: string | null = null
+  try {
+    answer = await $.ui.ask(
+      `Which model should "${g.name}" run on? Now: ${goalModelLabel(g.model)}. Smaller models cost less and suit routine work; pick a larger one if its runs miss things. Or type a full model id under Other.`,
+      MODEL_CHOICES.map((c) => c.label),
+    )
+  } catch {
+    answer = null
+  }
+  const read = readModelAnswer(answer)
+  if (!read || read.model === g.model) {
+    $.ui.toast(`${g.name}: model unchanged.`)
+    return
+  }
+  await updateGoal($, g.id, { model: read.model }) // the server refuses a name that can't be a model
+  $.ui.toast(`${g.name} now runs on ${goalModelLabel(read.model)}.`)
+}
+
 function allowSection($: Engine, e: E, view: View, g: GoalCard) {
   const { Box, Text, Button } = $.ui.resolve(e)
   const { rules, skipped } = allowRules(g)

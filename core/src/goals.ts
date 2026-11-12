@@ -28,6 +28,7 @@ function deserializeGoal(r: Row): Goal {
     health_triggers_run: r.health_triggers_run === undefined ? true : Boolean(r.health_triggers_run),
     last_health_at: (r.last_health_at as string | null | undefined) ?? null,
     one_off: Boolean(r.one_off),
+    model: (r.model as string | null | undefined) ?? null,
   } as Goal
 }
 
@@ -51,8 +52,27 @@ export function createGoal(db: Database, plan: NewPlan, goal: Omit<NewGoal, 'pla
     )
     if (interval) setIntervalTrigger(db, plan.id, interval)
     if (goal.one_off) db.prepare('UPDATE goals SET one_off = 1 WHERE plan_id = ?').run(plan.id)
+    if (goal.model) db.prepare('UPDATE goals SET model = ? WHERE plan_id = ?').run(normalizeModel(goal.model), plan.id)
   })()
   return getGoal(db, plan.id)!
+}
+
+/** The aliases a goal's model may be, besides a full id. */
+export const MODEL_ALIASES = ['haiku', 'sonnet', 'opus'] as const
+
+/**
+ * A model as stored: an alias in lower case, a full id as given, or null for
+ * "the session's model" (null, "", "inherit", "default"). Throws on anything
+ * that can't be a model name.
+ */
+export function normalizeModel(model: string | null | undefined): string | null {
+  const m = (model ?? '').trim()
+  if (!m || /^(inherit|default|session)$/i.test(m)) return null
+  if ((MODEL_ALIASES as readonly string[]).includes(m.toLowerCase())) return m.toLowerCase()
+  if (m.length > 100 || !/^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]*$/.test(m)) {
+    throw new Error(`"${m}" isn't a model: use haiku, sonnet, opus, a full model id, or null for the session's model.`)
+  }
+  return m
 }
 
 export function getGoal(db: Database, planId: string): Goal | undefined {

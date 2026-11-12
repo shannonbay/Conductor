@@ -5,7 +5,7 @@
  */
 import type { Database } from './sqlite.js'
 import { getPlan, updatePlan } from './queries.js'
-import { getGoal, getMemory, getRun, insertMemory, updateGoal, updateMemory, updateRun } from './goals.js'
+import { getGoal, getMemory, getRun, insertMemory, normalizeModel, updateGoal, updateMemory, updateRun } from './goals.js'
 import { failRun, GoalError } from './goal-engine.js'
 import type { AutonomyMode, MemoryKind, WatchSpec } from './types.js'
 import { describeWatch, listWatches, releaseWatchEvents, removeWatch, setWatch } from './watches.js'
@@ -26,6 +26,8 @@ export interface GoalChanges {
   /** Watch name → what it runs; null removes the watch. */
   watches?: Record<string, WatchSpec | null>
   status?: 'active' | 'paused'
+  /** The model its runs use (an alias or a full id); null: the model of the session that starts the run. */
+  model?: string | null
 }
 
 const MODES = new Set(['off', 'propose', 'auto'])
@@ -38,6 +40,7 @@ export function applyGoalChanges(db: Database, planId: string, changes: GoalChan
   for (const [category, mode] of Object.entries(changes.autonomy ?? {})) {
     if (mode !== null && !MODES.has(mode)) throw new GoalError(`"${mode}" isn't a mode for ${category}: use off, propose or auto.`)
   }
+  const model = changes.model === undefined ? undefined : normalizeModel(changes.model) // throws on a name that can't be a model
   for (const id of changes.forget_memory ?? []) {
     if (getMemory(db, id)?.plan_id !== planId) throw new GoalError(`Memory ${id} isn't this goal's.`)
   }
@@ -93,6 +96,10 @@ export function applyGoalChanges(db: Database, planId: string, changes: GoalChan
       const after = setWatch(db, planId, name, spec) // throws on a watch with no command
       if (before && describeWatch(before) === describeWatch(after) && before.every_minutes === after.every_minutes) continue
       done.push(`watch "${after.name}" ${before ? 'changed' : 'added'}: every ${after.every_minutes} min, ${after.kind === 'tool' ? 'calls' : 'runs'} ${describeWatch(after)}`)
+    }
+    if (model !== undefined && model !== goal.model) {
+      updateGoal(db, planId, { model })
+      done.push(model ? `runs use ${model}` : "runs use the session's model")
     }
     if (changes.status && changes.status !== goal.status) {
       if (goal.status === 'retired') throw new GoalError('This goal is done; run it again first.')

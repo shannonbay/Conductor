@@ -62,6 +62,8 @@ export interface ClaimedRun {
   working_dir: string
   trigger: GoalRun['trigger']
   max_run_minutes: number
+  /** The model the run's agent uses; null: the starting session's. */
+  model: string | null
   /** The agent's task: read the brief, work, end_run. */
   prompt: string
 }
@@ -102,6 +104,7 @@ export function claimRun(db: Database, planId: string, opts: { holder: string; q
     working_dir: plan.working_dir,
     trigger: run.trigger,
     max_run_minutes: goal.limits.max_run_minutes,
+    model: goal.model,
     prompt: goalRunPrompt({ goalId: planId, runId: run.id, name: plan.name, workingDir: plan.working_dir, maxRunMinutes: goal.limits.max_run_minutes }),
   }
 }

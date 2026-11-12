@@ -144,6 +144,8 @@ export interface Goal {
   last_health_at: string | null
   /** Runs once: when a run ends with nothing open, the goal is done (status 'retired'). */
   one_off: boolean
+  /** The model its runs use: an alias (haiku, sonnet, opus) or a full id. null: the model of the session that starts the run. */
+  model: string | null
 }
 
 export type NewGoal = Pick<Goal, 'plan_id' | 'objective'> & Partial<Omit<Goal, 'plan_id' | 'objective' | 'limits'>> & { limits?: Partial<GoalLimits> }

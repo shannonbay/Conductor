@@ -7,7 +7,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
 import { addTodo, answerItem, approve, createGoal, fetchOverview, editTodo, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
-import { ago, clip, describe, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, soundsEventDriven, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
+import { ago, clip, describe, NEW_GOAL_MODEL, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, soundsEventDriven, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
 import { kick } from './runner'
 import { askSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
@@ -90,7 +90,7 @@ export const TOOLS = [
   },
   {
     name: 'update_goal',
-    description: "Changes a Quarterdeck goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), watches, or pause / resume. A watch starts a run when something happens (a new issue, a feed entry, a file, an email): it is a shell command, run every few minutes in the goal's directory, that prints one line per current item, or a read-only connector tool called every few minutes; an item not there before starts a run, which is told the new ones. The answer says whether each new watch's command worked. Try the command or the tool yourself first; the goal-watches skill has recipes. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
+    description: "Changes a Quarterdeck goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), watches, the model its runs use, or pause / resume. A watch starts a run when something happens (a new issue, a feed entry, a file, an email): it is a shell command, run every few minutes in the goal's directory, that prints one line per current item, or a read-only connector tool called every few minutes; an item not there before starts a run, which is told the new ones. The answer says whether each new watch's command worked. Try the command or the tool yourself first; the goal-watches skill has recipes. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -121,6 +121,7 @@ export const TOOLS = [
           },
         },
         status: { type: 'string', enum: ['active', 'paused'] },
+        model: { type: ['string', 'null'], description: "The model its runs use: haiku, sonnet, opus or a full model id; null: the model of the session that starts each run. Suggest a larger one when runs miss things or time out, a smaller one for routine work" },
       },
       required: ['goal'],
     },
@@ -206,7 +207,7 @@ export async function runTool($: Engine, name: ToolName, input: Record<string, u
 
   if (name === 'update_goal') {
     // Only the change fields: the call also carries the engine's own (tool, tool_use_id)
-    const keys = ['name', 'objective', 'instructions', 'autonomy', 'tool_map', 'add_memory', 'forget_memory', 'watches', 'status'] as const
+    const keys = ['name', 'objective', 'instructions', 'autonomy', 'tool_map', 'add_memory', 'forget_memory', 'watches', 'status', 'model'] as const
     const changes = Object.fromEntries(keys.filter((k) => input[k] !== undefined).map((k) => [k, input[k]])) as GoalChanges
     const lines = describeGoalChanges(goal, changes)
     if (lines.length === 0) return fail(`Nothing to change in ${goal.name}: give at least one new value.`)
@@ -347,7 +348,7 @@ async function newFromTemplate($: Engine): Promise<string> {
   const cwd = await $.session.root()
   try {
     await createGoal($, {
-      name: template.name, objective: template.objective, working_dir: cwd, schedule: template.schedule,
+      name: template.name, objective: template.objective, working_dir: cwd, schedule: template.schedule, model: NEW_GOAL_MODEL,
       instructions, autonomy: template.autonomy, tool_map: template.tool_map,
     })
   } catch (err) {
@@ -371,7 +372,7 @@ export async function newGoal($: Engine, args: string): Promise<string> {
   const choice = await askSchedule($, name, suggestion)
   let created
   try {
-    created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff })
+    created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff, model: NEW_GOAL_MODEL })
   } catch (err) {
     return `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}`
   }

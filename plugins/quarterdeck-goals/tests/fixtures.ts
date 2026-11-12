@@ -36,6 +36,7 @@ type FakeGoal = {
   objective: string
   status: string
   one_off?: boolean
+  model?: string | null
   instructions?: string
   autonomy?: Record<string, string>
   tool_map?: Record<string, string>
@@ -43,7 +44,7 @@ type FakeGoal = {
   schedule: { kind: 'interval'; minutes: number; active_hours?: string } | { kind: 'cron'; expr: string } | null
   open_run: { id: string; status: string } | null
   activity: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null; waiting?: { tool: string; since: string } }
-  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null }[]
+  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null; model?: string | null }[]
   needs_you: Item[]
   open_items: Item[]
   health: { passed: boolean; value: number | null }[]
@@ -158,6 +159,7 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
             ...(input.instructions !== undefined && { instructions: String(input.instructions) }),
             ...(input.autonomy !== undefined && { autonomy: input.autonomy as Record<string, string> }),
             ...(input.tool_map !== undefined && { tool_map: input.tool_map as Record<string, string> }),
+            ...(input.model !== undefined && { model: input.model as string | null }),
             next_run_at: schedule ? new Date(NOW).toISOString() : null,
             open_run: oneOff ? { id: `r${++runs}`, status: 'queued' } : null,
           })
@@ -169,7 +171,7 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
           if (input.release) return ok({ released: true }) as never
           const claimed = goals.filter((x) => x.open_run?.status === 'queued').map((x) => {
             x.open_run = { id: x.open_run!.id, status: 'running' }
-            return { run_id: x.open_run.id, goal_id: x.id, name: x.name, working_dir: '/work/project', trigger: 'manual', max_run_minutes: 15, prompt: `Run ${x.name}` }
+            return { run_id: x.open_run.id, goal_id: x.id, name: x.name, working_dir: '/work/project', trigger: 'manual', max_run_minutes: 15, model: x.model ?? null, prompt: `Run ${x.name}` }
           })
           if (claimed.length) version++
           const due = input.tool_watches === true ? (opts.toolWatches ?? []).splice(0) : []
@@ -212,6 +214,7 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
             changed.push(`${cat}: ${mode ?? 'back to propose'}`)
           }
           if (input.status) { g!.status = String(input.status); changed.push(String(input.status)) }
+          if (input.model !== undefined) { g!.model = (input.model as string | null) ?? null; changed.push(`runs use ${g!.model ?? "the session's model"}`) }
           // As the server does: each new watch is checked once, and the answer says how that went
           const checked: { name: string; result: string }[] = []
           for (const [name, w] of Object.entries((input.watches ?? {}) as Record<string, { command: string; every_minutes?: number } | null>)) {
@@ -330,13 +333,13 @@ export function engine(on: On, opts: { answer?: string; answers?: string[]; guar
   on('tool.list', () => ({ value: tools }) as never)
   // Subagents: spawned ones are listed as running until a test ends them
   const agents: { id: string; description: string; type: string; status: string }[] = []
-  const spawned: { prompt: string; subagentType?: string; cwd?: string }[] = []
+  const spawned: { prompt: string; subagentType?: string; cwd?: string; model?: string }[] = []
   const stopped: string[] = []
   on('agent.register', (_, e) => ({ value: { agent: `quarterdeck-goals:${e.name}` } }))
   on('agent.list', () => ({ value: agents.map((a) => ({ ...a })) }) as never)
   on('agent.spawn', (_, e) => {
     const agentId = `agent-${spawned.length + 1}`
-    spawned.push({ prompt: e.prompt, subagentType: e.subagentType, cwd: e.cwd })
+    spawned.push({ prompt: e.prompt, subagentType: e.subagentType, cwd: e.cwd, ...(e.model !== undefined && { model: e.model }) })
     agents.push({ id: agentId, description: e.description, type: e.subagentType, status: 'running' })
     return { model: 'test-model', agentId }
   })

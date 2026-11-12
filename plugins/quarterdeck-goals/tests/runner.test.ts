@@ -23,6 +23,18 @@ test('a queued run starts in a background subagent of the runner type, and the b
   await band.unmount()
 })
 
+test("a goal's model goes to its run's agent; without one the agent takes the session's", async ($, on) => {
+  const { spawned, clock } = engine(on)
+  fakeQuarterdeck(on, [
+    goal({ id: 'g1', name: 'Inbox', model: 'haiku', open_run: { id: 'r1', status: 'queued' } }),
+    goal({ id: 'g2', name: 'Feeds', open_run: { id: 'r2', status: 'queued' } }),
+  ])
+  await $.session.start(START)
+  await clock.settle()
+  expect(spawned.find((s) => s.prompt === 'Run Inbox')?.model).toBe('haiku')
+  expect(spawned.find((s) => s.prompt === 'Run Feeds')).not.toHaveProperty('model')
+})
+
 test('"Run now" starts the run at once instead of at the next tick', async ($, on) => {
   const { spawned, clock } = engine(on)
   settle = () => clock.settle()

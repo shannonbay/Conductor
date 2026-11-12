@@ -4,7 +4,7 @@ import { phoneText } from '../hooks/alerts'
 
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
-  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet, allowRules, allowRulesPrompt, describe } from '../hooks/model'
+  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet, allowRules, allowRulesPrompt, describe, describeGoalChanges, modelName, readModelAnswer } from '../hooks/model'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -201,4 +201,33 @@ test("allowRules lists a Claude Code allow rule for each of a goal's auto tool r
   const detail = describe(card({ id: 'g1', name: 'Inbox', autonomy: { shell: 'auto' }, tool_map: { Bash: 'shell' } }), NOW)
   expect(detail).toContain('Claude Code allow rules for its auto tools')
   expect(describe(card({ id: 'g2', name: 'Quiet' }), NOW)).not.toContain('allow rules')
+})
+
+test('modelName reads a model id as the person would say it', async () => {
+  expect(modelName('claude-opus-5-5')).toBe('Opus 5.5')
+  expect(modelName('claude-haiku-4-5-20251001')).toBe('Haiku 4.5')
+  expect(modelName('claude-sonnet-4-20250514')).toBe('Sonnet 4')
+  expect(modelName('claude-3-5-sonnet-20241022')).toBe('Sonnet')
+  expect(modelName('sonnet')).toBe('Sonnet')
+  expect(modelName('some-other-model')).toBe('some-other-model')
+})
+
+test('readModelAnswer: a choice, a typed id, or nothing for a dismissed question', async () => {
+  expect(readModelAnswer('Opus')).toEqual({ model: 'opus' })
+  expect(readModelAnswer("Session's model")).toEqual({ model: null })
+  expect(readModelAnswer(' claude-sonnet-5-5 ')).toEqual({ model: 'claude-sonnet-5-5' })
+  expect(readModelAnswer('Cancel')).toBeNull()
+  expect(readModelAnswer(null)).toBeNull()
+})
+
+test("a goal's model shows in its detail and in a change the person confirms", async () => {
+  const g = card({ id: 'g1', name: 'Inbox', model: 'sonnet' })
+  expect(describe(g, NOW)).toContain('Model: Sonnet')
+  expect(describeGoalChanges(g, { model: 'opus' })).toEqual(['Model: Sonnet → Opus'])
+  expect(describeGoalChanges(g, { model: null })).toEqual(["Model: Sonnet → the session's model"])
+  expect(describeGoalChanges(g, { model: 'sonnet' })).toEqual([])
+})
+
+test('runCost names the model a run used', async () => {
+  expect(runCost({ tokens: 48_000, startedAt: '2026-11-07T07:00:00Z', endedAt: '2026-11-07T07:02:00Z', model: 'claude-opus-5-5' })).toBe('Opus 5.5 · 48k tokens · 2m')
 })

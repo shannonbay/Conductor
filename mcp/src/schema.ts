@@ -196,6 +196,7 @@ export const CreateGoalSchema = z.object({
   schedule: GoalScheduleSchema.optional().describe('When it runs on its own; left out or null, on demand'),
   one_off: z.boolean().optional().describe('Runs once now; done when its run leaves nothing open'),
   watches: z.record(WatchSchema).optional().describe('Watch name → what it checks: a run starts when a watch sees something new'),
+  model: z.string().nullable().optional().describe("The model its runs use: haiku, sonnet, opus or a full model id; left out or null, the model of the session that starts each run"),
 })
 
 export const SetScheduleSchema = z.object({
@@ -239,6 +240,7 @@ export const UpdateGoalSchema = z.object({
   forget_memory: z.array(z.string()).optional().describe('Memory ids to forget'),
   watches: z.record(WatchSchema.nullable()).optional().describe('Watch name → what it checks; null removes the watch. A run starts when a watch sees something new'),
   status: z.enum(['active', 'paused']).optional(),
+  model: z.string().nullable().optional().describe("The model its runs use: haiku, sonnet, opus or a full model id; null: the model of the session that starts each run"),
 })
 
 export const ReportRunEndSchema = z.object({

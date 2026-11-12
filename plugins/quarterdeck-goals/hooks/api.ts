@@ -158,7 +158,7 @@ export type CreatedGoal = { id: string; next_run_at: string | null; one_off: boo
 
 export async function createGoal(
   $: Engine, input: {
-    name: string; objective: string; working_dir: string; schedule?: Schedule | null; one_off?: boolean
+    name: string; objective: string; working_dir: string; schedule?: Schedule | null; one_off?: boolean; model?: string | null
     instructions?: string; autonomy?: Record<string, string>; tool_map?: Record<string, string>
   },
 ): Promise<CreatedGoal> {
@@ -175,6 +175,8 @@ export type ClaimedRun = {
   working_dir: string
   trigger: string
   max_run_minutes: number
+  /** The model the run's agent uses; null or missing (an older server): the session's. */
+  model?: string | null
   prompt: string
 }
 

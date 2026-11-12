@@ -307,3 +307,23 @@ describe('create_goal with autonomy and tool rules', () => {
     expect(getGoal(r.id)).toMatchObject({ autonomy: { 'email.send': 'off' }, tool_map: { 'mcp__*Gmail*__send_message': 'email.send' } })
   })
 })
+
+describe('goal model', () => {
+  it('create_goal and update_goal set the model its runs use; the claimed run carries it', async () => {
+    const made = await create_goal({ name: 'Feeds', objective: 'Read feeds', working_dir: tmpdir(), model: 'Sonnet' }) as { id: string; model: string | null }
+    expect(made.model).toBe('sonnet')
+    const changed = await update_goal({ goal_id: made.id, model: 'claude-opus-5-5' }) as { changed: string[] }
+    expect(changed.changed).toEqual(['runs use claude-opus-5-5'])
+    await run_goal({ goal_id: made.id })
+    const pass = await tick('session-a')
+    expect(pass.claimed.find((r) => r.goal_id === made.id)?.model).toBe('claude-opus-5-5')
+    await update_goal({ goal_id: made.id, model: null })
+    expect(getGoal(made.id)!.model).toBeNull()
+  })
+
+  it("refuses a model name that can't be one, and makes no goal", async () => {
+    await expect(create_goal({ name: 'Bad', objective: 'x', working_dir: tmpdir(), model: 'two words' })).rejects.toThrow(/isn't a model/)
+    const goal = makeGoal()
+    await expect(update_goal({ goal_id: goal, model: 'two words' })).rejects.toThrow(/isn't a model/)
+  })
+})

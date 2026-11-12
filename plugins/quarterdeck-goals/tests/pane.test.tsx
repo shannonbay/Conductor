@@ -326,6 +326,47 @@ test('Reschedule sets the chosen schedule', async ($, on) => {
   await ui.unmount()
 })
 
+test("an expanded goal shows its model; Change… sets the one picked", async ($, on) => {
+  const { asked, toasts } = engine(on, { answer: 'Haiku' })
+  const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' })
+  expect(await ui.find({ type: 'Text', text: "Model: the session's model · " })).toBeDefined()
+  await ui.press({ key: 'model-change-g1' })
+  expect(asked[0]).toMatch(/^Which model should "Inbox" run on\? Now: the session's model\./)
+  expect(fake.of('update_goal').map((c) => c.input)).toEqual([{ goal_id: 'g1', model: 'haiku' }])
+  expect(toasts.join(' ')).toContain('Inbox now runs on Haiku.')
+  expect(await ui.find({ type: 'Text', text: 'Model: Haiku · ' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a dismissed model question changes nothing', async ($, on) => {
+  engine(on) // the fake dismisses (answers Cancel)
+  const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox', model: 'sonnet' })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' })
+  await ui.press({ key: 'model-change-g1' })
+  expect(fake.of('update_goal')).toEqual([])
+  await ui.unmount()
+})
+
+test('the model line says when the last run used another model than the goal is set to', async ($, on) => {
+  engine(on)
+  const ran = (model: string) => [{ id: 'r1', status: 'completed', trigger: 'manual', summary: 'ok', started_at: '2026-11-07T07:00:00Z', ended_at: '2026-11-07T07:02:00Z', model }]
+  fakeQuarterdeck(on, [
+    goal({ id: 'g1', name: 'Inbox', model: 'sonnet', runs: ran('claude-opus-5-5') }),
+    goal({ id: 'g2', name: 'Feeds', model: 'sonnet', runs: ran('claude-sonnet-5-5') }),
+  ])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' })
+  await ui.press({ key: 'toggle-g2' })
+  expect(await ui.findAll({ type: 'Text', text: ' (last run used Opus 5.5)' })).toHaveLength(1)
+  await ui.unmount()
+})
+
 test('a category approved every time lately can be switched to auto, after a second press', async ($, on) => {
   engine(on)
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Tidy', suggestions: [{ category: 'file.delete', approved_in_a_row: 10 }] })])

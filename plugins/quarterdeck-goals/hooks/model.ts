@@ -13,13 +13,15 @@ export type OverviewGoal = {
   next_run_at: string | null
   schedule?: Schedule | null
   one_off?: boolean
+  /** Missing from a server older than per-goal models. */
+  model?: string | null
   instructions?: string
   autonomy?: Record<string, string>
   tool_map?: Record<string, string>
   open_run: { id: string; status: string } | null
   /** `waiting`: a run's tool call waits for the person's permission answer (from the guard plugin's reports). */
   activity?: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null; waiting?: { tool: string; since: string } }
-  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null; tokens?: number }[]
+  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null; tokens?: number; model?: string | null }[]
   /** False for a card: runs, memory, open items, instructions and tool rules left out. */
   detail?: boolean
   needs_you_count?: number
@@ -58,10 +60,11 @@ export function toCard(g: OverviewGoal): GoalCard {
     openItems: g.open_items.map(toItem),
     openItemCount: g.open_item_count,
     openRun: g.open_run ? { id: g.open_run.id, status: g.open_run.status } : null,
-    runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at, agentId: r.agent_id ?? null, tokens: r.tokens ?? 0 })),
+    runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at, agentId: r.agent_id ?? null, tokens: r.tokens ?? 0, model: r.model ?? null })),
     nextRunAt: g.next_run_at,
     schedule: g.schedule ?? null,
     oneOff: g.one_off ?? false,
+    model: g.model ?? null,
     instructions: g.instructions ?? '',
     autonomy: g.autonomy ?? {},
     toolMap: g.tool_map ?? {},
@@ -196,6 +199,7 @@ export function describe(g: GoalCard, now: number): string {
       : null,
     g.instructions.trim() ? `Instructions: ${g.instructions.trim()}` : null,
     `Schedule: ${g.oneOff ? 'one-off' : scheduleLabel(g.schedule)}`,
+    `Model: ${goalModelLabel(g.model)}`,
     g.watches.length > 0
       ? `Watches (a run starts when one sees a new line):\n${g.watches.map((w) => `- ${w.name}: every ${w.everyMinutes} min, runs ${w.runs}${w.failing ? ` [failing: ${w.error ?? 'no message'}]` : ''}${w.lastFiredAt ? `, last saw something new ${ago(w.lastFiredAt, now)}` : ''}`).join('\n')}`
       : null,
@@ -515,6 +519,8 @@ export type GoalChanges = {
   /** Watch name → what it runs; null removes it. */
   watches?: Record<string, WatchChange | null>
   status?: 'active' | 'paused'
+  /** The model its runs use; null: the session's. */
+  model?: string | null
 }
 
 /** A watch as update_goal takes it: a command to run, or a tool to call with its input. */
@@ -545,6 +551,7 @@ export function describeGoalChanges(g: GoalCard, c: GoalChanges): string[] {
     else if (w.tool) lines.push(`${had ? 'Watch changed' : 'New watch'} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this tool is called without asking you, and a run starts when its answer has something it hasn't before: ${w.tool} ${JSON.stringify(w.input ?? {})}${w.match ? ` (read with ${w.match})` : ''}`)
     else lines.push(`${had ? 'Watch changed' : 'New watch'} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this command runs on your computer, and a run starts when it prints a line it hasn't before: ${w.command ?? ''}`)
   }
+  if (c.model !== undefined && (c.model || null) !== g.model) lines.push(`Model: ${goalModelLabel(g.model)} → ${goalModelLabel(c.model || null)}`)
   if (c.status && c.status !== g.status) lines.push(c.status === 'paused' ? 'Pause the goal' : 'Resume the goal')
   return lines
 }
@@ -563,9 +570,47 @@ export function runTokens(run: { tokens?: number }): string {
   return `${t >= 1_000_000 ? `${(t / 1_000_000).toFixed(1)}M` : t >= 1000 ? `${Math.round(t / 1000)}k` : t} tokens`
 }
 
-/** "48k tokens · 2m": the new tokens a finished run used (no cache reads), and how long it took; '' when unknown. */
-export function runCost(run: { tokens?: number; startedAt: string; endedAt: string | null }): string {
+/** "Opus 5.5" for claude-opus-5-5, "Sonnet" for sonnet; anything else as it is. */
+export function modelName(model: string): string {
+  const m = /(haiku|sonnet|opus|fable)(?:-(\d{1,2})(?!\d)(?:[-.](\d{1,2})(?!\d))?)?/i.exec(model)
+  if (!m) return model
+  const family = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase()
+  return m[2] ? `${family} ${m[2]}${m[3] ? `.${m[3]}` : ''}` : family
+}
+
+/** A goal's model setting as the person reads it. */
+export function goalModelLabel(model: string | null): string {
+  return model ? modelName(model) : "the session's model"
+}
+
+/** The pane's model choices, in the order asked; "Session's model" is null. At most 4 ($.ui.ask's limit). */
+export const MODEL_CHOICES: { label: string; model: string | null }[] = [
+  { label: "Session's model", model: null },
+  { label: 'Haiku', model: 'haiku' },
+  { label: 'Sonnet', model: 'sonnet' },
+  { label: 'Opus', model: 'opus' },
+]
+
+/** The model new goals get: routine runs don't need the largest model, and a goal can be changed when one does. */
+export const NEW_GOAL_MODEL = 'sonnet'
+
+/**
+ * The person's answer to the model question: a choice, or a model id typed
+ * under Other. null when dismissed or cancelled (nothing changes).
+ */
+export function readModelAnswer(answer: string | null): { model: string | null } | null {
+  const a = (answer ?? '').trim()
+  if (!a || /^cancel$/i.test(a)) return null
+  const choice = MODEL_CHOICES.find((c) => c.label.toLowerCase() === a.toLowerCase())
+  if (choice) return { model: choice.model }
+  if (/^(inherit|default|session)$/i.test(a)) return { model: null }
+  return { model: a }
+}
+
+/** "Opus 5.5 · 48k tokens · 2m": the model a finished run used, the new tokens (no cache reads) and how long it took; '' when unknown. */
+export function runCost(run: { tokens?: number; startedAt: string; endedAt: string | null; model?: string | null }): string {
   const parts: string[] = []
+  if (run.model) parts.push(modelName(run.model))
   const tokens = runTokens(run)
   if (tokens) parts.push(tokens)
   if (run.endedAt) {

@@ -64,7 +64,7 @@ test('/goal-new creates a goal in the session directory; /goal-pause pauses it',
   expect(made.text).toContain('running every 1d')
   expect(fake.of('create_goal')[0]?.input).toEqual({
     name: 'Inbox', objective: 'keep my inbox under 20 unread', working_dir: '/work/project',
-    schedule: { kind: 'interval', minutes: 1440 }, one_off: false,
+    schedule: { kind: 'interval', minutes: 1440 }, one_off: false, model: 'sonnet',
   })
 
   const paused = await $.command.run(typed('goal-pause', 'inbox'))

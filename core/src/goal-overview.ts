@@ -229,6 +229,7 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
         objective: clip(goal.objective, CLIP.objective)!,
         status: goal.status,
         one_off: goal.one_off,
+        model: goal.model,
         instructions: clip(goal.instructions, CLIP.instructions)!,
         autonomy: goal.autonomy,
         tool_map: goal.tool_map,

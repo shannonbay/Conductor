@@ -167,7 +167,7 @@ async function start($: Engine, run: ClaimedRun): Promise<void> {
   let why = 'no agent was started'
   const description = `Goal: ${run.name} (${run.run_id})`
   try {
-    const r = await $.agent.spawn({ subagentType: RUNNER_AGENT, prompt: run.prompt, description, cwd: run.working_dir })
+    const r = await $.agent.spawn({ subagentType: RUNNER_AGENT, prompt: run.prompt, description, cwd: run.working_dir, ...(run.model ? { model: run.model } : {}) })
     agentId = r.agentId
     if ('deny' in r && typeof r.deny === 'string') why = r.deny
     // An answer without the id (a host that doesn't report it): find the agent by its description

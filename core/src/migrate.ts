@@ -36,7 +36,7 @@ export const REVISION_TRIGGERS = [
  * a session still running older code then sees it is outdated (`schemaOutdated`)
  * and leaves scheduling to the newer one.
  */
-export const SCHEMA_VERSION = 3
+export const SCHEMA_VERSION = 4
 
 /** The schema version recorded in the database (0 before versions existed). */
 export function dbSchemaVersion(db: Database): number {
@@ -317,6 +317,8 @@ export function runMigrations(db: Database): void {
     ['last_health_at', 'TEXT'],
     // 1: runs once; when its run ends with nothing open it is done (status 'retired')
     ['one_off', 'INTEGER NOT NULL DEFAULT 0'],
+    // The model its runs use (an alias or a full id); null: the model of the session that starts the run
+    ['model', 'TEXT'],
   ]
   for (const [col, def] of addedGoalColumns) {
     try { db.exec(`ALTER TABLE goals ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }
