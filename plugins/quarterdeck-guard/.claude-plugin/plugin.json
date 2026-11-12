@@ -1,7 +1,7 @@
 {
   "name": "quarterdeck-guard",
   "displayName": "Quarterdeck Guard",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "license": "Apache-2.0",
   "description": "Part of Quarterdeck: install Quarterdeck (quarterdeck-goals), not this on its own. It holds each goal run to what you have allowed: it refuses the kinds of action you turned off, makes the rest wait for your approval, and keeps run reports out of your chat.",
   "author": {
@@ -12,6 +12,7 @@
   "icon": "./.claude-plugin/icon.png",
   "documentationUrl": "https://github.com/shannonbay/Quarterdeck/blob/main/plugins/quarterdeck-guard/README.md",
   "supportUrl": "https://github.com/shannonbay/Quarterdeck/issues",
+  "privacyPolicyUrl": "https://github.com/shannonbay/Quarterdeck/blob/main/PRIVACY.md",
   "keywords": [
     "goals",
     "guard",
