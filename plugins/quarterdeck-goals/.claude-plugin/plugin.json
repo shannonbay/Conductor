@@ -1,7 +1,7 @@
 {
   "name": "quarterdeck-goals",
   "displayName": "Quarterdeck",
-  "version": "0.19.4",
+  "version": "0.20.0",
   "license": "Apache-2.0",
   "description": "Standing goals for Claude Code, like \"keep my inbox under control\" or \"find the best new job ads each week\". Each goal runs on a schedule in a background subagent, asks before it acts, and remembers what you decided. You approve or reject from the Goals pane beside the chat.",
   "author": {
