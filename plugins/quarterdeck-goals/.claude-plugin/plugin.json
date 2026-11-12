@@ -9,6 +9,9 @@
   },
   "homepage": "https://github.com/shannonbay/Quarterdeck",
   "repository": "https://github.com/shannonbay/Quarterdeck",
+  "icon": "./.claude-plugin/icon.png",
+  "documentationUrl": "https://github.com/shannonbay/Quarterdeck/blob/main/plugins/quarterdeck-goals/README.md",
+  "supportUrl": "https://github.com/shannonbay/Quarterdeck/issues",
   "keywords": [
     "goals",
     "automation",
