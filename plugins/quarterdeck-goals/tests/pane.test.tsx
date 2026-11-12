@@ -55,6 +55,19 @@ test("each goal shows a line of what its agent is doing, clipped to the pane", a
   }
 })
 
+test("expanding a quiet goal adds no blank line above its title", async ($, on) => {
+  engine(on)
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' }), goal({ id: 'g2', name: 'Invoices' })])
+  await $.session.start(START)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'g1' }))?.props.marginBottom).toBe(0)
+  await ui.press({ key: 'toggle-g2' })
+  expect((await ui.find({ key: 'toggle-g2' }))?.props.label).toBe('▾ Invoices')
+  expect((await ui.find({ key: 'g1' }))?.props.marginBottom).toBe(0)
+  await ui.unmount()
+})
+
 test('a run waiting for a permission answer says so, on which call, and where to answer', async ($, on) => {
   engine(on)
   fakeQuarterdeck(on, [

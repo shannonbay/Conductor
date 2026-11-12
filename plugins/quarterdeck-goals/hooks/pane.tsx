@@ -109,6 +109,8 @@ export async function renderPane($: Engine, e: E) {
   const shown = await getExpanded($)
   // A goal with nothing for the person is one line until it is expanded
   const oneLine = current.map((g) => isQuiet(g) && !shown.includes(g.id))
+  // A quiet goal the person expanded (its title must stay where they pressed it)
+  const opened = current.map((g) => isQuiet(g) && shown.includes(g.id))
   const view: View = {
     now: await $.clock.now(),
     columns: e.props.bodyColumns,
@@ -154,8 +156,9 @@ export async function renderPane($: Engine, e: E) {
         </Box>
       )}
       {current.map((g, i) => (oneLine[i]
-        // One-line goals sit together; a blank line only before a card or the next section
-        ? quietLine($, e, view, g, i, oneLine[i + 1] ? 0 : 1)
+        // One-line goals sit together; a blank line only before a card that needs you or the
+        // next section, none above a goal you opened, so its title stays where you pressed it
+        ? quietLine($, e, view, g, i, oneLine[i + 1] || opened[i + 1] ? 0 : 1)
         : goalCard($, e, view, g, i)))}
       {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo, askingAbout, editing)}
       {done.length > 0 && doneSection($, e, view, done)}
