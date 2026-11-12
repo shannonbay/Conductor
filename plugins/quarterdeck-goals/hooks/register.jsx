@@ -159,10 +159,11 @@ function toCard(g) {
     openItems: g.open_items.map(toItem),
     openItemCount: g.open_item_count,
     openRun: g.open_run ? { id: g.open_run.id, status: g.open_run.status } : null,
-    runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at, agentId: r.agent_id ?? null, tokens: r.tokens ?? 0 })),
+    runs: g.runs.map((r) => ({ id: r.id, status: r.status, trigger: r.trigger, summary: r.summary, startedAt: r.started_at, endedAt: r.ended_at, agentId: r.agent_id ?? null, tokens: r.tokens ?? 0, model: r.model ?? null })),
     nextRunAt: g.next_run_at,
     schedule: g.schedule ?? null,
     oneOff: g.one_off ?? false,
+    model: g.model ?? null,
     instructions: g.instructions ?? "",
     autonomy: g.autonomy ?? {},
     toolMap: g.tool_map ?? {},
@@ -180,6 +181,11 @@ function lastRun(g) {
 }
 function isFailed(status) {
   return status === "failed" || status === "timed_out";
+}
+function permissionWhere(mine, standing) {
+  if (mine) return "Answer the prompt in this window, or Cancel run.";
+  if (standing) return 'Answer it in the "Quarterdeck goals" chat (Claude app or claude.ai/code), or Cancel run.';
+  return "Answer it in the window running this goal (or the Claude app), or Cancel run.";
 }
 function isQuiet(g) {
   const run = lastRun(g);
@@ -255,6 +261,7 @@ ${g.openItems.map((i) => `- item ${i.id}: ${i.title}`).join("\n")}` : null,
 ${g.runs.map((r) => `- ${r.status} (${r.trigger}) ${ago(r.endedAt ?? r.startedAt, now)}${r.summary ? ` — ${r.summary}` : ""}`).join("\n")}` : null,
     g.instructions.trim() ? `Instructions: ${g.instructions.trim()}` : null,
     `Schedule: ${g.oneOff ? "one-off" : scheduleLabel(g.schedule)}`,
+    `Model: ${goalModelLabel(g.model)}`,
     g.watches.length > 0 ? `Watches (a run starts when one sees a new line):
 ${g.watches.map((w) => `- ${w.name}: every ${w.everyMinutes} min, runs ${w.runs}${w.failing ? ` [failing: ${w.error ?? "no message"}]` : ""}${w.lastFiredAt ? `, last saw something new ${ago(w.lastFiredAt, now)}` : ""}`).join("\n")}` : null,
     `Autonomy (unlisted categories: propose): ${Object.entries(g.autonomy).map(([c, m]) => `${c}=${m}`).join(", ") || "none set"}`,
@@ -398,6 +405,7 @@ function suggestByKeywords(name, objective) {
   for (const [re, suggestion] of KEYWORDS) if (re.test(text)) return suggestion;
   return { choice: "daily", reason: "goals are ongoing unless they are clearly one-offs" };
 }
+var MODEL_TIERS = ["haiku", "sonnet", "opus"];
 function parseSuggestion(text) {
   const json = /\{[\s\S]*\}/.exec(text)?.[0];
   if (!json) return null;
@@ -405,9 +413,13 @@ function parseSuggestion(text) {
     const v = JSON.parse(json);
     const choice = SCHEDULE_CHOICES.find((c) => c.key === v.choice && c.key !== "on-demand");
     if (!choice) return null;
-    const reason = typeof v.reason === "string" && v.reason.trim() ? v.reason.trim().replace(/\.$/, "") : "suggested from its objective";
+    const sentence = (s) => typeof s === "string" && s.trim() ? s.trim().replace(/\.$/, "") : "";
+    const reason = sentence(v.reason) || "suggested from its objective";
     const title = typeof v.title === "string" ? cleanTitle(v.title) : "";
-    return { choice: choice.key, reason, ...title && { title } };
+    const named = typeof v.model === "string" ? v.model.trim().toLowerCase() : "";
+    const model = MODEL_TIERS.find((m) => m === named);
+    const modelReason = model ? sentence(v.model_reason) : "";
+    return { choice: choice.key, reason, ...title && { title }, ...model && { model }, ...modelReason && { modelReason } };
   } catch {
     return null;
   }
@@ -525,6 +537,7 @@ function describeGoalChanges(g, c) {
     else if (w.tool) lines.push(`${had ? "Watch changed" : "New watch"} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this tool is called without asking you, and a run starts when its answer has something it hasn't before: ${w.tool} ${JSON.stringify(w.input ?? {})}${w.match ? ` (read with ${w.match})` : ""}`);
     else lines.push(`${had ? "Watch changed" : "New watch"} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this command runs on your computer, and a run starts when it prints a line it hasn't before: ${w.command ?? ""}`);
   }
+  if (c.model !== void 0 && (c.model || null) !== g.model) lines.push(`Model: ${goalModelLabel(g.model)} → ${goalModelLabel(c.model || null)}`);
   if (c.status && c.status !== g.status) lines.push(c.status === "paused" ? "Pause the goal" : "Resume the goal");
   return lines;
 }
@@ -538,8 +551,36 @@ function runTokens(run) {
   if (t <= 0) return "";
   return `${t >= 1e6 ? `${(t / 1e6).toFixed(1)}M` : t >= 1e3 ? `${Math.round(t / 1e3)}k` : t} tokens`;
 }
+function modelName(model) {
+  const m = /(haiku|sonnet|opus|fable)(?:-(\d{1,2})(?!\d)(?:[-.](\d{1,2})(?!\d))?)?/i.exec(model);
+  if (!m) return model;
+  const family = m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+  return m[2] ? `${family} ${m[2]}${m[3] ? `.${m[3]}` : ""}` : family;
+}
+function goalModelLabel(model) {
+  return model ? modelName(model) : "the session's model";
+}
+var MODEL_CHOICES = [
+  { label: "Session's model", model: null },
+  { label: "Haiku", model: "haiku" },
+  { label: "Sonnet", model: "sonnet" },
+  { label: "Opus", model: "opus" }
+];
+var NEW_GOAL_MODEL = "sonnet";
+function newGoalModelText(model, reason) {
+  return ` Its runs use ${modelName(model)}${reason ? ` (${reason})` : ""}; change that in the Goals pane.`;
+}
+function readModelAnswer(answer) {
+  const a = (answer ?? "").trim();
+  if (!a || /^cancel$/i.test(a)) return null;
+  const choice = MODEL_CHOICES.find((c) => c.label.toLowerCase() === a.toLowerCase());
+  if (choice) return { model: choice.model };
+  if (/^(inherit|default|session)$/i.test(a)) return { model: null };
+  return { model: a };
+}
 function runCost(run) {
   const parts = [];
+  if (run.model) parts.push(modelName(run.model));
   const tokens = runTokens(run);
   if (tokens) parts.push(tokens);
   if (run.endedAt) {
@@ -1009,7 +1050,7 @@ async function start($, run) {
   let why = "no agent was started";
   const description = `Goal: ${run.name} (${run.run_id})`;
   try {
-    const r = await $.agent.spawn({ subagentType: RUNNER_AGENT, prompt: run.prompt, description, cwd: run.working_dir });
+    const r = await $.agent.spawn({ subagentType: RUNNER_AGENT, prompt: run.prompt, description, cwd: run.working_dir, ...run.model ? { model: run.model } : {} });
     agentId = r.agentId;
     if ("deny" in r && typeof r.deny === "string") why = r.deny;
     else if (!agentId) agentId = (await $.agent.list()).find((a) => a.description === description && !ENDED.has(a.status))?.id;
@@ -1079,15 +1120,16 @@ async function cancelRun($, goalId) {
 }
 
 // schedule.ts
-var SYSTEM = `You choose how often a standing goal for an AI agent should run. Most goals are ongoing work (keeping, maintaining, monitoring, triaging, checking, tidying) and should run on a schedule; pick a one-off only when the goal is clearly a single task that is finished once done (install, set up, migrate, fix this one thing).
-Answer with JSON only: {"choice": "hourly" | "6h" | "daily" | "weekly" | "one-off", "reason": "<one short sentence>"}, adding "title": "<2-5 word name, Title Case>" when the goal has no name yet.
-Guide: inboxes, alerts and triage hourly; monitoring and watching every 6 hours; maintaining, keeping current and checking daily; reports, digests and reviews weekly.`;
+var SYSTEM = `You set up a standing goal for an AI agent: how often it runs, and which model its runs use.
+Schedule: most goals are ongoing work (keeping, maintaining, monitoring, triaging, checking, tidying) and should run on a schedule; pick a one-off only when the goal is clearly a single task that is finished once done (install, set up, migrate, fix this one thing). Inboxes, alerts and triage hourly; monitoring and watching every 6 hours; maintaining, keeping current and checking daily; reports, digests and reviews weekly.
+Model: "haiku" when a run only checks something and reports or notifies (a release watch, a price check, a status check, a simple rule applied to files). "sonnet" when it triages, sorts or classifies and proposes actions for the person to approve; this is the usual choice. "opus" when it writes something a person will read (drafts, replies, reports, a README, cover letters) or makes hard judgement calls with real consequences. A goal that runs hourly or more often runs many times a day: prefer a smaller model there unless the writing or judgement clearly needs it.
+Answer with JSON only: {"choice": "hourly" | "6h" | "daily" | "weekly" | "one-off", "reason": "<one short sentence>", "model": "haiku" | "sonnet" | "opus", "model_reason": "<a few words, e.g. it only checks and reports>"}, adding "title": "<2-5 word name, Title Case>" when the goal has no name yet.`;
 async function suggestSchedule($, name, objective) {
   let suggestion = null;
   try {
     const prompt = `Goal name: ${name ?? "(none yet: suggest a title)"}
 Objective: ${objective}`;
-    const r = await $.model.complete({ model: "haiku", system: SYSTEM, prompt, maxTokens: 120, timeoutMs: 15e3 });
+    const r = await $.model.complete({ model: "haiku", system: SYSTEM, prompt, maxTokens: 200, timeoutMs: 15e3 });
     if (r.isAnswered) suggestion = parseSuggestion(r.text);
   } catch {
   }
@@ -1415,6 +1457,7 @@ async function renderPane($, e) {
   const firstWithProposal = current.find((g) => g.needsYou.length > 0);
   const shown = await getExpanded($);
   const oneLine = current.map((g) => isQuiet(g) && !shown.includes(g.id));
+  const opened = current.map((g) => isQuiet(g) && shown.includes(g.id));
   const view = {
     now: await $.clock.now(),
     columns: e.props.bodyColumns,
@@ -1426,7 +1469,9 @@ async function renderPane($, e) {
     discussing: await getDiscussing($),
     first: firstWithProposal ? `${firstWithProposal.id}/${firstWithProposal.needsYou[0].id}` : null,
     // Only a full card has Run now to carry the hotkey
-    runnable: current.find((g, i) => canRun(g) && !oneLine[i])?.id ?? null
+    runnable: current.find((g, i) => canRun(g) && !oneLine[i])?.id ?? null,
+    mine: Object.values(await getRuns($)).map((r) => r.goalId),
+    standing: s.standing === true
   };
   return <Box flexDirection="column">
       {guardMissing2 && <Text color="yellow">{GUARD_MISSING}</Text>}
@@ -1451,7 +1496,7 @@ async function renderPane($, e) {
           <Text dimColor>No goals yet.</Text>
           <Text dimColor>Create one with /goal-new &lt;objective&gt;; /goal-new alone offers ready-made ones.</Text>
         </Box>}
-      {current.map((g, i) => oneLine[i] ? quietLine($, e, view, g, i, oneLine[i + 1] ? 0 : 1) : goalCard($, e, view, g, i))}
+      {current.map((g, i) => oneLine[i] ? quietLine($, e, view, g, i, oneLine[i + 1] || opened[i + 1] ? 0 : 1) : goalCard($, e, view, g, i))}
       {todos2 && todos2.lists.length > 0 && todoSection($, e, view, todos2, addingTo2, askingAbout2, editing)}
       {done.length > 0 && doneSection($, e, view, done)}
       {message && <Text color="red">{message}</Text>}
@@ -1556,7 +1601,10 @@ function activityLine($, e, view, g) {
           <Text color="yellow">⏸ {clip(text, Math.max(view.columns - 2 - age.length, 10))}</Text>
           <Text dimColor>{age}</Text>
         </Text>
-        <Text dimColor>{clip("Answer Claude Code's permission prompt for this run: in its window, the Claude app or claude.ai/code.", Math.max(view.columns - 2, 10))}</Text>
+        {
+      /* Wraps rather than clips: where to answer is the point of the line */
+    }
+        <Text dimColor>{permissionWhere(view.mine.includes(g.id), view.standing)}</Text>
       </Box>;
   }
   if (state === "running") {
@@ -1697,6 +1745,7 @@ function details($, e, view, g) {
   return <Box key={`details-${g.id}`} flexDirection="column" marginTop={1}>
       <Text dimColor>{g.objective}</Text>
       <Text dimColor>Runs {scheduleLabel(g.schedule)}{g.schedule ? "" : " (set one with /goal-schedule)"}</Text>
+      {modelLine($, e, view, g)}
       {g.watches.map((w) => <Text key={`watch-${g.id}/${w.name}`} dimColor>
           Also runs when "{w.name}" sees something new (checked every {w.everyMinutes} min{w.lastFiredAt ? `, last ${ago(w.lastFiredAt, view.now)}` : ""})
           {w.failing && <Text color="red"> · can't check: {w.error ?? "the command fails"}</Text>}
@@ -1856,6 +1905,39 @@ function todoSection($, e, view, todos2, addingTo2, askingAbout2, editing) {
   })}
     </Box>;
 }
+function modelLine($, e, view, g) {
+  const { Box, Text } = $.ui.resolve(e);
+  const used = lastRun(g)?.model ?? null;
+  const differs = used !== null && g.model !== null && !sameModel(g.model, used);
+  return <Box key={`model-${g.id}`}>
+      <Text dimColor>{`Model: ${goalModelLabel(g.model)} · `}</Text>
+      {action($, e, { key: `model-change-${g.id}`, label: view.doing === `model:${g.id}` ? "Choosing…" : "Change…", onPress: () => void act($, `model:${g.id}`, "change the model", () => chooseModel($, g)) })}
+      {differs && <Text color="yellow"> (last run used {modelName(used)})</Text>}
+    </Box>;
+}
+function sameModel(setting, used) {
+  const s = setting.toLowerCase();
+  const u = used.toLowerCase();
+  return s === u || !s.includes("-") && u.includes(s) || u.startsWith(s);
+}
+async function chooseModel($, g) {
+  let answer = null;
+  try {
+    answer = await $.ui.ask(
+      `Which model should "${g.name}" run on? Now: ${goalModelLabel(g.model)}. Smaller models cost less and suit routine work; pick a larger one if its runs miss things. Or type a full model id under Other.`,
+      MODEL_CHOICES.map((c) => c.label)
+    );
+  } catch {
+    answer = null;
+  }
+  const read2 = readModelAnswer(answer);
+  if (!read2 || read2.model === g.model) {
+    $.ui.toast(`${g.name}: model unchanged.`);
+    return;
+  }
+  await updateGoal($, g.id, { model: read2.model });
+  $.ui.toast(`${g.name} now runs on ${goalModelLabel(read2.model)}.`);
+}
 function allowSection($, e, view, g) {
   const { Box, Text, Button } = $.ui.resolve(e);
   const { rules, skipped } = allowRules(g);
@@ -1909,6 +1991,8 @@ var TEMPLATES = [
       "Delete means move to the bin, never delete permanently. When a sender's unsubscribe and clean-up are done, complete its item."
     ].join(" "),
     schedule: { kind: "interval", minutes: DAY },
+    model: "sonnet",
+    modelReason: "it sorts senders and you approve each unsubscribe",
     autonomy: { "email.unsubscribe": "propose", "email.delete": "propose", "email.send": "off" },
     tool_map: {
       "mcp__quarterdeck__unsubscribe_one_click": "email.unsubscribe",
@@ -1923,6 +2007,8 @@ var TEMPLATES = [
     objective: "Once a week, find new job ads that match what I'm looking for and tell me the top three",
     instructions: "",
     schedule: { kind: "interval", minutes: 7 * DAY },
+    model: "sonnet",
+    modelReason: "it ranks ads against what you want",
     autonomy: { "email.send": "propose" },
     tool_map: gmail({ send_message: "email.send", reply: "email.send", forward: "email.send" }),
     needs: "Claude in Chrome or web access to search job sites; the Gmail connector only if you want the top 3 emailed",
@@ -1952,6 +2038,8 @@ var TEMPLATES = [
       "Leave anything that isn't an installer alone."
     ].join(" "),
     schedule: { kind: "interval", minutes: 7 * DAY },
+    model: "haiku",
+    modelReason: "it applies a simple rule to files",
     autonomy: { "file.delete": "propose" },
     tool_map: {},
     needs: "nothing extra"
@@ -1967,6 +2055,8 @@ var TEMPLATES = [
       "In your end_run summary, list what looks like it needs a reply or action from me, with sender and subject."
     ].join(" "),
     schedule: { kind: "interval", minutes: 360 },
+    model: "sonnet",
+    modelReason: "it sorts mail and you approve what it archives",
     autonomy: { "email.archive": "propose", "email.delete": "off", "email.send": "off" },
     tool_map: gmail({
       "label_*": "email.archive",
@@ -1987,6 +2077,8 @@ var TEMPLATES = [
     instructions: "",
     // set below: GITHUB_PROFILE
     schedule: { kind: "interval", minutes: 7 * DAY },
+    model: "opus",
+    modelReason: "it writes your public profile",
     autonomy: { "profile.readme_edit": "propose" },
     tool_map: {},
     needs: "the GitHub CLI, gh (the first run installs it if it's missing; you sign in once with gh auth login)",
@@ -2106,7 +2198,7 @@ var TOOLS = [
   },
   {
     name: "update_goal",
-    description: "Changes a Quarterdeck goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), watches, or pause / resume. A watch starts a run when something happens (a new issue, a feed entry, a file, an email): it is a shell command, run every few minutes in the goal's directory, that prints one line per current item, or a read-only connector tool called every few minutes; an item not there before starts a run, which is told the new ones. The answer says whether each new watch's command worked. Try the command or the tool yourself first; the goal-watches skill has recipes. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
+    description: "Changes a Quarterdeck goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), watches, the model its runs use, or pause / resume. A watch starts a run when something happens (a new issue, a feed entry, a file, an email): it is a shell command, run every few minutes in the goal's directory, that prints one line per current item, or a read-only connector tool called every few minutes; an item not there before starts a run, which is told the new ones. The answer says whether each new watch's command worked. Try the command or the tool yourself first; the goal-watches skill has recipes. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
     inputSchema: {
       type: "object",
       properties: {
@@ -2136,7 +2228,8 @@ var TOOLS = [
             }
           }
         },
-        status: { type: "string", enum: ["active", "paused"] }
+        status: { type: "string", enum: ["active", "paused"] },
+        model: { type: ["string", "null"], description: "The model its runs use: haiku, sonnet, opus or a full model id; null: the model of the session that starts each run. Suggest a larger one when runs miss things or time out, a smaller one for routine work" }
       },
       required: ["goal"]
     }
@@ -2204,7 +2297,7 @@ ${traced.map((l) => `- ${l}`).join("\n")}` : "";
   if (!goal.detail && (name === "goal_detail" || name === "update_goal")) goal = await withDetail($, goal);
   if (name === "goal_detail") return { text: describe(goal, now), isError: false };
   if (name === "update_goal") {
-    const keys = ["name", "objective", "instructions", "autonomy", "tool_map", "add_memory", "forget_memory", "watches", "status"];
+    const keys = ["name", "objective", "instructions", "autonomy", "tool_map", "add_memory", "forget_memory", "watches", "status", "model"];
     const changes = Object.fromEntries(keys.filter((k) => input[k] !== void 0).map((k) => [k, input[k]]));
     const lines = describeGoalChanges(goal, changes);
     if (lines.length === 0) return fail(`Nothing to change in ${goal.name}: give at least one new value.`);
@@ -2324,6 +2417,7 @@ async function newFromTemplate($) {
       objective: template.objective,
       working_dir: cwd,
       schedule: template.schedule,
+      model: template.model,
       instructions,
       autonomy: template.autonomy,
       tool_map: template.tool_map
@@ -2333,7 +2427,7 @@ async function newFromTemplate($) {
   }
   await kick($);
   await refresh($);
-  return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute. It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`;
+  return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute.${newGoalModelText(template.model, template.modelReason)} It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`;
 }
 async function newGoal($, args) {
   const { name: given, objective } = splitGoalArgs(args);
@@ -2342,19 +2436,21 @@ async function newGoal($, args) {
   const suggestion = await suggestSchedule($, given, objective);
   const name = given ?? suggestion.title ?? fallbackTitle(objective);
   const choice = await askSchedule($, name, suggestion);
+  const model = suggestion.model ?? NEW_GOAL_MODEL;
   let created;
   try {
-    created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff });
+    created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff, model });
   } catch (err) {
     return `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}`;
   }
   await kick($);
   await refresh($);
   const where = `in ${cwd}`;
-  if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${await phoneHint($)}`;
+  const runsOn = newGoalModelText(model, suggestion.model && suggestion.modelReason);
+  if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${runsOn}${await phoneHint($)}`;
   const watch = soundsEventDriven(objective) ? ` To start a run as soon as something happens, not only on a timer, ask Claude to add a watch to "${name}".` : "";
-  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${watch}${await phoneHint($)}`;
-  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${watch}${await phoneHint($)}`;
+  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${runsOn}${watch}${await phoneHint($)}`;
+  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${runsOn}${watch}${await phoneHint($)}`;
 }
 async function applySchedule($, goal, schedule, oneOff = false) {
   let next = null;

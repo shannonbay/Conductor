@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Quarterdeck MCP server 0.19.4, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.20.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 // Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
 const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
@@ -363,7 +363,9 @@ function runMigrations(db) {
     ["health_triggers_run", "INTEGER NOT NULL DEFAULT 1"],
     ["last_health_at", "TEXT"],
     // 1: runs once; when its run ends with nothing open it is done (status 'retired')
-    ["one_off", "INTEGER NOT NULL DEFAULT 0"]
+    ["one_off", "INTEGER NOT NULL DEFAULT 0"],
+    // The model its runs use (an alias or a full id); null: the model of the session that starts the run
+    ["model", "TEXT"]
   ];
   for (const [col, def] of addedGoalColumns) {
     try {
@@ -533,7 +535,7 @@ var init_migrate = __esm({
       "trg_goal_watches_update_revision",
       "trg_goal_watches_delete_revision"
     ];
-    SCHEMA_VERSION = 3;
+    SCHEMA_VERSION = 4;
   }
 });
 
@@ -799,7 +801,8 @@ function deserializeGoal(r) {
     health_every_minutes: r.health_every_minutes ?? 60,
     health_triggers_run: r.health_triggers_run === void 0 ? true : Boolean(r.health_triggers_run),
     last_health_at: r.last_health_at ?? null,
-    one_off: Boolean(r.one_off)
+    one_off: Boolean(r.one_off),
+    model: r.model ?? null
   };
 }
 function createGoal(db, plan, goal, interval) {
@@ -821,8 +824,18 @@ function createGoal(db, plan, goal, interval) {
     );
     if (interval) setIntervalTrigger(db, plan.id, interval);
     if (goal.one_off) db.prepare("UPDATE goals SET one_off = 1 WHERE plan_id = ?").run(plan.id);
+    if (goal.model) db.prepare("UPDATE goals SET model = ? WHERE plan_id = ?").run(normalizeModel(goal.model), plan.id);
   })();
   return getGoal(db, plan.id);
+}
+function normalizeModel(model) {
+  const m = (model ?? "").trim();
+  if (!m || /^(inherit|default|session)$/i.test(m)) return null;
+  if (MODEL_ALIASES.includes(m.toLowerCase())) return m.toLowerCase();
+  if (m.length > 100 || !/^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]*$/.test(m)) {
+    throw new Error(`"${m}" isn't a model: use haiku, sonnet, opus, a full model id, or null for the session's model.`);
+  }
+  return m;
 }
 function getGoal(db, planId) {
   const row = db.prepare("SELECT * FROM goals WHERE plan_id = ?").get(planId);
@@ -979,13 +992,14 @@ function deleteGoal(db, planId) {
   })();
   return { name: plan.name };
 }
-var newId, GOAL_TABLES;
+var newId, MODEL_ALIASES, GOAL_TABLES;
 var init_goals = __esm({
   "../core/src/goals.ts"() {
     "use strict";
     init_queries();
     init_types();
     newId = (prefix) => `${prefix}_${randomUUID2().replace(/-/g, "").slice(0, 12)}`;
+    MODEL_ALIASES = ["haiku", "sonnet", "opus"];
     GOAL_TABLES = [
       "goal_watch_events",
       "goal_watches",
@@ -1434,6 +1448,27 @@ function guardRun(db, run, toolName) {
   const reason = `Quarterdeck goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`;
   record(db, run, toolName, category, "deny", reason);
   return { decision: "deny", category, run_id: run.id, reason };
+}
+function usableAsAllowRule(pattern) {
+  return !pattern.includes("*") || /^mcp__[^*]+?__\*$/.test(pattern);
+}
+function standingAllowRules(db) {
+  const rules = /* @__PURE__ */ new Set();
+  const goals = db.prepare("SELECT g.plan_id FROM goals g JOIN plans p ON p.id = g.plan_id WHERE g.status = 'active'").all();
+  for (const { plan_id } of goals) {
+    const goal = getGoal(db, plan_id);
+    if (!goal) continue;
+    const allowed = (category) => category !== null && autonomyFor(goal, category) !== "off";
+    for (const [pattern, category] of Object.entries(goal.tool_map)) {
+      if (allowed(category) && usableAsAllowRule(pattern)) rules.add(pattern);
+    }
+    const seen = db.prepare("SELECT DISTINCT tool_name FROM goal_tool_calls WHERE plan_id = ?").all(plan_id);
+    for (const { tool_name } of seen) {
+      if (allowed(matchToolCategory(goal.tool_map, tool_name))) rules.add(tool_name);
+    }
+  }
+  const own = [QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX];
+  return [...rules].filter((r) => !own.some((p) => r.startsWith(p))).sort();
 }
 function listToolCalls(db, planId, limit = 50) {
   return db.prepare("SELECT * FROM goal_tool_calls WHERE plan_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?").all(planId, limit);
@@ -1896,6 +1931,7 @@ function applyGoalChanges(db, planId, changes) {
   for (const [category, mode] of Object.entries(changes.autonomy ?? {})) {
     if (mode !== null && !MODES.has(mode)) throw new GoalError(`"${mode}" isn't a mode for ${category}: use off, propose or auto.`);
   }
+  const model = changes.model === void 0 ? void 0 : normalizeModel(changes.model);
   for (const id of changes.forget_memory ?? []) {
     if (getMemory(db, id)?.plan_id !== planId) throw new GoalError(`Memory ${id} isn't this goal's.`);
   }
@@ -1950,6 +1986,10 @@ function applyGoalChanges(db, planId, changes) {
       const after = setWatch(db, planId, name, spec);
       if (before && describeWatch(before) === describeWatch(after) && before.every_minutes === after.every_minutes) continue;
       done.push(`watch "${after.name}" ${before ? "changed" : "added"}: every ${after.every_minutes} min, ${after.kind === "tool" ? "calls" : "runs"} ${describeWatch(after)}`);
+    }
+    if (model !== void 0 && model !== goal.model) {
+      updateGoal(db, planId, { model });
+      done.push(model ? `runs use ${model}` : "runs use the session's model");
     }
     if (changes.status && changes.status !== goal.status) {
       if (goal.status === "retired") throw new GoalError("This goal is done; run it again first.");
@@ -2091,6 +2131,7 @@ function claimRun(db, planId, opts) {
     working_dir: plan.working_dir,
     trigger: run.trigger,
     max_run_minutes: goal.limits.max_run_minutes,
+    model: goal.model,
     prompt: goalRunPrompt({ goalId: planId, runId: run.id, name: plan.name, workingDir: plan.working_dir, maxRunMinutes: goal.limits.max_run_minutes })
   };
 }
@@ -2363,6 +2404,7 @@ function buildOverview(db, detail = "all", standingSession = null) {
       objective: clip(goal.objective, CLIP.objective),
       status: goal.status,
       one_off: goal.one_off,
+      model: goal.model,
       instructions: clip(goal.instructions, CLIP.instructions),
       autonomy: goal.autonomy,
       tool_map: goal.tool_map,
@@ -2567,6 +2609,7 @@ __export(src_exports, {
   HEALTH_TIMEOUT_S: () => HEALTH_TIMEOUT_S,
   LEASE_MS: () => LEASE_MS,
   MEMORY_BRIEF_CHARS: () => MEMORY_BRIEF_CHARS,
+  MODEL_ALIASES: () => MODEL_ALIASES,
   OUTPUT_TAIL_CHARS: () => OUTPUT_TAIL_CHARS,
   PLUGIN_QUARTERDECK_TOOL_PREFIX: () => PLUGIN_QUARTERDECK_TOOL_PREFIX,
   PROMOTE_AFTER: () => PROMOTE_AFTER,
@@ -2684,6 +2727,7 @@ __export(src_exports, {
   nextChildId: () => nextChildId,
   nextIntervalRun: () => nextIntervalRun,
   nextScheduledRun: () => nextScheduledRun,
+  normalizeModel: () => normalizeModel,
   openDatabase: () => openDatabase,
   overrideCompletion: () => overrideCompletion,
   overviewWithEtag: () => overviewWithEtag,
@@ -2713,6 +2757,7 @@ __export(src_exports, {
   setSchedule: () => setSchedule,
   setTodo: () => setTodo,
   setWatch: () => setWatch,
+  standingAllowRules: () => standingAllowRules,
   startRun: () => startRun,
   takeDueToolWatches: () => takeDueToolWatches,
   takeLease: () => takeLease,
@@ -2725,6 +2770,7 @@ __export(src_exports, {
   updatePlan: () => updatePlan,
   updateRun: () => updateRun,
   updateTask: () => updateTask,
+  usableAsAllowRule: () => usableAsAllowRule,
   verifyEventSecret: () => verifyEventSecret,
   watchDue: () => watchDue,
   watchFailing: () => watchFailing,
@@ -2797,6 +2843,8 @@ var PERMISSION_MODES = ["acceptEdits", "auto", "bypassPermissions", "manual", "d
 var DEFAULT_PERMISSION_MODE = "auto";
 var ASKING_MODES = ["manual", "plan"];
 var OWN_TOOL_RULES = ["mcp__plugin_quarterdeck-goals_quarterdeck", "mcp__quarterdeck"];
+var RESUME_MAX_BYTES = 2e6;
+var RESUME_SETTLE_MS = 5e3;
 function modeWarning(permissionMode) {
   if (!permissionMode) return `it has no permission mode of its own, so it uses your default; if that one asks before a tool runs, its runs wait with nobody to answer`;
   if (ASKING_MODES.includes(permissionMode)) return `its permission mode is "${permissionMode}", which asks before a tool runs, and nobody is there to answer (a prompt does reach the Claude app on your phone)`;
@@ -2817,7 +2865,7 @@ function status(deps) {
     sessionId: live?.sessionId ?? null,
     holdsLease: live !== null && holder === live.sessionId,
     leaseElsewhere: holder !== null && holder !== live?.sessionId,
-    stale: live !== null && live.build !== deps.build,
+    stale: live !== null && (live.build !== deps.build || rulesChanged(deps, live)),
     waiting: live ? waitingOn(deps.screenText?.(live.pid)) : null
   };
 }
@@ -2826,22 +2874,51 @@ function statusText(s) {
   if (!s.running) return "The standing session is not running. Start it with: quarterdeck runner start";
   const who = s.holdsLease ? "it is the session starting goal runs" : s.leaseElsewhere ? "another session holds the goal runs (an open Claude Code window, or a session that just stopped); it takes over within 90 seconds of that one going quiet" : "no session has started goal runs in the last minutes (it takes over within 90 seconds)";
   if (s.waiting) return `The standing session is running (${s.sessionId}) but waiting to be told its folder is safe, so no goal runs in it yet. ${ATTACH_HINT}`;
-  return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? " It started with an older Quarterdeck and restarts at the next check with no run going." : ""}`;
+  return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? " It started with an older Quarterdeck or other goal tool rules, and restarts at the next check with no run going." : ""}`;
 }
-function startArgs(sessionId, permissionMode) {
-  return ["--remote-control", SESSION_NAME, "--name", SESSION_NAME, "--session-id", sessionId, "--allowedTools", OWN_TOOL_RULES.join(","), ...permissionMode ? ["--permission-mode", permissionMode] : []];
+function startArgs(sessionId, permissionMode, resume = false, allowed = []) {
+  return ["--remote-control", SESSION_NAME, "--name", SESSION_NAME, resume ? "--resume" : "--session-id", sessionId, "--allowedTools", [...OWN_TOOL_RULES, ...allowed].join(","), ...permissionMode ? ["--permission-mode", permissionMode] : []];
+}
+function allowRulesNow(deps) {
+  return deps.allowRules?.() ?? [];
+}
+function rulesChanged(deps, live) {
+  return (live.allowed ?? []).join(",") !== allowRulesNow(deps).join(",");
+}
+function resumableId(deps, state) {
+  if (!state?.sessionId) return null;
+  const bytes = deps.transcriptBytes(state.sessionId);
+  return bytes !== null && bytes < RESUME_MAX_BYTES ? state.sessionId : null;
+}
+function stayedUp(deps, pid) {
+  for (let waited = 0; waited < RESUME_SETTLE_MS; waited += 500) {
+    deps.sleep(500);
+    if (!deps.pidAlive(pid)) return false;
+  }
+  return true;
 }
 function checkMode(permissionMode) {
   if (permissionMode && !PERMISSION_MODES.includes(permissionMode)) throw new Error(`Unknown permission mode "${permissionMode}" (one of: ${PERMISSION_MODES.join(", ")}).`);
 }
 function start(deps, opts = {}) {
-  const permissionMode = opts.permissionMode ?? deps.readState()?.permissionMode;
+  const previous = deps.readState();
+  const permissionMode = opts.permissionMode ?? previous?.permissionMode;
   checkMode(permissionMode);
   const live = liveState(deps);
   if (live) return { started: false, sessionId: live.sessionId, text: `The standing session is already running (${live.sessionId}).` };
+  const allowed = allowRulesNow(deps);
+  const extra = allowed.length > 0 ? { allowed } : {};
+  const earlier = resumableId(deps, previous);
+  if (earlier) {
+    const pid2 = deps.spawnSession(startArgs(earlier, permissionMode, true, allowed));
+    if (stayedUp(deps, pid2)) {
+      deps.writeState({ sessionId: earlier, pid: pid2, build: deps.build, ...permissionMode ? { permissionMode } : {}, ...extra });
+      return { started: true, sessionId: earlier, text: `Started the standing session again (${earlier}). It goes on in its chat "${SESSION_NAME}" in the Claude app and at claude.ai/code.` };
+    }
+  }
   const sessionId = deps.newId();
-  const pid = deps.spawnSession(startArgs(sessionId, permissionMode));
-  deps.writeState({ sessionId, pid, build: deps.build, ...permissionMode ? { permissionMode } : {} });
+  const pid = deps.spawnSession(startArgs(sessionId, permissionMode, false, allowed));
+  deps.writeState({ sessionId, pid, build: deps.build, ...permissionMode ? { permissionMode } : {}, ...extra });
   return { started: true, sessionId, text: `Started the standing session (${sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.` };
 }
 function stop(deps) {
@@ -2854,11 +2931,13 @@ function stop(deps) {
 function ensure(deps) {
   const live = liveState(deps);
   if (!live) return { action: "started", text: start(deps).text };
-  if (live.build === deps.build) return { action: "running", text: `The standing session is running (${live.sessionId}).` };
-  if (deps.runsRunning() > 0) return { action: "restart-waits", text: "Quarterdeck was updated; the standing session restarts once no goal run is going." };
+  const updated = live.build !== deps.build;
+  if (!updated && !rulesChanged(deps, live)) return { action: "running", text: `The standing session is running (${live.sessionId}).` };
+  const why = updated ? "Quarterdeck was updated" : "The goals' tool rules changed";
+  if (deps.runsRunning() > 0) return { action: "restart-waits", text: `${why}; the standing session restarts once no goal run is going.` };
   stop(deps);
   const r = start(deps);
-  return { action: "restarted", text: `Quarterdeck was updated: restarted the standing session (${r.sessionId}).` };
+  return { action: "restarted", text: `${why}: restarted the standing session (${r.sessionId}).` };
 }
 var LAUNCHER = `// Written by \`quarterdeck runner install\`. Runs \`quarterdeck runner ensure\` with the current Quarterdeck.
 import { execFileSync } from 'child_process'
@@ -3074,6 +3153,12 @@ function currentBuild(scriptDir = dirname2(fileURLToPath(import.meta.url))) {
   const bundle = join2(plugin, "server", "quarterdeck-mcp.mjs");
   return existsSync3(bundle) ? `${version}+${Math.round(statSync(bundle).mtimeMs)}` : version;
 }
+function readStateText(file) {
+  return readFileSync(file, "utf8").replace(/^﻿/, "");
+}
+function transcriptPath(dir, sessionId, configDir = process.env.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude")) {
+  return join2(configDir, "projects", dir.replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`);
+}
 function sessionEnv() {
   const env = { ...process.env };
   for (const key of Object.keys(env)) if (/^CLAUDE(CODE$|_CODE_|_PID$|_EFFORT$)/.test(key)) delete env[key];
@@ -3201,11 +3286,19 @@ async function realDeps() {
       }
     },
     newId: () => randomUUID4(),
+    transcriptBytes: (sessionId) => {
+      try {
+        return statSync(transcriptPath(dir, sessionId)).size;
+      } catch {
+        return null;
+      }
+    },
     runsRunning: () => withDb((db) => db.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get().n),
     leaseHolder: () => withDb((db) => core.leaseHolder(db)),
+    allowRules: () => withDb((db) => core.standingAllowRules(db)),
     readState: () => {
       try {
-        return JSON.parse(readFileSync(stateFile, "utf8"));
+        return JSON.parse(readStateText(stateFile));
       } catch {
         return null;
       }

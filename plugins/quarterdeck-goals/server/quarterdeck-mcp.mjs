@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.19.4, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.20.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 // Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
 const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
@@ -7154,7 +7154,9 @@ function runMigrations(db2) {
     ["health_triggers_run", "INTEGER NOT NULL DEFAULT 1"],
     ["last_health_at", "TEXT"],
     // 1: runs once; when its run ends with nothing open it is done (status 'retired')
-    ["one_off", "INTEGER NOT NULL DEFAULT 0"]
+    ["one_off", "INTEGER NOT NULL DEFAULT 0"],
+    // The model its runs use (an alias or a full id); null: the model of the session that starts the run
+    ["model", "TEXT"]
   ];
   for (const [col, def] of addedGoalColumns) {
     try {
@@ -7306,7 +7308,7 @@ var SCHEMA_VERSION;
 var init_migrate = __esm({
   "../core/src/migrate.ts"() {
     "use strict";
-    SCHEMA_VERSION = 3;
+    SCHEMA_VERSION = 4;
   }
 });
 
@@ -7557,7 +7559,8 @@ function deserializeGoal(r) {
     health_every_minutes: r.health_every_minutes ?? 60,
     health_triggers_run: r.health_triggers_run === void 0 ? true : Boolean(r.health_triggers_run),
     last_health_at: r.last_health_at ?? null,
-    one_off: Boolean(r.one_off)
+    one_off: Boolean(r.one_off),
+    model: r.model ?? null
   };
 }
 function createGoal(db2, plan, goal, interval) {
@@ -7579,8 +7582,18 @@ function createGoal(db2, plan, goal, interval) {
     );
     if (interval) setIntervalTrigger(db2, plan.id, interval);
     if (goal.one_off) db2.prepare("UPDATE goals SET one_off = 1 WHERE plan_id = ?").run(plan.id);
+    if (goal.model) db2.prepare("UPDATE goals SET model = ? WHERE plan_id = ?").run(normalizeModel(goal.model), plan.id);
   })();
   return getGoal(db2, plan.id);
+}
+function normalizeModel(model) {
+  const m = (model ?? "").trim();
+  if (!m || /^(inherit|default|session)$/i.test(m)) return null;
+  if (MODEL_ALIASES.includes(m.toLowerCase())) return m.toLowerCase();
+  if (m.length > 100 || !/^[A-Za-z0-9][A-Za-z0-9._:@/\[\]-]*$/.test(m)) {
+    throw new Error(`"${m}" isn't a model: use haiku, sonnet, opus, a full model id, or null for the session's model.`);
+  }
+  return m;
 }
 function getGoal(db2, planId) {
   const row = db2.prepare("SELECT * FROM goals WHERE plan_id = ?").get(planId);
@@ -7737,13 +7750,14 @@ function deleteGoal(db2, planId) {
   })();
   return { name: plan.name };
 }
-var newId, GOAL_TABLES;
+var newId, MODEL_ALIASES, GOAL_TABLES;
 var init_goals = __esm({
   "../core/src/goals.ts"() {
     "use strict";
     init_queries();
     init_types();
     newId = (prefix) => `${prefix}_${randomUUID2().replace(/-/g, "").slice(0, 12)}`;
+    MODEL_ALIASES = ["haiku", "sonnet", "opus"];
     GOAL_TABLES = [
       "goal_watch_events",
       "goal_watches",
@@ -8611,6 +8625,7 @@ function applyGoalChanges(db2, planId, changes) {
   for (const [category, mode] of Object.entries(changes.autonomy ?? {})) {
     if (mode !== null && !MODES.has(mode)) throw new GoalError(`"${mode}" isn't a mode for ${category}: use off, propose or auto.`);
   }
+  const model = changes.model === void 0 ? void 0 : normalizeModel(changes.model);
   for (const id of changes.forget_memory ?? []) {
     if (getMemory(db2, id)?.plan_id !== planId) throw new GoalError(`Memory ${id} isn't this goal's.`);
   }
@@ -8665,6 +8680,10 @@ function applyGoalChanges(db2, planId, changes) {
       const after = setWatch(db2, planId, name, spec);
       if (before && describeWatch(before) === describeWatch(after) && before.every_minutes === after.every_minutes) continue;
       done.push(`watch "${after.name}" ${before ? "changed" : "added"}: every ${after.every_minutes} min, ${after.kind === "tool" ? "calls" : "runs"} ${describeWatch(after)}`);
+    }
+    if (model !== void 0 && model !== goal.model) {
+      updateGoal(db2, planId, { model });
+      done.push(model ? `runs use ${model}` : "runs use the session's model");
     }
     if (changes.status && changes.status !== goal.status) {
       if (goal.status === "retired") throw new GoalError("This goal is done; run it again first.");
@@ -8803,6 +8822,7 @@ function claimRun(db2, planId, opts) {
     working_dir: plan.working_dir,
     trigger: run.trigger,
     max_run_minutes: goal.limits.max_run_minutes,
+    model: goal.model,
     prompt: goalRunPrompt({ goalId: planId, runId: run.id, name: plan.name, workingDir: plan.working_dir, maxRunMinutes: goal.limits.max_run_minutes })
   };
 }
@@ -9075,6 +9095,7 @@ function buildOverview(db2, detail = "all", standingSession = null) {
       objective: clip(goal.objective, CLIP.objective),
       status: goal.status,
       one_off: goal.one_off,
+      model: goal.model,
       instructions: clip(goal.instructions, CLIP.instructions),
       autonomy: goal.autonomy,
       tool_map: goal.tool_map,
@@ -21861,7 +21882,8 @@ var CreateGoalSchema = external_exports.object({
   tool_map: external_exports.record(external_exports.string()).optional().describe("Tool name pattern \u2192 category"),
   schedule: GoalScheduleSchema.optional().describe("When it runs on its own; left out or null, on demand"),
   one_off: external_exports.boolean().optional().describe("Runs once now; done when its run leaves nothing open"),
-  watches: external_exports.record(WatchSchema).optional().describe("Watch name \u2192 what it checks: a run starts when a watch sees something new")
+  watches: external_exports.record(WatchSchema).optional().describe("Watch name \u2192 what it checks: a run starts when a watch sees something new"),
+  model: external_exports.string().nullable().optional().describe("The model its runs use: haiku, sonnet, opus or a full model id; left out or null, the model of the session that starts each run")
 });
 var SetScheduleSchema = external_exports.object({
   goal_id: external_exports.string(),
@@ -21896,7 +21918,8 @@ var UpdateGoalSchema = external_exports.object({
   add_memory: external_exports.array(external_exports.object({ kind: external_exports.enum(["fact", "rule", "preference"]), text: external_exports.string().trim().min(1), pinned: external_exports.boolean().optional() })).optional(),
   forget_memory: external_exports.array(external_exports.string()).optional().describe("Memory ids to forget"),
   watches: external_exports.record(WatchSchema.nullable()).optional().describe("Watch name \u2192 what it checks; null removes the watch. A run starts when a watch sees something new"),
-  status: external_exports.enum(["active", "paused"]).optional()
+  status: external_exports.enum(["active", "paused"]).optional(),
+  model: external_exports.string().nullable().optional().describe("The model its runs use: haiku, sonnet, opus or a full model id; null: the model of the session that starts each run")
 });
 var ReportRunEndSchema = external_exports.object({
   run_id: external_exports.string(),
@@ -22802,6 +22825,7 @@ async function run_goal(args) {
 }
 
 // src/tools/goal_runner.ts
+init_src();
 import { existsSync as existsSync5 } from "fs";
 
 // src/runner-session.ts
@@ -22823,10 +22847,13 @@ function recordCliPath(serverDir, dir = runnerDir()) {
 }
 function standingSessionId(dir = runnerDir()) {
   try {
-    return JSON.parse(readFileSync(join2(dir, "state.json"), "utf8")).sessionId ?? null;
+    return JSON.parse(readStateText(join2(dir, "state.json"))).sessionId ?? null;
   } catch {
     return null;
   }
+}
+function readStateText(file) {
+  return readFileSync(file, "utf8").replace(/^﻿/, "");
 }
 var RUNNER_USAGE = [
   "Usage: quarterdeck runner <command>",
@@ -22998,7 +23025,7 @@ async function create_goal(args) {
   const id = `plan_${nanoid2(10)}`;
   createGoal2(
     { id, name: input.name, description: input.objective, status: "active", working_dir: input.working_dir, created_at: now, updated_at: now },
-    { objective: input.objective, instructions: input.instructions ?? "", autonomy: input.autonomy ?? {}, one_off: input.one_off ?? false }
+    { objective: input.objective, instructions: input.instructions ?? "", autonomy: input.autonomy ?? {}, one_off: input.one_off ?? false, model: normalizeModel(input.model) }
   );
   if (input.tool_map && Object.keys(input.tool_map).length) applyGoalChanges2(id, { tool_map: input.tool_map });
   if (input.watches && Object.keys(input.watches).length) applyGoalChanges2(id, { watches: input.watches });
@@ -23006,7 +23033,7 @@ async function create_goal(args) {
   const applied = input.schedule ? applySchedule(id, input.schedule) : { schedule: null, next_run_at: null };
   const queued = input.one_off ? queueRun2(id) : null;
   const watches = await firstChecks(id);
-  return { id, ...applied, one_off: input.one_off ?? false, queued_run: queued ? queued.id : null, ...watches.length ? { watches } : {} };
+  return { id, ...applied, one_off: input.one_off ?? false, model: getGoal2(id)?.model ?? null, queued_run: queued ? queued.id : null, ...watches.length ? { watches } : {} };
 }
 async function delete_memory(args) {
   const input = DeleteMemorySchema.parse(args);

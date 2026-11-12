@@ -13,6 +13,8 @@ export type Run = {
   agentId: string | null
   /** Tokens the run's agent used, all kinds summed (0 when unknown). */
   tokens?: number
+  /** The model the run's agent actually used, as its turns reported it (null when unknown). */
+  model?: string | null
 }
 
 /** One memory entry the goal's runs read. */
@@ -54,6 +56,8 @@ export type GoalCard = {
   schedule: Schedule | null
   /** Runs once; done (status 'retired') when its run leaves nothing open. */
   oneOff: boolean
+  /** The model its runs use (an alias or a full id); null: the model of the session that starts each run. */
+  model: string | null
   instructions: string
   /** Action category → off | propose | auto (unlisted: propose). */
   autonomy: Record<string, string>
