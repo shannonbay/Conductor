@@ -3,8 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import {
-  ensure, install, runnerCommand, start, startArgs, startByTask, status, statusText, stop, systemdUnits, taskXml, uninstall, waitingOn,
-  SESSION_NAME, TASK_NAME, UNIT_NAME, type InstallDeps, type RunnerState,
+  ensure, install, runnerCommand, start, startArgs, startByTask, status, statusText, stop, systemdUnits, taskXml, transcriptPath, uninstall, waitingOn,
+  RESUME_MAX_BYTES, SESSION_NAME, TASK_NAME, UNIT_NAME, type InstallDeps, type RunnerState,
 } from '../runner-session.js'
 import { checkRunner } from '../doctor.js'
 
@@ -29,6 +29,8 @@ function fake(over: Partial<InstallDeps> = {}) {
     enabled: false,
     screen: null as string | null,
     attached: 0,
+    /** Transcript sizes by session id; none means no transcript. */
+    transcripts: {} as Record<string, number>,
   }
   const deps: InstallDeps = {
     dir: DIR,
@@ -45,6 +47,7 @@ function fake(over: Partial<InstallDeps> = {}) {
       world.alive.delete(pid)
     },
     newId: () => `session-${++world.made}`,
+    transcriptBytes: (id) => world.transcripts[id] ?? null,
     runsRunning: () => world.running,
     leaseHolder: () => world.holder,
     readState: () => world.state,
@@ -129,6 +132,56 @@ describe('the standing session', () => {
     expect(world.killed).toEqual([101])
     expect(world.state).toEqual({ sessionId: 'session-2', pid: 102, build: '0.15.0+2' })
     expect(ensure(updated).action).toBe('running')
+  })
+
+  it('a restart resumes the earlier session, so it stays one chat in the Claude app', () => {
+    const { deps, world } = fake()
+    start(deps, { permissionMode: 'auto' })
+    world.transcripts['session-1'] = 50_000
+    world.alive.clear() // a restart of the computer
+    const r = start(deps)
+    expect(r).toMatchObject({ started: true, sessionId: 'session-1' })
+    expect(r.text).toMatch(/again/)
+    expect(world.spawned[1]).toEqual(['--remote-control', SESSION_NAME, '--name', SESSION_NAME, '--resume', 'session-1', '--allowedTools', 'mcp__plugin_quarterdeck-goals_quarterdeck,mcp__quarterdeck', '--permission-mode', 'auto'])
+    expect(world.state).toEqual({ sessionId: 'session-1', pid: 102, build: '0.14.0+1', permissionMode: 'auto' })
+    // After an update too
+    world.running = 0
+    expect(ensure({ ...deps, build: '0.15.0+2' }).action).toBe('restarted')
+    expect(world.spawned[2]).toContain('--resume')
+    expect(world.state).toMatchObject({ sessionId: 'session-1', build: '0.15.0+2' })
+  })
+
+  it('starts a new session when the transcript is missing or too long, or the resume dies at once', () => {
+    // No transcript: new
+    const a = fake()
+    a.world.state = { sessionId: 'old', pid: 0, build: '0.14.0+1' }
+    expect(start(a.deps).sessionId).toBe('session-1')
+    expect(a.world.spawned[0]).toContain('--session-id')
+
+    // Too long: new
+    const b = fake()
+    b.world.state = { sessionId: 'old', pid: 0, build: '0.14.0+1' }
+    b.world.transcripts.old = RESUME_MAX_BYTES
+    expect(start(b.deps).sessionId).toBe('session-1')
+
+    // The resumed session exits at once: a new one
+    const c = fake()
+    c.world.state = { sessionId: 'old', pid: 0, build: '0.14.0+1' }
+    c.world.transcripts.old = 10
+    const spawn = c.deps.spawnSession
+    c.deps.spawnSession = (args) => {
+      const pid = spawn(args)
+      if (args.includes('--resume')) c.world.alive.delete(pid)
+      return pid
+    }
+    expect(start(c.deps)).toMatchObject({ started: true, sessionId: 'session-1' })
+    expect(c.world.spawned.map((s) => s[4])).toEqual(['--resume', '--session-id'])
+    expect(c.world.state).toMatchObject({ sessionId: 'session-1', pid: 102 })
+  })
+
+  it('finds the transcript where Claude Code keeps it', () => {
+    expect(transcriptPath('C:\\Users\\me\\.quarterdeck\\runner', 'abc', 'C:\\Users\\me\\.claude')).toBe(join('C:\\Users\\me\\.claude', 'projects', 'C--Users-me--quarterdeck-runner', 'abc.jsonl'))
+    expect(transcriptPath('/home/me/.quarterdeck/runner', 'abc', '/home/me/.claude')).toBe(join('/home/me/.claude', 'projects', '-home-me--quarterdeck-runner', 'abc.jsonl'))
   })
 
   it('status says who starts goal runs', () => {

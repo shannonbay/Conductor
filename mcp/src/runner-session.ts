@@ -51,6 +51,17 @@ const ASKING_MODES = ['manual', 'plan']
  * Windows, where its screen can't be read; likely a question about the new file).
  */
 export const OWN_TOOL_RULES = ['mcp__plugin_quarterdeck-goals_quarterdeck', 'mcp__quarterdeck']
+/**
+ * A start resumes the last session (`--resume`) while its transcript is under
+ * this size, so it goes on in the same chat in the Claude app instead of adding
+ * one each restart (tested Nov 2026: same id, same Remote Control chat, and
+ * goal runs as before). Past it, a new session, so one doesn't open on weeks of
+ * history. Runs are subagents with transcripts of their own, so the session's
+ * grows mainly with what the person says to it.
+ */
+export const RESUME_MAX_BYTES = 2_000_000
+/** How long a resumed session must stay up to count as resumed; one gone by then is replaced by a new session. */
+const RESUME_SETTLE_MS = 5_000
 
 /** A line for the doctor when the standing session's mode leaves runs waiting; null when it is fine. */
 export function modeWarning(permissionMode: string | undefined): string | null {
@@ -61,7 +72,7 @@ export function modeWarning(permissionMode: string | undefined): string | null {
 
 /** What `ensure` remembers between its runs (runner/state.json). */
 export interface RunnerState {
-  /** The session's id, chosen at start (`--session-id`): the scheduler lease's holder when it runs goals. */
+  /** The session's id, chosen at its first start (`--session-id`) and kept while later starts resume it: the scheduler lease's holder when it runs goals. */
   sessionId: string
   /** The hidden console's process (Windows) or `claude`'s in the tmux pane (Linux); 0 once stopped. Claude Code doesn't list this session, so this is how it is found. */
   pid: number
@@ -85,6 +96,10 @@ export interface RunnerDeps {
   /** What the session's terminal shows now, where it can be read (tmux); null otherwise. */
   screenText?(pid: number): string | null
   newId(): string
+  /** The size of that session's transcript in Claude Code's projects folder, or null when there is none. */
+  transcriptBytes(sessionId: string): number | null
+  /** Waits, blocking. */
+  sleep(ms: number): void
   /** Goal runs going now: no restart while one is. */
   runsRunning(): number
   /** The session id holding the scheduler lease, or null. */
@@ -146,9 +161,25 @@ export function statusText(s: RunnerStatus): string {
   return `The standing session is running (${s.sessionId}); ${who}.${s.stale ? ' It started with an older Quarterdeck and restarts at the next check with no run going.' : ''}`
 }
 
-/** The `claude` arguments that start the standing session. */
-export function startArgs(sessionId: string, permissionMode?: string): string[] {
-  return ['--remote-control', SESSION_NAME, '--name', SESSION_NAME, '--session-id', sessionId, '--allowedTools', OWN_TOOL_RULES.join(','), ...(permissionMode ? ['--permission-mode', permissionMode] : [])]
+/** The `claude` arguments that start the standing session: a new one with this id, or (`resume`) the earlier one that has it. */
+export function startArgs(sessionId: string, permissionMode?: string, resume = false): string[] {
+  return ['--remote-control', SESSION_NAME, '--name', SESSION_NAME, resume ? '--resume' : '--session-id', sessionId, '--allowedTools', OWN_TOOL_RULES.join(','), ...(permissionMode ? ['--permission-mode', permissionMode] : [])]
+}
+
+/** The earlier session's id when a start should resume it: its transcript is there and not too long. */
+function resumableId(deps: RunnerDeps, state: RunnerState | null): string | null {
+  if (!state?.sessionId) return null
+  const bytes = deps.transcriptBytes(state.sessionId)
+  return bytes !== null && bytes < RESUME_MAX_BYTES ? state.sessionId : null
+}
+
+/** Whether a session just started is still up after a few seconds (one that can't resume exits at once). */
+function stayedUp(deps: RunnerDeps, pid: number): boolean {
+  for (let waited = 0; waited < RESUME_SETTLE_MS; waited += 500) {
+    deps.sleep(500)
+    if (!deps.pidAlive(pid)) return false
+  }
+  return true
 }
 
 export type StartResult = { started: boolean; sessionId: string | null; text: string }
@@ -157,12 +188,22 @@ function checkMode(permissionMode: string | undefined): void {
   if (permissionMode && !PERMISSION_MODES.includes(permissionMode)) throw new Error(`Unknown permission mode "${permissionMode}" (one of: ${PERMISSION_MODES.join(', ')}).`)
 }
 
-/** Starts the standing session unless one is alive. */
+/** Starts the standing session unless one is alive: the earlier one again when it can (same chat in the Claude app), else a new one. */
 export function start(deps: RunnerDeps, opts: { permissionMode?: string } = {}): StartResult {
-  const permissionMode = opts.permissionMode ?? deps.readState()?.permissionMode
+  const previous = deps.readState()
+  const permissionMode = opts.permissionMode ?? previous?.permissionMode
   checkMode(permissionMode)
   const live = liveState(deps)
   if (live) return { started: false, sessionId: live.sessionId, text: `The standing session is already running (${live.sessionId}).` }
+  const earlier = resumableId(deps, previous)
+  if (earlier) {
+    const pid = deps.spawnSession(startArgs(earlier, permissionMode, true))
+    if (stayedUp(deps, pid)) {
+      deps.writeState({ sessionId: earlier, pid, build: deps.build, ...(permissionMode ? { permissionMode } : {}) })
+      return { started: true, sessionId: earlier, text: `Started the standing session again (${earlier}). It goes on in its chat "${SESSION_NAME}" in the Claude app and at claude.ai/code.` }
+    }
+    // It couldn't resume: a new session
+  }
   const sessionId = deps.newId()
   const pid = deps.spawnSession(startArgs(sessionId, permissionMode))
   deps.writeState({ sessionId, pid, build: deps.build, ...(permissionMode ? { permissionMode } : {}) })
@@ -341,8 +382,6 @@ export interface InstallDeps extends RunnerDeps {
   attach(): void
   /** Linux under WSL, which stops the whole distro once its last window closes, the standing session with it. */
   wsl: boolean
-  /** Waits, blocking. */
-  sleep(ms: number): void
 }
 
 const SUPPORTED: NodeJS.Platform[] = ['win32', 'linux']
@@ -421,7 +460,7 @@ export function startByTask(deps: InstallDeps, opts: { permissionMode?: string }
  * connects, and only someone at its terminal can answer it. Answers a line to
  * add to the start's text, or ''.
  */
-export function questionNote(deps: RunnerDeps & { sleep(ms: number): void }, pid: number): string {
+export function questionNote(deps: RunnerDeps, pid: number): string {
   if (!deps.screenText) return ''
   for (let i = 0; i < 16; i++) {
     deps.sleep(500)
@@ -500,7 +539,17 @@ export function recordCliPath(serverDir: string, dir: string = runnerDir()): voi
 
 /** The standing session's id, or null when there is none (read for each overview: a small file). */
 export function standingSessionId(dir: string = runnerDir()): string | null {
-  try { return (JSON.parse(readFileSync(join(dir, 'state.json'), 'utf8')) as RunnerState).sessionId ?? null } catch { return null }
+  try { return (JSON.parse(readStateText(join(dir, 'state.json'))) as RunnerState).sessionId ?? null } catch { return null }
+}
+
+/** state.json's text, without a byte order mark (PowerShell's UTF-8 writes one, which JSON.parse refuses: the session then looked missing and a second one started). */
+function readStateText(file: string): string {
+  return readFileSync(file, 'utf8').replace(/^﻿/, '')
+}
+
+/** Where Claude Code keeps a session's transcript: its projects folder, under the session folder with every character but letters and digits made `-`. */
+export function transcriptPath(dir: string, sessionId: string, configDir: string = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude')): string {
+  return join(configDir, 'projects', dir.replace(/[^a-zA-Z0-9]/g, '-'), `${sessionId}.jsonl`)
 }
 
 /** The environment for the session: this process's, without what marks it as running inside another Claude Code session. */
@@ -620,10 +669,13 @@ export async function realDeps(): Promise<InstallDeps> {
       try { return tmux(['capture-pane', '-p', '-t', TMUX_SESSION]) } catch { return null }
     },
     newId: () => randomUUID(),
+    transcriptBytes: (sessionId) => {
+      try { return statSync(transcriptPath(dir, sessionId)).size } catch { return null }
+    },
     runsRunning: () => withDb((db) => (db.prepare("SELECT COUNT(*) n FROM goal_runs WHERE status = 'running'").get() as { n: number }).n),
     leaseHolder: () => withDb((db) => core.leaseHolder(db)),
     readState: () => {
-      try { return JSON.parse(readFileSync(stateFile, 'utf8')) as RunnerState } catch { return null }
+      try { return JSON.parse(readStateText(stateFile)) as RunnerState } catch { return null }
     },
     writeState: (state) => {
       if (state) writeFileSync(stateFile, JSON.stringify(state, null, 2) + '\n')
