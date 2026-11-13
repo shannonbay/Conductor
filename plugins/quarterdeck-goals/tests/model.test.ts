@@ -250,3 +250,11 @@ test("a goal's model shows in its detail and in a change the person confirms", a
 test('runCost names the model a run used', async () => {
   expect(runCost({ tokens: 48_000, startedAt: '2026-11-07T07:00:00Z', endedAt: '2026-11-07T07:02:00Z', model: 'claude-opus-5-5' })).toBe('Opus 5.5 · 48k tokens · 2m')
 })
+
+test('a run that read untrusted content says so, and so does a tool rule marking a reader', async () => {
+  const run = { id: 'run_1', status: 'completed', trigger: 'manual', summary: 'Proposed 2', started_at: new Date(NOW).toISOString(), ended_at: new Date(NOW).toISOString(), untrusted: 'WebFetch' }
+  const g = card({ id: 'g1', name: 'Inbox', runs: [run] })
+  expect(g.runs[0]!.untrusted).toBe('WebFetch')
+  expect(describe(g, NOW)).toContain('[read outside content (WebFetch): auto actions needed approval]')
+  expect(describeGoalChanges(g, { tool_map: { 'mcp__issues__get_issue': 'untrusted' } })[0]).toMatch(/untrusted \(reads outside content/)
+})

@@ -258,6 +258,13 @@ export interface GoalRun {
   /** The tool call waiting for a permission answer, and since when (null once answered). */
   waiting_tool: string | null
   waiting_since: string | null
+  /**
+   * When the run first read untrusted content (a tool that reads mail or web pages,
+   * or watch events in its brief), and what it was: from then on its `auto`
+   * categories need approval, in case that content asked for the action.
+   */
+  untrusted_at: string | null
+  untrusted_source: string | null
 }
 
 export type MemoryKind = 'fact' | 'rule' | 'preference'

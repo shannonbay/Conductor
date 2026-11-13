@@ -44,7 +44,7 @@ type FakeGoal = {
   schedule: { kind: 'interval'; minutes: number; active_hours?: string } | { kind: 'cron'; expr: string } | null
   open_run: { id: string; status: string } | null
   activity: { state: 'running' | 'queued' | 'paused' | 'idle'; text: string; at: string | null; waiting?: { tool: string; since: string } }
-  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null; model?: string | null }[]
+  runs: { id: string; status: string; trigger: string; summary: string | null; started_at: string; ended_at: string | null; agent_id?: string | null; model?: string | null; untrusted?: string | null }[]
   needs_you: Item[]
   open_items: Item[]
   health: { passed: boolean; value: number | null }[]

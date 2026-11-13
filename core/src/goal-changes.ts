@@ -7,6 +7,7 @@ import type { Database } from './sqlite.js'
 import { getPlan, updatePlan } from './queries.js'
 import { getGoal, getMemory, getRun, insertMemory, normalizeModel, updateGoal, updateMemory, updateRun } from './goals.js'
 import { failRun, GoalError } from './goal-engine.js'
+import { UNTRUSTED_CATEGORY } from './guard.js'
 import type { AutonomyMode, MemoryKind, WatchSpec } from './types.js'
 import { describeWatch, listWatches, releaseWatchEvents, removeWatch, setWatch } from './watches.js'
 
@@ -74,7 +75,7 @@ export function applyGoalChanges(db: Database, planId: string, changes: GoalChan
       for (const [pattern, category] of Object.entries(changes.tool_map)) {
         if (category === null) delete toolMap[pattern]
         else toolMap[pattern] = category
-        done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} → ${category}`)
+        done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} → ${category}${category === UNTRUSTED_CATEGORY ? ' (reads outside content)' : ''}`)
       }
       updateGoal(db, planId, { tool_map: toolMap })
     }

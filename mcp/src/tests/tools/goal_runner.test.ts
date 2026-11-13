@@ -142,6 +142,20 @@ describe('guard_check', () => {
     expect(await guard_check({ run_id: run.run_id, tool_name: 'mcp__gmail__delete' })).toMatchObject({ decision: 'deny', category: 'email.delete' })
     expect(await guard_check({ run_id: run.run_id, tool_name: 'Read' })).toMatchObject({ decision: 'allow' })
   })
+
+  it('needs approval for auto actions once the run has read untrusted content, and add_item says why', async () => {
+    const id = makeGoal()
+    updateGoal(id, { tool_map: { 'mcp__gmail__archive*': 'email.archive' }, autonomy: { 'email.archive': 'auto' } })
+    const run = await claim(id)
+    expect(await guard_check({ run_id: run.run_id, tool_name: 'mcp__gmail__archive_thread' })).toMatchObject({ decision: 'allow' })
+    expect(await guard_check({ run_id: run.run_id, tool_name: 'WebFetch' })).toMatchObject({ decision: 'allow' })
+    expect(await guard_check({ run_id: run.run_id, tool_name: 'mcp__gmail__archive_thread' })).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/untrusted content \(WebFetch\)/) })
+    await withScope({ planId: id, runId: run.run_id }, async () => {
+      const r = await add_item({ goal: 'Archive the newsletter', action: { category: 'email.archive', summary: 'archive it' } })
+      expect(r).toMatchObject({ mode: 'propose', item: { awaiting_review: true }, message: expect.stringMatching(/untrusted content \(WebFetch\)/) })
+      expect((await get_goal_brief({ goal_id: id, run_id: run.run_id })).run).toMatchObject({ untrusted: { source: 'WebFetch' } })
+    })
+  })
 })
 
 describe('create_goal and delete_memory', () => {

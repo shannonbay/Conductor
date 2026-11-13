@@ -180,6 +180,7 @@ export function GoalView({ goalId }: { goalId: string }) {
                     </div>
                     {r.status === 'skipped' ? <p className="text-xs text-gray-500 mt-1">{r.skip_reason}</p>
                       : r.summary && <p className="text-gray-700 mt-1 whitespace-pre-wrap">{r.summary}</p>}
+                    {r.untrusted_source && <p className="text-xs text-amber-700 mt-1">Read outside content ({r.untrusted_source}): auto actions needed approval</p>}
                     {(r.items_created > 0 || r.items_resolved > 0) && (
                       <p className="text-xs text-gray-400 mt-1">{r.items_created} added · {r.items_resolved} resolved</p>
                     )}
@@ -341,7 +342,7 @@ function Settings({ data, busy, patch, call }: { data: GoalData; busy: string | 
   const [limits, setLimits] = useState(goal.limits)
   const [retention, setRetention] = useState(goal.item_retention_days)
   // Every category the goal knows about: configured, seen in decisions, or named by a tool rule
-  const categories = [...new Set([...Object.keys(autonomy), ...Object.keys(data.approval_stats), ...Object.values(goal.tool_map)])].sort()
+  const categories = [...new Set([...Object.keys(autonomy), ...Object.keys(data.approval_stats), ...Object.values(goal.tool_map)])].filter((c) => c !== 'untrusted').sort()
   const input = 'border border-gray-200 rounded-md px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400'
 
   return (

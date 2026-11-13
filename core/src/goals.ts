@@ -150,7 +150,7 @@ export function insertRun(db: Database, planId: string, trigger: TriggerKind, st
     skip_reason: skipReason ?? null, items_created: 0, items_resolved: 0, started_at: now,
     ended_at: status === 'skipped' ? now : null,
     input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, cache_write_tokens: 0, model: null,
-    now_tool: null, now_tool_at: null, waiting_tool: null, waiting_since: null,
+    now_tool: null, now_tool_at: null, waiting_tool: null, waiting_since: null, untrusted_at: null, untrusted_source: null,
   }
   db.prepare(`
     INSERT INTO goal_runs (id, plan_id, trigger, status, session_id, summary, skip_reason, items_created, items_resolved, started_at, ended_at)
@@ -168,6 +168,15 @@ export function updateRun(db: Database, runId: string, fields: Partial<Omit<Goal
   if (!entries.length) return
   db.prepare(`UPDATE goal_runs SET ${entries.map(([k]) => `${k} = ?`).join(', ')} WHERE id = ?`)
     .run(...entries.map(([, v]) => v), runId)
+}
+
+/**
+ * Marks a run as having read untrusted content (the first source is kept).
+ * From then on its `auto` categories need approval (guard.ts, addItem).
+ */
+export function markRunUntrusted(db: Database, runId: string, source: string): void {
+  db.prepare('UPDATE goal_runs SET untrusted_at = ?, untrusted_source = ? WHERE id = ? AND untrusted_at IS NULL')
+    .run(new Date().toISOString(), source, runId)
 }
 
 /** Runs newest first. */

@@ -36,7 +36,7 @@ export const REVISION_TRIGGERS = [
  * a session still running older code then sees it is outdated (`schemaOutdated`)
  * and leaves scheduling to the newer one.
  */
-export const SCHEMA_VERSION = 4
+export const SCHEMA_VERSION = 5
 
 /** The schema version recorded in the database (0 before versions existed). */
 export function dbSchemaVersion(db: Database): number {
@@ -276,7 +276,9 @@ export function runMigrations(db: Database): void {
       now_tool       TEXT,
       now_tool_at    TEXT,
       waiting_tool   TEXT,
-      waiting_since  TEXT
+      waiting_since  TEXT,
+      untrusted_at     TEXT,
+      untrusted_source TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
 
@@ -331,6 +333,10 @@ export function runMigrations(db: Database): void {
   try { db.exec('ALTER TABLE goal_runs ADD COLUMN model TEXT') } catch { /* already exists */ }
   // What a running run is doing now, and the call waiting on a permission answer (reported by the guard plugin)
   for (const col of ['now_tool', 'now_tool_at', 'waiting_tool', 'waiting_since']) {
+    try { db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`) } catch { /* already exists */ }
+  }
+  // When the run first read untrusted content (mail, a web page, watch events), and what: auto actions then need approval
+  for (const col of ['untrusted_at', 'untrusted_source']) {
     try { db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`) } catch { /* already exists */ }
   }
 

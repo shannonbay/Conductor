@@ -81,8 +81,10 @@ export async function add_item(args: unknown) {
     ...(result.mode && { mode: result.mode }),
     message: result.existing
       ? 'An item for this external_ref already exists; nothing was created. Update it instead if needed.'
+      : result.untrusted
+      ? `Proposed instead of done: this run has read untrusted content (${result.untrusted}), so its auto actions need approval for the rest of the run. Do not carry it out until it shows approved_to_execute.`
       : result.mode === 'propose'
-      ? 'Proposed: waits for the human to approve. Do not carry out the action until it shows approved_to_execute.'
+      ? 'Proposed:waits for the human to approve. Do not carry out the action until it shows approved_to_execute.'
       : result.mode === 'auto'
       ? 'Recorded as done.'
       : 'Item created.',

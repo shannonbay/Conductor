@@ -169,7 +169,7 @@ const TOOLS = [
   },
   {
     name: 'add_item',
-    description: 'Add a work item to the open goal. Always pass external_ref for things that come from outside (an email, an issue) so the same thing is never added twice — an existing item is returned instead. With an action: "propose" categories create an item that waits for human approval (do not act until approved), "auto" categories record an action you already took, "off" categories are refused.',
+    description: 'Add a work item to the open goal. Always pass external_ref for things that come from outside (an email, an issue) so the same thing is never added twice — an existing item is returned instead. With an action: "propose" categories create an item that waits for human approval (do not act until approved), "auto" categories record an action you already took (or, once the run has read untrusted content such as mail or a web page, propose it instead), "off" categories are refused.',
     inputSchema: zodToJsonSchema(AddItemSchema),
     handler: add_item,
   },

@@ -13,14 +13,22 @@
  *
  * Calls outside goal runs, or to tools not in the map, are always allowed.
  *
+ * Untrusted content: a tool that reads mail, a web page or the like (the
+ * built-in list below, or one the goal maps to the reserved category
+ * `untrusted`) marks the run, and from then on its `auto` categories act as
+ * `propose`, so text written to steer the agent can't take an action nobody
+ * approved. Reading more stays allowed, and an approved proposal still goes
+ * through. The guard sees tool names, not input: `Bash` running curl, or `Read`
+ * of a downloaded file, marks nothing unless the goal maps it to `untrusted`.
+ *
  * "allow" means only that Quarterdeck doesn't object: the plugin passes such a
  * call on to Claude Code's own permission rules, which decide it. It never
  * answers allow itself.
  */
 import type { Database } from './sqlite.js'
 import { autonomyFor } from './goal-engine.js'
-import { getGoal, newId } from './goals.js'
-import type { GoalRun, ToolCallRecord } from './types.js'
+import { getGoal, getRun, markRunUntrusted, newId } from './goals.js'
+import type { Goal, GoalRun, ToolCallRecord } from './types.js'
 
 export type GuardDecision =
   | { decision: 'allow'; category?: string; run_id?: string }
@@ -54,6 +62,26 @@ export function matchToolCategory(rawMap: Record<string, string>, rawName: strin
   return null
 }
 
+/** The reserved tool-rule category for a tool that reads untrusted content: never refused, it marks the run. */
+export const UNTRUSTED_CATEGORY = 'untrusted'
+
+/**
+ * Tools that read untrusted content whatever the goal's tool rules say: web
+ * fetches and searches, the browsers, and Gmail's readers (under either
+ * spelling of the connector's or a server's name).
+ */
+export const BUILTIN_UNTRUSTED: readonly string[] = [
+  'WebFetch', 'WebSearch',
+  'mcp__claude-in-chrome__*', 'mcp__*Claude_Browser__*',
+  ...['get_*', 'search_*', 'list_drafts', 'download_*'].flatMap((t) => [`mcp__*Gmail*__${t}`, `mcp__*gmail*__${t}`]),
+]
+const BUILTIN_UNTRUSTED_MAP = Object.fromEntries(BUILTIN_UNTRUSTED.map((p) => [p, UNTRUSTED_CATEGORY]))
+
+/** Whether a tool reads untrusted content: the built-in list, or the goal maps it to `untrusted`. */
+export function readsUntrusted(toolMap: Goal['tool_map'], toolName: string): boolean {
+  return matchToolCategory(toolMap, toolName) === UNTRUSTED_CATEGORY || matchToolCategory(BUILTIN_UNTRUSTED_MAP, toolName) !== null
+}
+
 function record(db: Database, run: GoalRun, toolName: string, category: string, decision: 'allow' | 'deny', reason: string | null): void {
   db.prepare(`
     INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
@@ -70,11 +98,18 @@ export function guardToolCallForRun(db: Database, runId: string, toolName: strin
 function guardRun(db: Database, run: GoalRun, toolName: string): GuardDecision {
   const goal = getGoal(db, run.plan_id)
   if (!goal) return { decision: 'allow' }
+  if (readsUntrusted(goal.tool_map, toolName)) markRunUntrusted(db, run.id, toolName)
   const category = matchToolCategory(goal.tool_map, toolName)
   if (!category) return { decision: 'allow', run_id: run.id }
+  if (category === UNTRUSTED_CATEGORY) {
+    record(db, run, toolName, category, 'allow', null)
+    return { decision: 'allow', category, run_id: run.id }
+  }
 
   const mode = autonomyFor(goal, category)
-  if (mode === 'auto') {
+  // Once the run has read untrusted content, its auto categories need approval like propose ones
+  const untrusted = mode === 'auto' ? getRun(db, run.id)?.untrusted_source ?? null : null
+  if (mode === 'auto' && untrusted === null) {
     record(db, run, toolName, category, 'allow', null)
     return { decision: 'allow', category, run_id: run.id }
   }
@@ -95,7 +130,10 @@ function guardRun(db: Database, run: GoalRun, toolName: string): GuardDecision {
     record(db, run, toolName, category, 'allow', null)
     return { decision: 'allow', category, run_id: run.id }
   }
-  const reason = `Quarterdeck goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`
+  const how = `Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`
+  const reason = untrusted !== null
+    ? `Quarterdeck goal guard: this run has read untrusted content (${untrusted}), so "${category}" needs approval for the rest of the run, in case that content asked for it. ${how}`
+    : `Quarterdeck goal guard: "${category}" needs approval first. ${how}`
   record(db, run, toolName, category, 'deny', reason)
   return { decision: 'deny', category, run_id: run.id, reason }
 }

@@ -525,6 +525,7 @@ function details($: Engine, e: E, view: View, g: GoalCard) {
             <Text dimColor> {r.trigger} · {ago(r.endedAt ?? r.startedAt, view.now)}{runCost(r) ? ` · ${runCost(r)}` : ''}</Text>
             {r.summary ? ` — ${r.summary}` : ''}
           </Text>
+          {r.untrusted && <Text key={`run-untrusted-${r.id}`} dimColor>    Read outside content ({r.untrusted}): auto actions needed approval</Text>}
           {r.status !== 'running' && r.status !== 'queued' && (view.discussing === `run:${r.id}`
             ? discussBox('run', r.id, r)
             : action($, e, { key: `discuss-run-${r.id}`, label: '    Discuss this run…', onPress: () => void setDiscussing($, `run:${r.id}`) })

@@ -6,7 +6,7 @@ import type { Database } from './sqlite.js'
 import { getPlan, getTask, insertTask, nextChildId, compareTaskIds, deserializeTask } from './queries.js'
 import { isProposal } from './gates.js'
 import {
-  countRunsSince, getGoal, getOpenRun, getRun, insertRun, listMemory, listRuns, updateMemory, updateRun, updateGoal,
+  countRunsSince, getGoal, getOpenRun, getRun, insertRun, listMemory, listRuns, markRunUntrusted, updateMemory, updateRun, updateGoal,
 } from './goals.js'
 import { getSchedule, nextScheduledRun } from './schedule.js'
 import { listHealth } from './health.js'
@@ -58,6 +58,8 @@ export interface AddItemResult {
   existing: boolean
   /** The autonomy mode applied to the item's action, if any. */
   mode?: AutonomyMode
+  /** Set when an `auto` action became a proposal because the run has read untrusted content (what it read). */
+  untrusted?: string
 }
 
 /**
@@ -65,7 +67,8 @@ export interface AddItemResult {
  * items), enforces the per-run item cap, and applies the goal's autonomy:
  *   off     → refused
  *   propose → item waits for human approval (requires_approval, review requested now)
- *   auto    → item recorded as already done (the agent has taken the action)
+ *   auto    → item recorded as already done (the agent has taken the action),
+ *             or a proposal once the run has read untrusted content (guard.ts)
  */
 export function addItem(db: Database, planId: string, runId: string | null, input: AddItemInput): AddItemResult {
   const goal = mustGetGoal(db, planId)
@@ -100,7 +103,12 @@ export function addItem(db: Database, planId: string, runId: string | null, inpu
     return { task: getTask(db, planId, id)!, existing: false }
   }
 
-  const mode = autonomyFor(goal, input.action.category)
+  if (input.action.category === 'untrusted') {
+    throw new GoalError('"untrusted" is the tool-rule category for tools that read outside content, not an action category. Use the category of the action itself.')
+  }
+  const goalMode = autonomyFor(goal, input.action.category)
+  const untrusted = goalMode === 'auto' && runId ? getRun(db, runId)?.untrusted_source ?? undefined : undefined
+  const mode: AutonomyMode = untrusted !== undefined ? 'propose' : goalMode
   if (mode === 'off') {
     throw new GoalError(`Action category "${input.action.category}" is off for this goal: don't take or propose this action.`)
   }
@@ -110,7 +118,7 @@ export function addItem(db: Database, planId: string, runId: string | null, inpu
   } else {
     insertTask(db, { ...base, status: 'completed', state, result: input.result ?? `Done automatically: ${input.action.summary}` })
   }
-  return { task: getTask(db, planId, id)!, existing: false, mode }
+  return { task: getTask(db, planId, id)!, existing: false, mode, ...(untrusted !== undefined && { untrusted }) }
 }
 
 // ── Brief ─────────────────────────────────────────────────────────────────────
@@ -141,7 +149,11 @@ function summarizeItem(t: Task): ItemSummary {
 
 export interface GoalBrief {
   goal: { id: string; name: string; objective: string; instructions: string; status: Goal['status'] }
-  run: { id: string; trigger: TriggerKind; started_at: string; limits: Goal['limits'] } | null
+  run: {
+    id: string; trigger: TriggerKind; started_at: string; limits: Goal['limits']
+    /** Set once the run has read untrusted content: its auto categories then need proposing, like propose ones. */
+    untrusted: { since: string; source: string } | null
+  } | null
   autonomy: { default: 'propose'; categories: Record<string, AutonomyMode> }
   memory: { id: string; kind: string; text: string; source: string; pinned: boolean }[]
   memory_omitted: number
@@ -207,12 +219,20 @@ export function buildBrief(db: Database, planId: string, runId?: string): GoalBr
     .map(summarizeItem)
     .sort((a, b) => Number(b.approved_to_execute) - Number(a.approved_to_execute) || compareTaskIds(a.id, b.id))
 
+  // Watch lines are outside text (issue titles, email subjects): handing them to the run marks it
+  const watchEvents = takeWatchEvents(db, planId, runId)
+  if (run && watchEvents.length) markRunUntrusted(db, run.id, 'watch events')
+  const marked = run ? getRun(db, run.id) : undefined
+
   const dayAgo = new Date(Date.now() - 86_400_000).toISOString()
   const resolved24h = (db.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(planId, dayAgo) as { n: number }).n
 
   return {
     goal: { id: planId, name: plan.name, objective: goal.objective, instructions: goal.instructions, status: goal.status },
-    run: run ? { id: run.id, trigger: run.trigger, started_at: run.started_at, limits: goal.limits } : null,
+    run: run ? {
+      id: run.id, trigger: run.trigger, started_at: run.started_at, limits: goal.limits,
+      untrusted: marked?.untrusted_at && marked.untrusted_source ? { since: marked.untrusted_at, source: marked.untrusted_source } : null,
+    } : null,
     autonomy: { default: 'propose', categories: goal.autonomy },
     memory: memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned })),
     memory_omitted: active.length - memory.length,
@@ -232,7 +252,7 @@ export function buildBrief(db: Database, planId: string, runId?: string): GoalBr
       const [h] = listHealth(db, planId, 1)
       return h ? { passed: h.passed, value: h.value, at: h.created_at, ...(!h.passed && h.output && { output: h.output.slice(-500) }) } : null
     })(),
-    watch_events: takeWatchEvents(db, planId, runId),
+    watch_events: watchEvents,
   }
 }
 

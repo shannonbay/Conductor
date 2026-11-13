@@ -6,7 +6,7 @@ import {
   parseCron, cronNext, getSchedule, setSchedule, nextScheduledRun, decideTick,
   enableEventTrigger, disableEventTrigger, verifyEventSecret,
   runHealthCheck, listHealth, healthDue, parseHealthValue, buildBrief,
-  matchToolCategory, guardToolCallForRun, listToolCalls, standingAllowRules, usableAsAllowRule,
+  matchToolCategory, guardToolCallForRun, listToolCalls, standingAllowRules, usableAsAllowRule, readsUntrusted, getRun,
 } from './index.js'
 
 let db: Database
@@ -199,4 +199,63 @@ describe('goal guard', () => {
     expect(standingAllowRules(db)).toEqual([])
   })
 
+})
+
+describe('untrusted content', () => {
+  const MAP = { 'mcp__gmail__archive*': 'email.archive', 'mcp__gmail__delete*': 'email.delete', 'mcp__gmail__send_message': 'email.send', 'mcp__issues__get_issue': 'untrusted' }
+
+  function startRun() {
+    updateGoal(db, 'g1', { tool_map: MAP })
+    return insertRun(db, 'g1', 'manual', 'running')
+  }
+
+  it('knows the built-in readers and the tools a goal marks', () => {
+    for (const tool of ['WebFetch', 'WebSearch', 'mcp__claude-in-chrome__get_page_text', 'mcp__claude_ai_Gmail__get_thread', 'mcp__claude_ai_Gmail__search_threads', 'mcp__gmail__get_message', 'mcp__issues__get_issue']) {
+      expect(readsUntrusted(MAP, tool), tool).toBe(true)
+    }
+    for (const tool of ['Bash', 'Read', 'mcp__claude_ai_Gmail__trash_thread', 'mcp__gmail__send_message', 'mcp__issues__close_issue']) {
+      expect(readsUntrusted(MAP, tool), tool).toBe(false)
+    }
+  })
+
+  it('turns auto categories into propose for the rest of the run once it has read untrusted content', () => {
+    const run = startRun()
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__archive_thread').decision).toBe('allow')
+    expect(getRun(db, run.id)!.untrusted_at).toBeNull()
+
+    expect(guardToolCallForRun(db, run.id, 'mcp__claude_ai_Gmail__get_thread').decision).toBe('allow')
+    expect(getRun(db, run.id)).toMatchObject({ untrusted_source: 'mcp__claude_ai_Gmail__get_thread' })
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__archive_thread')).toMatchObject({
+      decision: 'deny', category: 'email.archive', reason: expect.stringMatching(/read untrusted content \(mcp__claude_ai_Gmail__get_thread\)/),
+    })
+    // Reading more is still allowed, and the first source is kept
+    expect(guardToolCallForRun(db, run.id, 'WebFetch').decision).toBe('allow')
+    expect(getRun(db, run.id)!.untrusted_source).toBe('mcp__claude_ai_Gmail__get_thread')
+    // Off stays off
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__delete_message')).toMatchObject({ decision: 'deny', reason: expect.stringMatching(/off/) })
+
+    // An approval covers the action, as for a propose category
+    const item = addItem(db, 'g1', run.id, { goal: 'Archive newsletters', action: { category: 'email.archive', summary: 'archive' } })
+    expect(item).toMatchObject({ mode: 'propose', untrusted: 'mcp__claude_ai_Gmail__get_thread' })
+    expect(item.task).toMatchObject({ status: 'active', requires_approval: true })
+    approveTask(db, 'g1', item.task.id)
+    expect(guardToolCallForRun(db, run.id, 'mcp__gmail__archive_thread').decision).toBe('allow')
+
+    // The next run starts unmarked
+    const next = insertRun(db, 'g1', 'manual', 'running')
+    expect(addItem(db, 'g1', next.id, { goal: 'Archive more', action: { category: 'email.archive', summary: 'archive' } })).toMatchObject({ mode: 'auto' })
+  })
+
+  it("allows a tool the goal marks untrusted and records it, whatever the autonomy says", () => {
+    const run = startRun()
+    updateGoal(db, 'g1', { autonomy: { untrusted: 'off', 'email.archive': 'auto' } })
+    expect(guardToolCallForRun(db, run.id, 'mcp__issues__get_issue')).toMatchObject({ decision: 'allow', category: 'untrusted' })
+    expect(getRun(db, run.id)!.untrusted_source).toBe('mcp__issues__get_issue')
+    expect(listToolCalls(db, 'g1')[0]).toMatchObject({ tool_name: 'mcp__issues__get_issue', decision: 'allow' })
+  })
+
+  it('refuses "untrusted" as an action category', () => {
+    const run = startRun()
+    expect(() => addItem(db, 'g1', run.id, { goal: 'x', action: { category: 'untrusted', summary: 'x' } })).toThrow(/not an action category/)
+  })
 })
