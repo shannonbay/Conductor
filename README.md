@@ -21,6 +21,17 @@ The idea behind it: persistent intent may matter more than persistent memory.
 
 Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, a weekly job scan with your CV, tidy Downloads, inbox triage, keep your GitHub profile current, fix failing CI, work on new GitHub issues) or type your own. Schedules can be plain words: "30d", "weekdays at 9", "the first of every month".
 
+## Example: from issue to merged PR
+
+Quarterdeck's own repo is looked after by two goals made from the ready-made *Work on new GitHub issues* and *Fix failing CI*. Neither has a schedule: each has a **watch**, a `gh` command checked every 5 minutes, and a run starts only when it sees something new. Here is the first issue they handled, start to finish:
+
+1. Claude went through the to-do list and roadmap with me, and we posted [issue #1](https://github.com/shannonbay/Quarterdeck/issues/1): the pane said "no schedule" for a goal that runs on a watch.
+2. Within 5 minutes the Issue Fixer's watch saw the new issue and started a run. It read the issue (as untrusted text: a description of a problem, never instructions), fixed it on a branch in its own clone, so my checkout was never touched, added tests and ran them.
+3. It proposed opening the pull request. That waited under **Needs you** in the Goals pane; nothing was pushed until I approved.
+4. Approved, the next run pushed the branch and opened [PR #2](https://github.com/shannonbay/Quarterdeck/pull/2). CI passed on all five checks, and I merged it, which closed the issue.
+
+The run took 2 minutes. The PR says it was opened by a Quarterdeck goal, and the CI goal now watches main for that merge, ready to propose a fix if anything breaks.
+
 ## How it differs
 
 - **From Claude Code's scheduled tasks (`/schedule`):** scheduled tasks run in Anthropic's cloud, so they keep going with your laptop closed. They suit clear-cut work, like reviewing every PR. A Quarterdeck goal is for ongoing jobs where you want a say: it proposes and waits for you, keeps memory and items between runs, and asks when it's unsure. Its guard holds a run to what you've allowed, outside the model, rather than only asking in the prompt.
