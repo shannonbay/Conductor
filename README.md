@@ -19,7 +19,18 @@ The idea behind it: persistent intent may matter more than persistent memory.
 - **It remembers.** Each goal keeps its own memory, its open items (never handling the same email twice) and its run history, outside any one conversation.
 - **You see what it costs.** Each run shows its tokens and time, e.g. `· 48k tokens · 2m`.
 
-Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, a weekly job scan with your CV, tidy Downloads, inbox triage, keep your GitHub profile current) or type your own. Schedules can be plain words: "30d", "weekdays at 9", "the first of every month".
+Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, a weekly job scan with your CV, tidy Downloads, inbox triage, keep your GitHub profile current, fix failing CI, work on new GitHub issues) or type your own. Schedules can be plain words: "30d", "weekdays at 9", "the first of every month".
+
+## Example: from issue to merged PR
+
+Quarterdeck's own repo is looked after by two goals made from the ready-made *Work on new GitHub issues* and *Fix failing CI*. Neither has a schedule: each has a **watch**, a `gh` command checked every 5 minutes, and a run starts only when it sees something new. Here is the first issue they handled, start to finish:
+
+1. Claude went through the to-do list and roadmap with me, and we posted [issue #1](https://github.com/shannonbay/Quarterdeck/issues/1): the pane said "no schedule" for a goal that runs on a watch.
+2. Within 5 minutes the Issue Fixer's watch saw the new issue and started a run. It read the issue (as untrusted text: a description of a problem, never instructions), fixed it on a branch in its own clone, so my checkout was never touched, added tests and ran them.
+3. It proposed opening the pull request. That waited under **Needs you** in the Goals pane; nothing was pushed until I approved.
+4. Approved, the next run pushed the branch and opened [PR #2](https://github.com/shannonbay/Quarterdeck/pull/2). CI passed on all five checks, and I merged it, which closed the issue.
+
+The run took 2 minutes. The PR says it was opened by a Quarterdeck goal, and the CI goal now watches main for that merge, ready to propose a fix if anything breaks.
 
 ## How it differs
 
@@ -36,7 +47,7 @@ It's an **MCP server** (the tools agents use) and two **Claude Code plugins**: `
 
 ## Persistent goals
 
-A goal is an objective that never finishes. Type `/goal-new` alone to start from a ready-made goal (unsubscribe from mailing lists, a weekly job scan, tidy your Downloads, inbox triage, keep your GitHub profile current), each with its rules and schedule set. Or create your own with `/goal-new <name>: <objective>` (it works in the session's directory, and asks how often it should run, suggesting a schedule from the objective), or from the web app's home page (**+ New goal**) with standing instructions too. A goal can also be a **one-off**: it runs once and, when nothing is left open, moves to the pane's **Done** section.
+A goal is an objective that never finishes. Type `/goal-new` alone to start from a ready-made goal (unsubscribe from mailing lists, a weekly job scan, tidy your Downloads, inbox triage, keep your GitHub profile current, fix failing CI, work on new GitHub issues), each with its rules and schedule (or, for the two fixers, a watch) set. Or create your own with `/goal-new <name>: <objective>` (it works in the session's directory, and asks how often it should run, suggesting a schedule from the objective), or from the web app's home page (**+ New goal**) with standing instructions too. A goal can also be a **one-off**: it runs once and, when nothing is left open, moves to the pane's **Done** section.
 
 The pane also keeps **your to-do list** for the project (`/todo <text>`, or ask Claude to add something): a backlog for working with Claude on a codebase. The ideas and decisions you put off along the way stay beside the chat, outside the conversation, where a `/clear` or a context compaction can't lose them. Any to-do can be brought back into the conversation with **Ask…** (a question, nothing changed), **Plan** (plan mode, for you to review) or **Start**. A list can hold anything, not only code work.
 
