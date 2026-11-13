@@ -36,7 +36,7 @@ export const REVISION_TRIGGERS = [
  * a session still running older code then sees it is outdated (`schemaOutdated`)
  * and leaves scheduling to the newer one.
  */
-export const SCHEMA_VERSION = 5
+export const SCHEMA_VERSION = 6
 
 /** The schema version recorded in the database (0 before versions existed). */
 export function dbSchemaVersion(db: Database): number {
@@ -292,7 +292,8 @@ export function runMigrations(db: Database): void {
       pinned       INTEGER NOT NULL DEFAULT 0,
       active       INTEGER NOT NULL DEFAULT 1,
       created_at   TEXT NOT NULL,
-      last_used_at TEXT
+      last_used_at TEXT,
+      untrusted_source TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_goal_memory_plan ON goal_memory(plan_id, active);
 
@@ -339,6 +340,8 @@ export function runMigrations(db: Database): void {
   for (const col of ['untrusted_at', 'untrusted_source']) {
     try { db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`) } catch { /* already exists */ }
   }
+  // Memory a marked run wrote, and what that run had read: a brief that hands it out marks its run too
+  try { db.exec('ALTER TABLE goal_memory ADD COLUMN untrusted_source TEXT') } catch { /* already exists */ }
 
   db.exec(`
     CREATE TABLE IF NOT EXISTS goal_health (

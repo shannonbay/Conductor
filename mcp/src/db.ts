@@ -51,6 +51,7 @@ export const insertMemory = (m: Parameters<typeof core.insertMemory>[1]) => core
 export const getMemory = (id: string) => core.getMemory(db, id)
 export const updateMemory = (id: string, fields: Parameters<typeof core.updateMemory>[2]) => core.updateMemory(db, id, fields)
 export const getRun = (runId: string) => core.getRun(db, runId)
+export const markRunUntrusted = (runId: string, source: string) => core.markRunUntrusted(db, runId, source)
 export const endRun = (runId: string, summary: string) => core.endRun(db, runId, summary)
 export const queueRun = (planId: string) => core.queueRun(db, planId, 'manual')
 export const getOpenGoalRun = (planId: string) => core.getOpenRun(db, planId)

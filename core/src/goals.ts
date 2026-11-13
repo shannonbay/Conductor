@@ -205,7 +205,7 @@ function deserializeMemory(r: Row): GoalMemory {
 
 export function insertMemory(
   db: Database,
-  m: { plan_id: string; kind: MemoryKind; text: string; source: MemorySource; source_ref?: string | null; pinned?: boolean },
+  m: { plan_id: string; kind: MemoryKind; text: string; source: MemorySource; source_ref?: string | null; pinned?: boolean; untrusted_source?: string | null },
 ): GoalMemory {
   const text = m.text.trim()
   if (!text) throw new Error('Memory text is required.')
@@ -213,10 +213,12 @@ export function insertMemory(
     id: newId('mem'), plan_id: m.plan_id, kind: m.kind, text, source: m.source,
     source_ref: m.source_ref ?? null, pinned: m.pinned ? 1 : 0, active: 1,
     created_at: new Date().toISOString(), last_used_at: null,
+    // Only an agent's memory can carry what its run had read
+    untrusted_source: m.source === 'agent' ? m.untrusted_source ?? null : null,
   }
   db.prepare(`
-    INSERT INTO goal_memory (id, plan_id, kind, text, source, source_ref, pinned, active, created_at, last_used_at)
-    VALUES (@id, @plan_id, @kind, @text, @source, @source_ref, @pinned, @active, @created_at, @last_used_at)
+    INSERT INTO goal_memory (id, plan_id, kind, text, source, source_ref, pinned, active, created_at, last_used_at, untrusted_source)
+    VALUES (@id, @plan_id, @kind, @text, @source, @source_ref, @pinned, @active, @created_at, @last_used_at, @untrusted_source)
   `).run(row)
   return deserializeMemory(row)
 }
@@ -232,7 +234,7 @@ export function listMemory(db: Database, planId: string, opts: { activeOnly?: bo
   return rows.map(deserializeMemory)
 }
 
-export function updateMemory(db: Database, id: string, fields: Partial<Pick<GoalMemory, 'kind' | 'text' | 'pinned' | 'active' | 'last_used_at'>>): void {
+export function updateMemory(db: Database, id: string, fields: Partial<Pick<GoalMemory, 'kind' | 'text' | 'pinned' | 'active' | 'last_used_at' | 'untrusted_source'>>): void {
   const serialized: Row = { ...fields }
   if ('pinned' in fields) serialized.pinned = fields.pinned ? 1 : 0
   if ('active' in fields) serialized.active = fields.active ? 1 : 0

@@ -149,6 +149,11 @@ export async function deleteMemory($: Engine, goalId: string, memoryId: string):
   await call($, 'delete_memory', { goal_id: goalId, memory_id: memoryId })
 }
 
+/** Clears the untrusted mark on a memory a run wrote after reading outside content. */
+export async function trustMemory($: Engine, goalId: string, memoryId: string): Promise<void> {
+  await call($, 'trust_memory', { goal_id: goalId, memory_id: memoryId })
+}
+
 /** null: the goal runs only on demand. */
 export async function setSchedule($: Engine, goalId: string, schedule: Schedule | null, oneOff = false): Promise<{ next_run_at: string | null }> {
   return call($, 'set_schedule', { goal_id: goalId, schedule, ...(oneOff && { one_off: true }) })

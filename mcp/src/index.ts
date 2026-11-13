@@ -34,6 +34,7 @@ import {
   GuardCheckSchema,
   CreateGoalSchema,
   DeleteMemorySchema,
+  TrustMemorySchema,
   SetScheduleSchema,
   UpdateGoalSchema,
   ReportRunEndSchema,
@@ -62,7 +63,7 @@ import { verify_task } from './tools/verify_task.js'
 import { list_goals, get_goal_brief, add_item, remember, forget, end_run, run_goal } from './tools/goals.js'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory, set_schedule, update_goal, report_run_end, delete_goal, watch_report, run_progress,
+  create_goal, delete_memory, trust_memory, set_schedule, update_goal, report_run_end, delete_goal, watch_report, run_progress,
 } from './tools/goal_runner.js'
 import { todo_list, todo_add, todo_set } from './tools/todos.js'
 import { unsubscribe_one_click } from './tools/unsubscribe.js'
@@ -234,6 +235,7 @@ const TOOLS = [
     ['guard_check', "Applies a goal's autonomy to a tool call made during a run.", GuardCheckSchema, guard_check],
     ['create_goal', 'Creates a goal for the human.', CreateGoalSchema, create_goal],
     ['delete_memory', "Deletes one of a goal's memories for the human.", DeleteMemorySchema, delete_memory],
+    ['trust_memory', "Clears the untrusted mark on a goal memory a run wrote after reading outside content, for the human.", TrustMemorySchema, trust_memory],
     ['set_schedule', "Sets a goal's schedule (interval, cron, or none) for the human.", SetScheduleSchema, set_schedule],
     ['update_goal', "Changes a goal's name, objective, instructions, autonomy, tool rules, memory, watches or status, once the human has confirmed.", UpdateGoalSchema, update_goal],
     ['report_run_end', "Reports how a goal run's agent finished a turn: a usage limit skips the run and holds goal runs until the reset.", ReportRunEndSchema, report_run_end],

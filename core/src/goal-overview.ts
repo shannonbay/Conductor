@@ -258,7 +258,7 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
         open_item_count: open.filter((t) => !t.review_requested_at).length,
         health: listHealth(db, plan.id, HEALTH).map((h) => ({ passed: h.passed, value: h.value, created_at: h.created_at })),
         memory: listMemory(db, plan.id, { activeOnly: true }).slice(-MEMORY).reverse()
-          .map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory)!, source: m.source, pinned: m.pinned, created_at: m.created_at })),
+          .map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory)!, source: m.source, pinned: m.pinned, created_at: m.created_at, untrusted: m.untrusted_source })),
         suggestions: getAutonomySuggestions(db, plan.id),
         // Without when each last checked: that changes every few minutes and would redraw the pane for nothing
         watches: watches.map((w) => ({

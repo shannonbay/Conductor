@@ -18,7 +18,11 @@ export type Run = {
 }
 
 /** One memory entry the goal's runs read. */
-export type Memory = { id: string; kind: string; text: string; pinned: boolean }
+export type Memory = {
+  id: string; kind: string; text: string; pinned: boolean
+  /** What its run had read before writing it: briefs that hand it out mark their runs untrusted until the person trusts it. */
+  untrusted?: string
+}
 
 /** What a goal's agent is doing now, or what it does next, in one line. */
 export type Activity = {

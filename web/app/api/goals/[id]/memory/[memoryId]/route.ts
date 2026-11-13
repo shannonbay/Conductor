@@ -11,6 +11,8 @@ const PatchSchema = z.object({
   text: z.string().trim().min(1).optional(),
   pinned: z.boolean().optional(),
   active: z.boolean().optional(),
+  /** true: the person trusts a memory a run wrote after reading untrusted content. */
+  trusted: z.literal(true).optional(),
 })
 
 function load(id: string, memoryId: string) {
@@ -18,14 +20,18 @@ function load(id: string, memoryId: string) {
   return m && m.plan_id === id ? m : undefined
 }
 
-/** PATCH — humans can edit, pin or deactivate any memory, including agent-written ones. */
+/**
+ * PATCH — humans can edit, pin or deactivate any memory, including agent-written ones.
+ * Trusting it, or rewriting its text (the words are then theirs), clears its untrusted mark.
+ */
 export async function PATCH(req: NextRequest, { params }: Params) {
   try {
     const { id, memoryId } = await params
     if (!load(id, memoryId)) return notFound('Memory')
     const parsed = PatchSchema.safeParse(await req.json())
     if (!parsed.success) return err(parsed.error.issues[0].message)
-    updateMemory(memoryId, parsed.data)
+    const { trusted, ...fields } = parsed.data
+    updateMemory(memoryId, { ...fields, ...((trusted || fields.text !== undefined) && { untrusted_source: null }) })
     recordEvent({ planId: id, taskId: id, eventType: 'memory_updated', actor: 'human', payload: { memory_id: memoryId, changes: Object.keys(parsed.data) } })
     return ok({ memory: getMemory(memoryId) })
   } catch (e) {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
-  create_goal, delete_memory, set_schedule, update_goal, report_run_end, watch_report,
+  create_goal, delete_memory, trust_memory, set_schedule, update_goal, report_run_end, watch_report,
 } from '../../tools/goal_runner.js'
 import { add_item, get_goal_brief, end_run, run_goal } from '../../tools/goals.js'
 import { create_plan } from '../../tools/create_plan.js'
@@ -171,6 +171,14 @@ describe('create_goal and delete_memory', () => {
     await expect(delete_memory({ goal_id: 'other', memory_id: m.id })).rejects.toThrow(/not found/)
     expect(await delete_memory({ goal_id: id, memory_id: m.id })).toEqual({ deleted: m.id })
     expect(getMemory(m.id)).toBeUndefined()
+  })
+
+  it("trusts a goal's marked memory, and only that goal's", async () => {
+    const id = makeGoal()
+    const m = insertMemory({ plan_id: id, kind: 'fact', text: 'Archive Bob', source: 'agent', untrusted_source: 'WebFetch' })
+    await expect(trust_memory({ goal_id: 'other', memory_id: m.id })).rejects.toThrow(/not found/)
+    expect(await trust_memory({ goal_id: id, memory_id: m.id })).toEqual({ trusted: m.id })
+    expect(getMemory(m.id)!.untrusted_source).toBeNull()
   })
 })
 

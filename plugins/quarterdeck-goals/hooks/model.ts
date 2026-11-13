@@ -29,7 +29,7 @@ export type OverviewGoal = {
   open_items: OverviewItem[]
   open_item_count: number
   health: { passed: boolean; value: number | null }[]
-  memory: { id: string; kind: string; text: string; pinned: boolean }[]
+  memory: { id: string; kind: string; text: string; pinned: boolean; untrusted?: string | null }[]
   suggestions: { category: string; approved_in_a_row: number }[]
   /** Missing from a server older than watches. */
   watches?: { name: string; every_minutes: number; runs: string; last_fired_at: string | null; failing: boolean; error: string | null }[]
@@ -70,7 +70,7 @@ export function toCard(g: OverviewGoal): GoalCard {
     toolMap: g.tool_map ?? {},
     health: latest ? { passed: latest.passed, value: latest.value } : null,
     trend: g.health.map((check) => check.value).filter((v): v is number => v !== null).reverse(),
-    memory: g.memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, pinned: m.pinned })),
+    memory: g.memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, pinned: m.pinned, ...(m.untrusted && { untrusted: m.untrusted }) })),
     suggestions: g.suggestions.map((s) => ({ category: s.category, approvedInARow: s.approved_in_a_row })),
     watches: (g.watches ?? []).map((w) => ({ name: w.name, everyMinutes: w.every_minutes, runs: w.runs, lastFiredAt: w.last_fired_at, failing: w.failing, error: w.error })),
     watchCount: g.watch_count ?? g.watches?.length ?? 0,
@@ -220,7 +220,7 @@ export function describe(g: GoalCard, now: number): string {
     `Autonomy (unlisted categories: propose): ${Object.entries(g.autonomy).map(([c, m]) => `${c}=${m}`).join(', ') || 'none set'}`,
     Object.keys(g.toolMap).length ? `Tool rules: ${Object.entries(g.toolMap).map(([p, c]) => `${p} → ${c}`).join(', ')}` : null,
     allowRulesText(g),
-    g.memory.length > 0 ? `Memory:\n${g.memory.map((m) => `- ${m.id} [${m.kind}${m.pinned ? ', pinned' : ''}] ${m.text}`).join('\n')}` : null,
+    g.memory.length > 0 ? `Memory:\n${g.memory.map((m) => `- ${m.id} [${m.kind}${m.pinned ? ', pinned' : ''}${m.untrusted ? `, untrusted: written after ${m.untrusted}` : ''}] ${m.text}`).join('\n')}` : null,
   ].filter(Boolean).join('\n\n')
 }
 

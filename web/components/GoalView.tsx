@@ -285,7 +285,16 @@ function MemorySection({ memory, goalId, busy, call }: { memory: GoalMemory[]; g
   const row = (m: GoalMemory) => (
     <li key={m.id} className={`flex items-start gap-3 px-4 py-2.5 text-sm ${m.active ? '' : 'opacity-50'}`}>
       <span className="text-[10px] uppercase tracking-wide text-gray-400 w-16 flex-shrink-0 mt-0.5">{m.kind}</span>
-      <span className="flex-1 text-gray-800">{m.text}</span>
+      <span className="flex-1 text-gray-800">
+        {m.text}
+        {m.untrusted_source && (
+          <span className="block text-xs text-amber-700 mt-0.5">
+            ⚠ Written by a run that had read {m.untrusted_source}: runs that read it need approval for auto actions.{' '}
+            <button className="underline hover:text-amber-900"
+              onClick={() => call('mem', `/api/goals/${goalId}/memory/${m.id}`, { method: 'PATCH', body: JSON.stringify({ trusted: true }) })}>Trust</button>
+          </span>
+        )}
+      </span>
       <span className="text-xs text-gray-400 flex-shrink-0">{sourceLabel[m.source]}</span>
       <button title={m.pinned ? 'Unpin' : 'Pin: always include in the brief'} className={`text-xs ${m.pinned ? 'text-amber-600' : 'text-gray-300 hover:text-gray-600'}`}
         onClick={() => call('mem', `/api/goals/${goalId}/memory/${m.id}`, { method: 'PATCH', body: JSON.stringify({ pinned: !m.pinned }) })}>📌</button>

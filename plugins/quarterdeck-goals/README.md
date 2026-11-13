@@ -150,7 +150,7 @@ Last change just now  Refresh
 - **Done (n)** at the bottom, collapsed: one-off goals that have finished, each with its last run's summary and **Run again**.
 - **Approve** or **Reject…** each proposal. Rejecting asks what should change, and your answer is saved to the goal's memory.
 - **Run now**, **Cancel run** (asks you to confirm), **Pause** and **Resume**.
-- **▸ name** expands a goal to show its objective, its schedule, open items, last five runs with summaries, and memory. Each memory entry can be deleted (asks you to confirm).
+- **▸ name** expands a goal to show its objective, its schedule, open items, last five runs with summaries, and memory. Each memory entry can be deleted (asks you to confirm). A memory a run wrote after reading untrusted content (mail, web pages, watch events) shows a yellow ⚠ and **Trust**: until you trust it, any run whose brief includes it needs your approval for its auto actions, in case that content asked for the memory.
 - When you have approved a category every time lately, a hint suggests switching it to auto on the goal page.
 - **Open in browser** opens the goal page.
 

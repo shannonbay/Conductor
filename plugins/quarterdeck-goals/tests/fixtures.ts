@@ -48,7 +48,7 @@ type FakeGoal = {
   needs_you: Item[]
   open_items: Item[]
   health: { passed: boolean; value: number | null }[]
-  memory: { id: string; kind: string; text: string; pinned: boolean }[]
+  memory: { id: string; kind: string; text: string; pinned: boolean; untrusted?: string | null }[]
   suggestions: { category: string; approved_in_a_row: number }[]
   watches?: { name: string; every_minutes: number; runs: string; last_fired_at: string | null; failing: boolean; error: string | null }[]
 }
@@ -83,7 +83,7 @@ export function question(id: string, title: string): Item {
 export type Call = { tool: string; input: Record<string, unknown> }
 
 const TOOLS = [
-  'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'create_goal',
+  'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'trust_memory', 'create_goal',
   'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set', 'update_goal', 'delete_goal', 'watch_report',
 ] as const
 
@@ -151,6 +151,10 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
           g!.memory = g!.memory.filter((x) => x.id !== input.memory_id)
           version++
           return ok({ deleted: input.memory_id }) as never
+        case 'trust_memory':
+          g!.memory = g!.memory.map((x) => x.id === input.memory_id ? { ...x, untrusted: null } : x)
+          version++
+          return ok({ trusted: input.memory_id }) as never
         case 'create_goal': {
           const schedule = (input.schedule ?? null) as FakeGoal['schedule']
           const oneOff = input.one_off === true

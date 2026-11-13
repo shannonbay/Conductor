@@ -6,13 +6,13 @@
  */
 import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
-  getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory,
+  getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory, updateMemory,
   setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd, reportRunProgress, deleteGoal,
   listWatches, checkCommandWatch, getWatch, reportToolWatch, queueForWatchEvents,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
-  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema, DeleteGoalSchema, WatchReportSchema,
+  FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, TrustMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema, DeleteGoalSchema, WatchReportSchema,
   RunProgressSchema,
 } from '../schema.js'
 import { normalizeModel, type GoalChanges } from '@quarterdeck/core'
@@ -141,6 +141,21 @@ export async function delete_memory(args: unknown) {
   deleteMemory(m.id)
   record(input.goal_id, input.goal_id, 'memory_deleted', { memory_id: m.id, text: m.text }, human)
   return { deleted: m.id }
+}
+
+/**
+ * The person trusts a memory a run wrote after reading untrusted content: briefs
+ * that hand it out stop marking their runs.
+ */
+export async function trust_memory(args: unknown) {
+  const input = TrustMemorySchema.parse(args)
+  const m = getMemory(input.memory_id)
+  if (!m || m.plan_id !== input.goal_id) throw new Error(`Memory ${input.memory_id} not found in this goal.`)
+  if (m.untrusted_source) {
+    updateMemory(m.id, { untrusted_source: null })
+    record(input.goal_id, input.goal_id, 'memory_trusted', { memory_id: m.id, text: m.text, was: m.untrusted_source }, human)
+  }
+  return { trusted: m.id }
 }
 
 /**

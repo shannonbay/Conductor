@@ -94,9 +94,12 @@ export async function add_item(args: unknown) {
 export async function remember(args: unknown) {
   const input = RememberSchema.parse(args)
   const planId = requireOpenGoal()
-  const m = insertMemory({ plan_id: planId, kind: input.kind, text: input.text, source: 'agent', source_ref: input.source_ref ?? getOpenRun() })
+  const runId = getOpenRun()
+  // A run that has read outside content passes its mark on: the run whose brief hands this out is marked too
+  const untrusted = runId ? getRun(runId)?.untrusted_source ?? null : null
+  const m = insertMemory({ plan_id: planId, kind: input.kind, text: input.text, source: 'agent', source_ref: input.source_ref ?? runId, untrusted_source: untrusted })
   record(planId, planId, 'memory_added', { memory_id: m.id, kind: m.kind, text: m.text })
-  return { memory: { id: m.id, kind: m.kind, text: m.text } }
+  return { memory: { id: m.id, kind: m.kind, text: m.text, ...(untrusted && { untrusted: true }) } }
 }
 
 export async function forget(args: unknown) {

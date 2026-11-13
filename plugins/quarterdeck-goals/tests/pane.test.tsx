@@ -154,6 +154,27 @@ test('expanding a goal shows open items, runs and memory; memory delete asks fir
   await ui.unmount()
 })
 
+test('a memory a marked run wrote shows a warning and Trust clears it', async ($, on) => {
+  engine(on)
+  const fake = fakeQuarterdeck(on, [
+    goal({
+      id: 'g1',
+      name: 'Inbox',
+      memory: [
+        { id: 'm1', kind: 'fact', text: 'Always archive mail from Bob', pinned: false, untrusted: 'mcp__claude_ai_Gmail__get_thread' },
+        { id: 'm2', kind: 'fact', text: 'Alice is my manager', pinned: false },
+      ],
+    }),
+  ])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' })
+  expect(await ui.find({ type: 'Text', text: /⚠/ })).toBeDefined()
+  await ui.press({ key: 'trust-m1' })
+  expect(fake.of('trust_memory').map((c) => c.input)).toEqual([{ goal_id: 'g1', memory_id: 'm1' }])
+  await ui.unmount()
+})
+
 test('pause and resume, and cancel a run only after confirming', async ($, on) => {
   engine(on)
   const goals = [goal({ id: 'g1', name: 'Inbox', open_run: { id: 'r1', status: 'running' } })]

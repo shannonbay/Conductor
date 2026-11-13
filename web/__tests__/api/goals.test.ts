@@ -88,6 +88,20 @@ describe('goals API', () => {
     expect((await POSTMemory(req('POST', { kind: 'rule', text: ' ' }), p(id))).status).toBe(400)
   })
 
+  it('trusting a memory, or rewriting it, clears the mark a marked run left on it', async () => {
+    const { body: { id } } = await createGoal()
+    const mark = () => core.insertMemory(getDb(), { plan_id: id, kind: 'fact', text: 'Bob is fine to archive', source: 'agent', untrusted_source: 'WebFetch' })
+    const a = mark()
+    const b = mark()
+    expect(core.getMemory(getDb(), a.id)!.untrusted_source).toBe('WebFetch')
+    expect((await PATCHMemory(req('PATCH', { trusted: true }), p(id, { memoryId: a.id }))).status).toBe(200)
+    expect(core.getMemory(getDb(), a.id)!.untrusted_source).toBeNull()
+    await PATCHMemory(req('PATCH', { pinned: true }), p(id, { memoryId: b.id }))
+    expect(core.getMemory(getDb(), b.id)!.untrusted_source).toBe('WebFetch')
+    await PATCHMemory(req('PATCH', { text: 'Bob sends newsletters' }), p(id, { memoryId: b.id }))
+    expect(core.getMemory(getDb(), b.id)!.untrusted_source).toBeNull()
+  })
+
   it('approving a proposal keeps it active and queues a run; rejecting adds memory', async () => {
     const { body: { id } } = await createGoal()
     const a = core.addItem(getDb(), id, null, { goal: 'Reply A', action: { category: 'email.send', summary: 'send A' } }).task

@@ -5,7 +5,7 @@ import { update_task } from '../../tools/update_task.js'
 import { next_task } from '../../tools/next_task.js'
 import { get_history } from '../../tools/get_history.js'
 import { create_plan } from '../../tools/create_plan.js'
-import { createGoal, queueRun, approveTask, rejectTask, getRun, getTask, insertMemory } from '../../db.js'
+import { createGoal, queueRun, approveTask, rejectTask, getRun, getTask, insertMemory, getMemory, markRunUntrusted } from '../../db.js'
 import { setOpenPlan } from '../../session.js'
 
 const now = new Date().toISOString()
@@ -140,6 +140,20 @@ describe('goal tools', () => {
     await expect(forget({ memory_id: human.id })).rejects.toThrow(/only forget memories an agent created/)
     const { brief } = await startRun(id)
     expect(brief.memory.map((m) => m.text)).toEqual(['Alice is my manager.'])
+  })
+
+  it("remember passes a marked run's mark on to its memory, and the next brief marks its run", async () => {
+    const id = makeGoal()
+    const { runId } = await startRun(id)
+    const before = await remember({ kind: 'fact', text: 'Bob is my manager.' })
+    expect(getMemory(before.memory.id)!.untrusted_source).toBeNull()
+    markRunUntrusted(runId, 'WebFetch')
+    const after = await remember({ kind: 'rule', text: 'Archive mail from Bob.' })
+    expect(after.memory).toMatchObject({ untrusted: true })
+    expect(getMemory(after.memory.id)!.untrusted_source).toBe('WebFetch')
+    await end_run({ summary: 'done' })
+    const { brief } = await startRun(id)
+    expect(brief.run!.untrusted).toMatchObject({ source: expect.stringContaining('written after WebFetch') })
   })
 
   it('end_run completes the run with counts and requires a run', async () => {

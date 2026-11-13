@@ -11,7 +11,7 @@
 import type { EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
 import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
-import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, updateGoal } from './api'
+import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, trustMemory, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, readModelAnswer, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
@@ -539,7 +539,14 @@ function details($: Engine, e: E, view: View, g: GoalCard) {
         const isConfirming = view.pending?.kind === 'delete-memory' && view.pending.memoryId === m.id
         return (
           <Box key={`memory-${m.id}`}>
-            <Text>  {m.pinned ? '📌 ' : ''}<Text dimColor>[{m.kind}]</Text> {m.text} </Text>
+            <Text>  {m.pinned ? '📌 ' : ''}{m.untrusted ? <Text color="yellow">⚠ </Text> : null}<Text dimColor>[{m.kind}]</Text> {m.text} </Text>
+            {m.untrusted && !isConfirming ? (
+              // A run wrote it after reading outside content: runs that read it need approval for auto actions until trusted
+              <Box>
+                {action($, e, { key: `trust-${m.id}`, label: 'Trust', onPress: () => void act($, `trust:${m.id}`, 'trust the memory', () => trustMemory($, g.id, m.id)) })}
+                <Text> </Text>
+              </Box>
+            ) : null}
             {isConfirming ? (
               <Box>
                 {action($, e, { key: `forget-yes-${m.id}`, label: 'Delete it', onPress: () => {

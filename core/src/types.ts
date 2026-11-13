@@ -282,6 +282,11 @@ export interface GoalMemory {
   active: boolean
   created_at: string
   last_used_at: string | null
+  /**
+   * Set when a run wrote it after reading untrusted content (what that run read).
+   * A brief that hands it out marks its run untrusted too; the person can clear it (Trust).
+   */
+  untrusted_source: string | null
 }
 
 export interface HealthResult {
