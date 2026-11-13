@@ -8,7 +8,7 @@ import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
   getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory, updateMemory,
   setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd, reportRunProgress, deleteGoal,
-  listWatches, checkCommandWatch, getWatch, reportToolWatch, queueForWatchEvents,
+  listWatches, checkCommandWatch, getWatch, reportToolWatch, queueForWatchEvents, reviveIfDone,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
@@ -166,13 +166,16 @@ export async function set_schedule(args: unknown) {
   const input = SetScheduleSchema.parse(args)
   if (!getGoal(input.goal_id)) throw new Error(`Goal ${input.goal_id} not found.`)
   if (input.one_off && input.schedule) throw new Error('A one-off goal has no schedule.')
+  // A done one-off is only listed while it is one: bring it back first, or clearing
+  // one_off below would leave a retired goal no list or tool can reach
+  const revived = reviveIfDone(input.goal_id)
   const applied = applySchedule(input.goal_id, input.schedule)
   // A schedule makes a goal recurring; "one-off" (with no schedule) makes it run once
   const one_off = Boolean(input.one_off && !input.schedule)
   updateGoal(input.goal_id, { one_off })
-  record(input.goal_id, input.goal_id, 'goal_updated', { schedule: applied.schedule, one_off }, human)
+  record(input.goal_id, input.goal_id, 'goal_updated', { schedule: applied.schedule, one_off, ...(revived && { revived }) }, human)
   touchPlan(input.goal_id)
-  return { goal_id: input.goal_id, ...applied, one_off }
+  return { goal_id: input.goal_id, ...applied, one_off, ...(revived && { revived }) }
 }
 
 /** Sets the schedule and when the next run is due: now for an interval, the next match for cron, none without one. */
