@@ -14,7 +14,7 @@ import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, trustMemory, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, readModelAnswer, runCost, runTokens, scheduleLabel, spark, updatePrompt } from './model'
+import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, readModelAnswer, runCost, runsText, runTokens, spark, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
 import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getRuns, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
@@ -494,7 +494,7 @@ function details($: Engine, e: E, view: View, g: GoalCard) {
   return (
     <Box key={`details-${g.id}`} flexDirection="column" marginTop={1}>
       <Text dimColor>{g.objective}</Text>
-      <Text dimColor>Runs {scheduleLabel(g.schedule)}{g.schedule ? '' : ' (set one with /goal-schedule)'}</Text>
+      <Text dimColor>{runsText(g)}</Text>
       {modelLine($, e, view, g)}
       {g.watches.map((w) => (
         <Text key={`watch-${g.id}/${w.name}`} dimColor>

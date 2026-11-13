@@ -301,6 +301,30 @@ test('each goal says how long until its next automatic run, or that it has no sc
   }
 })
 
+test('a goal with a watch and no schedule says it runs on its watch, not that it has no schedule', async ($, on) => {
+  engine(on)
+  const watch = { name: 'failed CI on main', every_minutes: 5, runs: 'gh run list', last_fired_at: null, failing: false, error: null }
+  fakeQuarterdeck(on, [
+    goal({ id: 'g1', name: 'Inbox', next_run_at: '2026-11-07T08:25:00Z' }),
+    goal({ id: 'g2', name: 'CI', next_run_at: null, schedule: null, watches: [watch] }),
+    goal({ id: 'g3', name: 'Invoices', next_run_at: null, schedule: null }),
+  ])
+  await $.session.start(START)
+  for (const surface of SURFACES) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    expect(await ui.find({ type: 'Text', text: /no runs yet · next in 25m/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /no runs yet · on watch/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /no runs yet · no schedule/ })).toBeDefined()
+    for (const id of ['g1', 'g2', 'g3']) await ui.press({ key: `toggle-${id}` })
+    expect(await ui.find({ type: 'Text', text: /^Runs every 1h$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Runs when a watch sees something new: failed CI on main$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Runs on demand \(set one with \/goal-schedule\)$/ })).toBeDefined()
+    expect((await ui.findAll({ type: 'Text', text: /goal-schedule/ })).length).toBe(1)
+    for (const id of ['g1', 'g2', 'g3']) await ui.press({ key: `toggle-${id}` }) // collapse again for the next surface
+    await ui.unmount()
+  }
+})
+
 test('Set schedule asks with the suggestion first and sets the choice', async ($, on) => {
   const { asked } = engine(on, { answer: 'Weekly' })
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Status', objective: 'a weekly report', next_run_at: null, schedule: null })])

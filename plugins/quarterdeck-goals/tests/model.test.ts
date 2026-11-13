@@ -77,6 +77,8 @@ test('scheduleLabel and nextRunText say when a goal runs next', async () => {
   expect(nextRunText({ ...g, nextRunAt: new Date(NOW + 25 * 60_000).toISOString() }, NOW)).toBe(' · next in 25m')
   expect(nextRunText({ ...g, nextRunAt: new Date(NOW - 60_000).toISOString() }, NOW)).toBe(' · next run due now')
   expect(nextRunText({ ...g, nextRunAt: null, schedule: null }, NOW)).toBe(' · no schedule')
+  expect(nextRunText({ ...g, nextRunAt: null, schedule: null, watchCount: 0 }, NOW)).toBe(' · no schedule')
+  expect(nextRunText({ ...g, nextRunAt: null, schedule: null, watchCount: 1 }, NOW)).toBe(' · on watch')
   expect(nextRunText({ ...g, nextRunAt: null, schedule: null, oneOff: true }, NOW)).toBe(' · one-off')
   expect(nextRunText({ ...g, status: 'paused', nextRunAt: null, schedule: null }, NOW)).toBe('')
   expect(nextRunText({ ...g, openRun: { id: 'r', status: 'running' }, nextRunAt: null }, NOW)).toBe('')
