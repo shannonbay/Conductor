@@ -307,12 +307,20 @@ export function scheduleLabel(s: Schedule | null): string {
   return `every ${every}${s.active_hours ? `, ${s.active_hours.replace('-', '–')}` : ''}`
 }
 
-/** " · next in 25m", " · next run due now", " · one-off", " · no schedule", or "" while running or paused. */
-export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt' | 'schedule' | 'oneOff'>, now: number): string {
+/** " · next in 25m", " · next run due now", " · one-off", " · on watch" (no schedule but a watch), " · no schedule", or "" while running or paused. */
+export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt' | 'schedule' | 'oneOff'> & { watchCount?: number }, now: number): string {
   if (g.status !== 'active' || g.openRun) return ''
   if (g.oneOff) return ' · one-off'
   if (g.nextRunAt) return Date.parse(g.nextRunAt) <= now ? ' · next run due now' : ` · next ${ago(g.nextRunAt, now)}`
-  return g.schedule === null ? ' · no schedule' : ''
+  if (g.schedule !== null) return ''
+  return (g.watchCount ?? 0) > 0 ? ' · on watch' : ' · no schedule'
+}
+
+/** The expanded card's "Runs …" line: the schedule, what a watch-only goal waits for, or how to set a schedule. */
+export function runsText(g: Pick<GoalCard, 'schedule' | 'watches'>): string {
+  if (g.schedule) return `Runs ${scheduleLabel(g.schedule)}`
+  if (g.watches.length > 0) return `Runs when a watch sees something new: ${g.watches.map((w) => w.name).join(', ')}`
+  return `Runs ${scheduleLabel(null)} (set one with /goal-schedule)`
 }
 
 // ── Choosing a schedule ───────────────────────────────────────────────────────
