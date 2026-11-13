@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Quarterdeck MCP server 0.20.1, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.21.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 // Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
 const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
@@ -325,7 +325,9 @@ function runMigrations(db) {
       now_tool       TEXT,
       now_tool_at    TEXT,
       waiting_tool   TEXT,
-      waiting_since  TEXT
+      waiting_since  TEXT,
+      untrusted_at     TEXT,
+      untrusted_source TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_goal_runs_plan ON goal_runs(plan_id, started_at);
 
@@ -388,6 +390,12 @@ function runMigrations(db) {
   } catch {
   }
   for (const col of ["now_tool", "now_tool_at", "waiting_tool", "waiting_since"]) {
+    try {
+      db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`);
+    } catch {
+    }
+  }
+  for (const col of ["untrusted_at", "untrusted_source"]) {
     try {
       db.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`);
     } catch {
@@ -535,7 +543,7 @@ var init_migrate = __esm({
       "trg_goal_watches_update_revision",
       "trg_goal_watches_delete_revision"
     ];
-    SCHEMA_VERSION = 4;
+    SCHEMA_VERSION = 5;
   }
 });
 
@@ -908,7 +916,9 @@ function insertRun(db, planId, trigger, status2 = "queued", skipReason) {
     now_tool: null,
     now_tool_at: null,
     waiting_tool: null,
-    waiting_since: null
+    waiting_since: null,
+    untrusted_at: null,
+    untrusted_source: null
   };
   db.prepare(`
     INSERT INTO goal_runs (id, plan_id, trigger, status, session_id, summary, skip_reason, items_created, items_resolved, started_at, ended_at)
@@ -923,6 +933,9 @@ function updateRun(db, runId, fields) {
   const entries = Object.entries(fields);
   if (!entries.length) return;
   db.prepare(`UPDATE goal_runs SET ${entries.map(([k]) => `${k} = ?`).join(", ")} WHERE id = ?`).run(...entries.map(([, v]) => v), runId);
+}
+function markRunUntrusted(db, runId, source) {
+  db.prepare("UPDATE goal_runs SET untrusted_at = ?, untrusted_source = ? WHERE id = ? AND untrusted_at IS NULL").run((/* @__PURE__ */ new Date()).toISOString(), source, runId);
 }
 function listRuns(db, planId, limit = 20, opts = {}) {
   const where = opts.includeSkipped === false ? "AND status != 'skipped'" : "";
@@ -1411,6 +1424,9 @@ function matchToolCategory(rawMap, rawName) {
   }
   return null;
 }
+function readsUntrusted(toolMap, toolName) {
+  return matchToolCategory(toolMap, toolName) === UNTRUSTED_CATEGORY || matchToolCategory(BUILTIN_UNTRUSTED_MAP, toolName) !== null;
+}
 function record(db, run, toolName, category, decision, reason) {
   db.prepare(`
     INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
@@ -1424,10 +1440,16 @@ function guardToolCallForRun(db, runId, toolName) {
 function guardRun(db, run, toolName) {
   const goal = getGoal(db, run.plan_id);
   if (!goal) return { decision: "allow" };
+  if (readsUntrusted(goal.tool_map, toolName)) markRunUntrusted(db, run.id, toolName);
   const category = matchToolCategory(goal.tool_map, toolName);
   if (!category) return { decision: "allow", run_id: run.id };
+  if (category === UNTRUSTED_CATEGORY) {
+    record(db, run, toolName, category, "allow", null);
+    return { decision: "allow", category, run_id: run.id };
+  }
   const mode = autonomyFor(goal, category);
-  if (mode === "auto") {
+  const untrusted = mode === "auto" ? getRun(db, run.id)?.untrusted_source ?? null : null;
+  if (mode === "auto" && untrusted === null) {
     record(db, run, toolName, category, "allow", null);
     return { decision: "allow", category, run_id: run.id };
   }
@@ -1445,7 +1467,8 @@ function guardRun(db, run, toolName) {
     record(db, run, toolName, category, "allow", null);
     return { decision: "allow", category, run_id: run.id };
   }
-  const reason = `Quarterdeck goal guard: "${category}" needs approval first. Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`;
+  const how = `Propose it with add_item (action.category "${category}") and wait until it shows approved_to_execute; once approved, carry it out and then complete the item.`;
+  const reason = untrusted !== null ? `Quarterdeck goal guard: this run has read untrusted content (${untrusted}), so "${category}" needs approval for the rest of the run, in case that content asked for it. ${how}` : `Quarterdeck goal guard: "${category}" needs approval first. ${how}`;
   record(db, run, toolName, category, "deny", reason);
   return { decision: "deny", category, run_id: run.id, reason };
 }
@@ -1473,7 +1496,7 @@ function standingAllowRules(db) {
 function listToolCalls(db, planId, limit = 50) {
   return db.prepare("SELECT * FROM goal_tool_calls WHERE plan_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?").all(planId, limit);
 }
-var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX;
+var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX, UNTRUSTED_CATEGORY, BUILTIN_UNTRUSTED, BUILTIN_UNTRUSTED_MAP;
 var init_guard = __esm({
   "../core/src/guard.ts"() {
     "use strict";
@@ -1481,6 +1504,15 @@ var init_guard = __esm({
     init_goals();
     QUARTERDECK_TOOL_PREFIX = "mcp__quarterdeck__";
     PLUGIN_QUARTERDECK_TOOL_PREFIX = "mcp__plugin_quarterdeck-goals_quarterdeck__";
+    UNTRUSTED_CATEGORY = "untrusted";
+    BUILTIN_UNTRUSTED = [
+      "WebFetch",
+      "WebSearch",
+      "mcp__claude-in-chrome__*",
+      "mcp__*Claude_Browser__*",
+      ...["get_*", "search_*", "list_drafts", "download_*"].flatMap((t) => [`mcp__*Gmail*__${t}`, `mcp__*gmail*__${t}`])
+    ];
+    BUILTIN_UNTRUSTED_MAP = Object.fromEntries(BUILTIN_UNTRUSTED.map((p) => [p, UNTRUSTED_CATEGORY]));
   }
 });
 
@@ -1736,7 +1768,12 @@ function addItem(db, planId, runId, input) {
     }
     return { task: getTask(db, planId, id), existing: false };
   }
-  const mode = autonomyFor(goal, input.action.category);
+  if (input.action.category === "untrusted") {
+    throw new GoalError('"untrusted" is the tool-rule category for tools that read outside content, not an action category. Use the category of the action itself.');
+  }
+  const goalMode = autonomyFor(goal, input.action.category);
+  const untrusted = goalMode === "auto" && runId ? getRun(db, runId)?.untrusted_source ?? void 0 : void 0;
+  const mode = untrusted !== void 0 ? "propose" : goalMode;
   if (mode === "off") {
     throw new GoalError(`Action category "${input.action.category}" is off for this goal: don't take or propose this action.`);
   }
@@ -1746,7 +1783,7 @@ function addItem(db, planId, runId, input) {
   } else {
     insertTask(db, { ...base, status: "completed", state, result: input.result ?? `Done automatically: ${input.action.summary}` });
   }
-  return { task: getTask(db, planId, id), existing: false, mode };
+  return { task: getTask(db, planId, id), existing: false, mode, ...untrusted !== void 0 && { untrusted } };
 }
 function summarizeItem(t) {
   const action = isProposal(t) ? t.state.action : void 0;
@@ -1798,11 +1835,20 @@ function buildBrief(db, planId, runId) {
   const nowIso = (/* @__PURE__ */ new Date()).toISOString();
   for (const m of memory) updateMemory(db, m.id, { last_used_at: nowIso });
   const items = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL AND status IN ('pending', 'active')").all(planId).map(deserializeTask).map(summarizeItem).sort((a, b) => Number(b.approved_to_execute) - Number(a.approved_to_execute) || compareTaskIds(a.id, b.id));
+  const watchEvents = takeWatchEvents(db, planId, runId);
+  if (run && watchEvents.length) markRunUntrusted(db, run.id, "watch events");
+  const marked = run ? getRun(db, run.id) : void 0;
   const dayAgo = new Date(Date.now() - 864e5).toISOString();
   const resolved24h = db.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(planId, dayAgo).n;
   return {
     goal: { id: planId, name: plan.name, objective: goal.objective, instructions: goal.instructions, status: goal.status },
-    run: run ? { id: run.id, trigger: run.trigger, started_at: run.started_at, limits: goal.limits } : null,
+    run: run ? {
+      id: run.id,
+      trigger: run.trigger,
+      started_at: run.started_at,
+      limits: goal.limits,
+      untrusted: marked?.untrusted_at && marked.untrusted_source ? { since: marked.untrusted_at, source: marked.untrusted_source } : null
+    } : null,
     autonomy: { default: "propose", categories: goal.autonomy },
     memory: memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned })),
     memory_omitted: active.length - memory.length,
@@ -1819,7 +1865,7 @@ function buildBrief(db, planId, runId) {
       const [h] = listHealth(db, planId, 1);
       return h ? { passed: h.passed, value: h.value, at: h.created_at, ...!h.passed && h.output && { output: h.output.slice(-500) } } : null;
     })(),
-    watch_events: takeWatchEvents(db, planId, runId)
+    watch_events: watchEvents
   };
 }
 function queueRun(db, planId, trigger = "manual") {
@@ -1964,7 +2010,7 @@ function applyGoalChanges(db, planId, changes) {
       for (const [pattern, category] of Object.entries(changes.tool_map)) {
         if (category === null) delete toolMap[pattern];
         else toolMap[pattern] = category;
-        done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} \u2192 ${category}`);
+        done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} \u2192 ${category}${category === UNTRUSTED_CATEGORY ? " (reads outside content)" : ""}`);
       }
       updateGoal(db, planId, { tool_map: toolMap });
     }
@@ -2075,6 +2121,7 @@ var init_goal_changes = __esm({
     init_queries();
     init_goals();
     init_goal_engine();
+    init_guard();
     init_watches();
     MODES = /* @__PURE__ */ new Set(["off", "propose", "auto"]);
     LIMIT = /(hit|reached) (your|the) .{0,30}limit|usage limit|rate limit|out of (credits|usage)/i;
@@ -2431,7 +2478,9 @@ function buildOverview(db, detail = "all", standingSession = null) {
         agent_id: r.agent_id,
         // New tokens only: every model call re-reads the cached prompt, so cache reads would swamp the total
         tokens: r.input_tokens + r.output_tokens + r.cache_write_tokens,
-        model: r.model
+        model: r.model,
+        // What untrusted content it read first: from then on its auto actions needed approval
+        untrusted: r.untrusted_source
       })),
       needs_you: open.filter((t) => t.review_requested_at).map(overviewItem),
       open_items: open.filter((t) => !t.review_requested_at).slice(0, OPEN_ITEMS).map(overviewItem),
@@ -2597,6 +2646,7 @@ var init_todos = __esm({
 // ../core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
+  BUILTIN_UNTRUSTED: () => BUILTIN_UNTRUSTED,
   DEFAULT_GOAL_LIMITS: () => DEFAULT_GOAL_LIMITS,
   DEFAULT_HOLD_MS: () => DEFAULT_HOLD_MS,
   DEFAULT_LIST: () => DEFAULT_LIST,
@@ -2618,6 +2668,7 @@ __export(src_exports, {
   SCHEMA_VERSION: () => SCHEMA_VERSION,
   STALE_GRACE_MS: () => STALE_GRACE_MS,
   Statement: () => Statement,
+  UNTRUSTED_CATEGORY: () => UNTRUSTED_CATEGORY,
   WATCH_BRIEF_LINES: () => WATCH_BRIEF_LINES,
   WATCH_BUDGET_MS: () => WATCH_BUDGET_MS,
   WATCH_DEFAULT_MATCH: () => WATCH_DEFAULT_MATCH,
@@ -2720,6 +2771,7 @@ __export(src_exports, {
   listTriggers: () => listTriggers,
   listWatchEvents: () => listWatchEvents,
   listWatches: () => listWatches,
+  markRunUntrusted: () => markRunUntrusted,
   markWatchEventsQueued: () => markWatchEventsQueued,
   matchLines: () => matchLines,
   matchToolCategory: () => matchToolCategory,
@@ -2736,6 +2788,7 @@ __export(src_exports, {
   parseLimitReset: () => parseLimitReset,
   queueForWatchEvents: () => queueForWatchEvents,
   queueRun: () => queueRun,
+  readsUntrusted: () => readsUntrusted,
   recordSkip: () => recordSkip,
   recordWatchLines: () => recordWatchLines,
   rejectTask: () => rejectTask,
