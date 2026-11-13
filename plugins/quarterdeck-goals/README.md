@@ -150,7 +150,7 @@ Last change just now  Refresh
 - **Done (n)** at the bottom, collapsed: one-off goals that have finished, each with its last run's summary and **Run again**.
 - **Approve** or **Reject…** each proposal. Rejecting asks what should change, and your answer is saved to the goal's memory.
 - **Run now**, **Cancel run** (asks you to confirm), **Pause** and **Resume**.
-- **▸ name** expands a goal to show its objective, its schedule, open items, last five runs with summaries, and memory. Each memory entry can be deleted (asks you to confirm).
+- **▸ name** expands a goal to show its objective, its schedule, open items, last five runs with summaries, and memory. Each memory entry can be deleted (asks you to confirm). A memory a run wrote after reading untrusted content (mail, web pages, watch events) shows a yellow ⚠ and **Trust**: until you trust it, any run whose brief includes it needs your approval for its auto actions, in case that content asked for the memory.
 - When you have approved a category every time lately, a hint suggests switching it to auto on the goal page.
 - **Open in browser** opens the goal page.
 
@@ -184,7 +184,7 @@ A list is any active Quarterdeck plan in the project's directory, and its to-dos
 
 ### Schedules and one-off goals
 
-Goals lean towards running on a schedule: most are ongoing work. When you create one (or press **Set schedule**), a small model (Haiku) reads the name and objective and suggests how often it should run, and a title if you didn't give one (the objective's first words stand in when the model isn't available). "maintain", "keep" or "check" suggest daily, an inbox or triage hourly, monitoring every 6 hours, a report weekly, and "install", "set up" or "migrate" a one-off. Keyword rules stand in when the model isn't available. You pick from four choices with the suggestion first, or type your own (`12h`, `30d`, `2 weeks`, `weekly`, `monthly`, `cron 0 9 * * 1-5`, `off`). Dismissing the question keeps the suggestion.
+Goals lean towards running on a schedule: most are ongoing work. When you create one (or press **Set schedule**), a small model (Haiku) reads the name and objective and suggests how often it should run, and a title if you didn't give one (the objective's first words stand in when the model isn't available). "maintain", "keep" or "check" suggest daily, an inbox or triage hourly, monitoring every 6 hours, a report weekly, and "install", "set up" or "migrate" a one-off. Keyword rules stand in when the model isn't available. You pick from four choices with the suggestion first, or type your own (`12h`, `30d`, `2 weeks`, `weekly`, `monthly`, `cron 0 9 * * 1-5`, `off`). Dismissing the question keeps the suggestion. For a goal about reacting to things that arrive (new issues, new mail, a new release; or an objective that says "watch for …"), `/goal-new` suggests **When something happens (watch)** first, with the timer it would otherwise use next. Choosing it creates the goal with a daily run as a backstop and then asks Claude, in the conversation, to set up the watch with the goal-watches skill: Claude writes and tries the command, and you confirm it before it is set.
 
 A **one-off** goal runs once, straight away. When its run ends with nothing left open (no proposals waiting, no open items), it's done and moves to **Done**. If it proposed something, it stays until you decide: approving runs it again to carry the action out, and rejecting runs it again to revise. **Run again** brings a done one-off back for another run.
 

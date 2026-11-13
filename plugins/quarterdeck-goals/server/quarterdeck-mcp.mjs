@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.21.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.22.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 // Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
 const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
@@ -7132,7 +7132,8 @@ function runMigrations(db2) {
       pinned       INTEGER NOT NULL DEFAULT 0,
       active       INTEGER NOT NULL DEFAULT 1,
       created_at   TEXT NOT NULL,
-      last_used_at TEXT
+      last_used_at TEXT,
+      untrusted_source TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_goal_memory_plan ON goal_memory(plan_id, active);
 
@@ -7191,6 +7192,10 @@ function runMigrations(db2) {
       db2.exec(`ALTER TABLE goal_runs ADD COLUMN ${col} TEXT`);
     } catch {
     }
+  }
+  try {
+    db2.exec("ALTER TABLE goal_memory ADD COLUMN untrusted_source TEXT");
+  } catch {
   }
   db2.exec(`
     CREATE TABLE IF NOT EXISTS goal_health (
@@ -7316,7 +7321,7 @@ var SCHEMA_VERSION;
 var init_migrate = __esm({
   "../core/src/migrate.ts"() {
     "use strict";
-    SCHEMA_VERSION = 5;
+    SCHEMA_VERSION = 6;
   }
 });
 
@@ -7721,11 +7726,13 @@ function insertMemory(db2, m) {
     pinned: m.pinned ? 1 : 0,
     active: 1,
     created_at: (/* @__PURE__ */ new Date()).toISOString(),
-    last_used_at: null
+    last_used_at: null,
+    // Only an agent's memory can carry what its run had read
+    untrusted_source: m.source === "agent" ? m.untrusted_source ?? null : null
   };
   db2.prepare(`
-    INSERT INTO goal_memory (id, plan_id, kind, text, source, source_ref, pinned, active, created_at, last_used_at)
-    VALUES (@id, @plan_id, @kind, @text, @source, @source_ref, @pinned, @active, @created_at, @last_used_at)
+    INSERT INTO goal_memory (id, plan_id, kind, text, source, source_ref, pinned, active, created_at, last_used_at, untrusted_source)
+    VALUES (@id, @plan_id, @kind, @text, @source, @source_ref, @pinned, @active, @created_at, @last_used_at, @untrusted_source)
   `).run(row);
   return deserializeMemory(row);
 }
@@ -8538,6 +8545,8 @@ function buildBrief(db2, planId, runId) {
   const items = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL AND status IN ('pending', 'active')").all(planId).map(deserializeTask).map(summarizeItem).sort((a, b) => Number(b.approved_to_execute) - Number(a.approved_to_execute) || compareTaskIds(a.id, b.id));
   const watchEvents = takeWatchEvents(db2, planId, runId);
   if (run && watchEvents.length) markRunUntrusted(db2, run.id, "watch events");
+  const taintedMemory = memory.find((m) => m.untrusted_source);
+  if (run && taintedMemory) markRunUntrusted(db2, run.id, `memory ${taintedMemory.id} (written after ${taintedMemory.untrusted_source})`);
   const marked = run ? getRun(db2, run.id) : void 0;
   const dayAgo = new Date(Date.now() - 864e5).toISOString();
   const resolved24h = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(planId, dayAgo).n;
@@ -8551,7 +8560,7 @@ function buildBrief(db2, planId, runId) {
       untrusted: marked?.untrusted_at && marked.untrusted_source ? { since: marked.untrusted_at, source: marked.untrusted_source } : null
     } : null,
     autonomy: { default: "propose", categories: goal.autonomy },
-    memory: memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned })),
+    memory: memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned, ...m.untrusted_source && { untrusted: true } })),
     memory_omitted: active.length - memory.length,
     decisions_since_last_run: decisions,
     open_items: items,
@@ -9177,7 +9186,7 @@ function buildOverview(db2, detail = "all", standingSession = null) {
       open_items: open.filter((t) => !t.review_requested_at).slice(0, OPEN_ITEMS).map(overviewItem),
       open_item_count: open.filter((t) => !t.review_requested_at).length,
       health: listHealth(db2, plan.id, HEALTH).map((h) => ({ passed: h.passed, value: h.value, created_at: h.created_at })),
-      memory: listMemory(db2, plan.id, { activeOnly: true }).slice(-MEMORY).reverse().map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory), source: m.source, pinned: m.pinned, created_at: m.created_at })),
+      memory: listMemory(db2, plan.id, { activeOnly: true }).slice(-MEMORY).reverse().map((m) => ({ id: m.id, kind: m.kind, text: clip(m.text, CLIP.memory), source: m.source, pinned: m.pinned, created_at: m.created_at, untrusted: m.untrusted_source })),
       suggestions: getAutonomySuggestions(db2, plan.id),
       // Without when each last checked: that changes every few minutes and would redraw the pane for nothing
       watches: watches.map((w) => ({
@@ -21991,6 +22000,7 @@ var DeleteMemorySchema = external_exports.object({
   goal_id: external_exports.string(),
   memory_id: external_exports.string()
 });
+var TrustMemorySchema = DeleteMemorySchema;
 var VerifyTaskSchema = external_exports.object({
   task_id: external_exports.string().describe("ID of the task whose checks to run")
 });
@@ -22831,9 +22841,11 @@ async function add_item(args) {
 async function remember(args) {
   const input = RememberSchema.parse(args);
   const planId = requireOpenGoal();
-  const m = insertMemory2({ plan_id: planId, kind: input.kind, text: input.text, source: "agent", source_ref: input.source_ref ?? getOpenRun2() });
+  const runId = getOpenRun2();
+  const untrusted = runId ? getRun2(runId)?.untrusted_source ?? null : null;
+  const m = insertMemory2({ plan_id: planId, kind: input.kind, text: input.text, source: "agent", source_ref: input.source_ref ?? runId, untrusted_source: untrusted });
   record3(planId, planId, "memory_added", { memory_id: m.id, kind: m.kind, text: m.text });
-  return { memory: { id: m.id, kind: m.kind, text: m.text } };
+  return { memory: { id: m.id, kind: m.kind, text: m.text, ...untrusted && { untrusted: true } } };
 }
 async function forget(args) {
   const input = ForgetSchema.parse(args);
@@ -23091,6 +23103,16 @@ async function delete_memory(args) {
   deleteMemory2(m.id);
   record3(input.goal_id, input.goal_id, "memory_deleted", { memory_id: m.id, text: m.text }, human);
   return { deleted: m.id };
+}
+async function trust_memory(args) {
+  const input = TrustMemorySchema.parse(args);
+  const m = getMemory2(input.memory_id);
+  if (!m || m.plan_id !== input.goal_id) throw new Error(`Memory ${input.memory_id} not found in this goal.`);
+  if (m.untrusted_source) {
+    updateMemory2(m.id, { untrusted_source: null });
+    record3(input.goal_id, input.goal_id, "memory_trusted", { memory_id: m.id, text: m.text, was: m.untrusted_source }, human);
+  }
+  return { trusted: m.id };
 }
 async function set_schedule(args) {
   const input = SetScheduleSchema.parse(args);
@@ -23456,6 +23478,7 @@ var TOOLS = [
     ["guard_check", "Applies a goal's autonomy to a tool call made during a run.", GuardCheckSchema, guard_check],
     ["create_goal", "Creates a goal for the human.", CreateGoalSchema, create_goal],
     ["delete_memory", "Deletes one of a goal's memories for the human.", DeleteMemorySchema, delete_memory],
+    ["trust_memory", "Clears the untrusted mark on a goal memory a run wrote after reading outside content, for the human.", TrustMemorySchema, trust_memory],
     ["set_schedule", "Sets a goal's schedule (interval, cron, or none) for the human.", SetScheduleSchema, set_schedule],
     ["update_goal", "Changes a goal's name, objective, instructions, autonomy, tool rules, memory, watches or status, once the human has confirmed.", UpdateGoalSchema, update_goal],
     ["report_run_end", "Reports how a goal run's agent finished a turn: a usage limit skips the run and holds goal runs until the reset.", ReportRunEndSchema, report_run_end],

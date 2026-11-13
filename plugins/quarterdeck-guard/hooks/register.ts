@@ -53,6 +53,7 @@ const HUMAN_ONLY = new Set([
   'create_goal',
   'delete_goal',
   'delete_memory',
+  'trust_memory',
   'set_schedule',
   'update_goal',
   'report_run_end',
