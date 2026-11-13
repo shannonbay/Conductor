@@ -7,8 +7,9 @@ import type { EngineInterface } from 'claude-code'
 
 import type { GoalCard } from '../types'
 import { addTodo, answerItem, approve, createGoal, fetchOverview, editTodo, fetchTodos, reject, runNow, setGoalStatus, setSchedule, setTodo, updateGoal } from './api'
-import { ago, clip, describe, NEW_GOAL_MODEL, newGoalModelText, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, soundsEventDriven, splitGoalArgs, summarize, type GoalChanges, toCard } from './model'
+import { ago, clip, describe, NEW_GOAL_MODEL, newGoalModelText, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, soundsEventDriven, splitGoalArgs, WATCH_FALLBACK, watchSetupPrompt, summarize, type GoalChanges, toCard } from './model'
 import { kick } from './runner'
+import { sendToChat } from './chat'
 import { askSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
 import { act, refresh, refreshTodos } from './sync'
@@ -359,6 +360,9 @@ async function newFromTemplate($: Engine): Promise<string> {
   return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute.${newGoalModelText(template.model, template.modelReason)} It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`
 }
 
+/** How long after /goal-new answers its watch prompt goes into the conversation. */
+const WATCH_PROMPT_DELAY_MS = 500
+
 /**
  * /goal-new <objective> (a title is suggested) or /goal-new <name>: <objective>.
  * Asks how often it runs, with a suggestion first. Alone, it offers templates.
@@ -369,7 +373,7 @@ export async function newGoal($: Engine, args: string): Promise<string> {
   const cwd = await $.session.root()
   const suggestion = await suggestSchedule($, given, objective)
   const name = given ?? suggestion.title ?? fallbackTitle(objective)
-  const choice = await askSchedule($, name, suggestion)
+  const choice = await askSchedule($, name, suggestion, true)
   const model = suggestion.model ?? NEW_GOAL_MODEL
   let created
   try {
@@ -381,6 +385,13 @@ export async function newGoal($: Engine, args: string): Promise<string> {
   await refresh($)
   const where = `in ${cwd}`
   const runsOn = newGoalModelText(model, suggestion.model && suggestion.modelReason)
+  if (choice.key === 'watch') {
+    // Writing and testing the watch is Claude's job (the person confirms it in update_goal). A command can't
+    // submit a prompt while it runs, so it goes once the command has answered.
+    $.clock.after(WATCH_PROMPT_DELAY_MS, () => void sendToChat($, watchSetupPrompt(name, suggestion.watch ?? WATCH_FALLBACK), `set up a watch for the goal "${name}"`)
+      .catch(() => $.ui.toast(`Ask Claude to add a watch to "${name}".`)))
+    return `Created the goal "${name}" ${where}, running daily as a backstop; the first run starts within a minute. Claude sets up its watch next: you confirm the command before it is set.${runsOn}${await phoneHint($)}`
+  }
   if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${runsOn}${await phoneHint($)}`
   // A goal about things happening can also start when they do, not only on its timer
   const watch = soundsEventDriven(objective) ? ` To start a run as soon as something happens, not only on a timer, ask Claude to add a watch to "${name}".` : ''

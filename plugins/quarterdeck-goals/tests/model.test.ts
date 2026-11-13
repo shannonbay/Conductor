@@ -4,7 +4,7 @@ import { phoneText } from '../hooks/alerts'
 
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
-  statusText, suggestByKeywords, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet, allowRules, allowRulesPrompt, describe, describeGoalChanges, modelName, newGoalModelText, readModelAnswer } from '../hooks/model'
+  statusText, suggestByKeywords, offersWatch, watchSetupPrompt, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet, allowRules, allowRulesPrompt, describe, describeGoalChanges, modelName, newGoalModelText, readModelAnswer } from '../hooks/model'
 import { TEMPLATES } from '../hooks/templates'
 import { goal, NOW, proposal } from './fixtures'
 
@@ -180,6 +180,9 @@ test('an objective about things happening is spotted, so /goal-new can mention w
   expect(soundsEventDriven('Whenever a release is published, write the notes')).toBe(true)
   expect(soundsEventDriven('Keep my inbox under 20 unread')).toBe(false)
   expect(soundsEventDriven('Water the plants every morning')).toBe(false)
+  expect(soundsEventDriven('Watch for issues on GitHub in octo/site')).toBe(true)
+  expect(soundsEventDriven('watching out for price drops on the camera')).toBe(true)
+  expect(soundsEventDriven('Keep the watch list tidy')).toBe(false)
 })
 
 test('a goal whose watch cannot check is not quiet, and an older server without watches still reads', () => {
@@ -257,4 +260,20 @@ test('a run that read untrusted content says so, and so does a tool rule marking
   expect(g.runs[0]!.untrusted).toBe('WebFetch')
   expect(describe(g, NOW)).toContain('[read outside content (WebFetch): auto actions needed approval]')
   expect(describeGoalChanges(g, { tool_map: { 'mcp__issues__get_issue': 'untrusted' } })[0]).toMatch(/untrusted \(reads outside content/)
+})
+
+test('a goal about something arriving is offered a watch first, its timer next', () => {
+  expect(choiceOptions('hourly', true)).toEqual(['When something happens (watch) (suggested)', 'Every hour', 'Daily', 'Weekly'])
+  expect(choiceOptions('daily', true)).toEqual(['When something happens (watch) (suggested)', 'Daily', 'Weekly', 'One-off: run once now'])
+  expect(choiceFromAnswer('When something happens (watch) (suggested)')).toMatchObject({ key: 'watch', schedule: { kind: 'interval', minutes: 1440 } })
+  expect(parseSuggestion('{"choice": "hourly", "reason": "x", "watch": "new issues in octo/site."}')).toEqual({ choice: 'hourly', reason: 'x', watch: 'new issues in octo/site' })
+  expect(parseSuggestion('{"choice": "hourly", "reason": "x", "watch": null}')).toEqual({ choice: 'hourly', reason: 'x' })
+  expect(parseSuggestion('{"choice": "watch", "reason": "x"}')).toBeNull()
+  expect(suggestByKeywords('', 'Triage new issues in octo/site')).toMatchObject({ watch: 'what the objective describes' })
+  expect(suggestByKeywords('', 'Keep my inbox under 20 unread').watch).toBeUndefined()
+  expect(offersWatch({ choice: 'one-off', reason: 'x', watch: 'y' })).toBe(false)
+  expect(offersWatch({ choice: 'daily', reason: 'x', watch: 'y' })).toBe(true)
+  expect(watchSetupPrompt('Issues', 'new issues in octo/site')).toContain('"Issues"')
+  expect(watchSetupPrompt('Issues', 'new issues in octo/site')).toContain('(new issues in octo/site)')
+  expect(watchSetupPrompt('Issues', 'what the objective describes')).not.toContain('(what the objective')
 })

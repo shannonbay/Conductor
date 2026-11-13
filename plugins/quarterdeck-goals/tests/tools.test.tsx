@@ -160,6 +160,42 @@ test('/goal-new gives the goal the model the small model suggests, and says why'
   expect(made.text).toContain('Its runs use Haiku (it only checks and reports)')
 })
 
+test('/goal-new offers a watch first for a goal about things arriving; choosing it has Claude set one up', async ($, on) => {
+  const { asked, prompts, clock } = engine(on, { answer: 'When something happens (watch) (suggested)', suggestion: '{"choice": "hourly", "reason": "issues arrive all the time", "watch": "new issues in octo/site"}' })
+  const fake = fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', 'Issues: triage new issues in octo/site'))
+  expect(asked[0]).toContain('Suggested: when something happens (new issues in octo/site): Claude sets up a watch next')
+  expect(asked[0]).toContain('On a timer instead: every hour (issues arrive all the time)')
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({ schedule: { kind: 'interval', minutes: 1440 }, one_off: false })
+  expect(made.text).toContain('running daily as a backstop')
+  expect(made.text).toContain('Claude sets up its watch next')
+  expect(prompts).toEqual([]) // not while the command runs
+  await clock.advance(1_000)
+  await clock.settle()
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain('Set up a watch for my new Quarterdeck goal "Issues"')
+  expect(prompts[0]).toContain('goal-watches skill')
+})
+
+test('/goal-new offers a watch when the objective says so, even if the model named none; a timer sends nothing', async ($, on) => {
+  const { asked, prompts } = engine(on, { answer: 'Every 6 hours', suggestion: '{"choice": "6h", "reason": "it watches for changes"}' })
+  const fake = fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', 'Issues: watch for issues on github in octo/site'))
+  expect(asked[0]).toContain('Suggested: when something happens: Claude sets up a watch next')
+  expect(fake.of('create_goal')[0]?.input).toMatchObject({ schedule: { kind: 'interval', minutes: 360 } })
+  expect(prompts).toEqual([])
+})
+
+test('/goal-new does not offer a watch for upkeep', async ($, on) => {
+  const { asked } = engine(on, { suggestion: '{"choice": "daily", "reason": "it is ongoing upkeep"}' })
+  fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', 'Tidy: keep my downloads folder tidy'))
+  expect(asked[0]).not.toContain('watch')
+})
+
 test('/goal-new without a name takes the title the model suggests, or one from the objective', async ($, on) => {
   const { asked } = engine(on, { suggestion: '{"choice": "hourly", "reason": "new mail arrives all the time", "title": "Inbox Under Control."}' })
   const fake = fakeQuarterdeck(on, [])

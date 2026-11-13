@@ -317,12 +317,14 @@ export function nextRunText(g: Pick<GoalCard, 'status' | 'openRun' | 'nextRunAt'
 
 // ── Choosing a schedule ───────────────────────────────────────────────────────
 
-export type ChoiceKey = 'hourly' | '6h' | 'daily' | 'weekly' | 'one-off' | 'on-demand' | 'custom'
+export type ChoiceKey = 'hourly' | '6h' | 'daily' | 'weekly' | 'one-off' | 'on-demand' | 'watch' | 'custom'
 export type ScheduleChoice = { key: ChoiceKey; label: string; schedule: Schedule | null; oneOff: boolean; /** How a typed answer was read, when a model read it. */ read?: string }
 export type ModelTier = 'haiku' | 'sonnet' | 'opus'
 export type Suggestion = {
-  choice: Exclude<ChoiceKey, 'on-demand'>
+  choice: Exclude<ChoiceKey, 'on-demand' | 'watch'>
   reason: string
+  /** What a watch would look for ("new issues in octo/site") when a run is better started by something happening than by the clock. */
+  watch?: string
   /** A short name for a goal created without one. */
   title?: string
   /** The model its runs should use, and why; absent when the small model gave none (new goals then get NEW_GOAL_MODEL). */
@@ -338,6 +340,8 @@ export const SCHEDULE_CHOICES: readonly ScheduleChoice[] = [
   { key: 'weekly', label: 'Weekly', schedule: { kind: 'interval', minutes: 10080 }, oneOff: false },
   { key: 'one-off', label: 'One-off: run once now', schedule: null, oneOff: true },
   { key: 'on-demand', label: 'Only when I run it', schedule: null, oneOff: false },
+  // Started by a watch Claude sets up next; the daily run is a backstop while it isn't set, or if it misses something
+  { key: 'watch', label: 'When something happens (watch)', schedule: { kind: 'interval', minutes: 1440 }, oneOff: false },
 ]
 
 const SUGGESTED = ' (suggested)'
@@ -345,11 +349,20 @@ const SUGGESTED = ' (suggested)'
 /** The alternatives offered after the suggestion, in this order (the question takes four options). */
 const ALTERNATIVES: ChoiceKey[] = ['daily', 'weekly', 'one-off', 'hourly', '6h']
 
-/** Four labels: the suggestion first and marked, then the most common alternatives. Anything else is typed. */
-export function choiceOptions(suggested: ChoiceKey): string[] {
-  const first = SCHEDULE_CHOICES.find((c) => c.key === suggested)!
-  const rest = ALTERNATIVES.filter((k) => k !== suggested).slice(0, 3).map((k) => SCHEDULE_CHOICES.find((c) => c.key === k)!.label)
-  return [first.label + SUGGESTED, ...rest]
+/**
+ * Four labels: the suggestion first and marked, then the most common alternatives. Anything else is typed.
+ * With `watch`, a watch is the suggestion and the timer the small model picked comes next.
+ */
+export function choiceOptions(suggested: ChoiceKey, watch = false): string[] {
+  const label = (k: ChoiceKey) => SCHEDULE_CHOICES.find((c) => c.key === k)!.label
+  const order: ChoiceKey[] = watch ? ['watch', suggested, ...ALTERNATIVES] : [suggested, ...ALTERNATIVES]
+  const keys = order.filter((k, i) => order.indexOf(k) === i).slice(0, 4)
+  return keys.map((k, i) => (i === 0 ? label(k) + SUGGESTED : label(k)))
+}
+
+/** Whether to offer a watch for this suggestion: one was named, and the goal recurs. */
+export function offersWatch(s: Suggestion): boolean {
+  return Boolean(s.watch) && s.choice !== 'one-off'
 }
 
 /**
@@ -384,9 +397,12 @@ const KEYWORDS: [RegExp, Suggestion][] = [
 /** The fallback suggestion: keyword rules, leaning towards a daily schedule. */
 export function suggestByKeywords(name: string, objective: string): Suggestion {
   const text = `${name} ${objective}`.toLowerCase().replace(/[-_]/g, ' ')
-  for (const [re, suggestion] of KEYWORDS) if (re.test(text)) return suggestion
-  return { choice: 'daily', reason: 'goals are ongoing unless they are clearly one-offs' }
+  const suggestion: Suggestion = KEYWORDS.find(([re]) => re.test(text))?.[1] ?? { choice: 'daily', reason: 'goals are ongoing unless they are clearly one-offs' }
+  return soundsEventDriven(objective) ? { ...suggestion, watch: WATCH_FALLBACK } : suggestion
 }
+
+/** What a watch looks for when only the keyword rules spotted one. */
+export const WATCH_FALLBACK = 'what the objective describes'
 
 const MODEL_TIERS: readonly ModelTier[] = ['haiku', 'sonnet', 'opus']
 
@@ -398,8 +414,8 @@ export function parseSuggestion(text: string): Suggestion | null {
   const json = /\{[\s\S]*\}/.exec(text)?.[0]
   if (!json) return null
   try {
-    const v = JSON.parse(json) as { choice?: unknown; reason?: unknown; title?: unknown; model?: unknown; model_reason?: unknown }
-    const choice = SCHEDULE_CHOICES.find((c) => c.key === v.choice && c.key !== 'on-demand')
+    const v = JSON.parse(json) as { choice?: unknown; reason?: unknown; title?: unknown; model?: unknown; model_reason?: unknown; watch?: unknown }
+    const choice = SCHEDULE_CHOICES.find((c) => c.key === v.choice && c.key !== 'on-demand' && c.key !== 'watch')
     if (!choice) return null
     const sentence = (s: unknown) => (typeof s === 'string' && s.trim() ? s.trim().replace(/\.$/, '') : '')
     const reason = sentence(v.reason) || 'suggested from its objective'
@@ -407,7 +423,8 @@ export function parseSuggestion(text: string): Suggestion | null {
     const named = typeof v.model === 'string' ? v.model.trim().toLowerCase() : ''
     const model = MODEL_TIERS.find((m) => m === named)
     const modelReason = model ? sentence(v.model_reason) : ''
-    return { choice: choice.key as Suggestion['choice'], reason, ...(title && { title }), ...(model && { model }), ...(modelReason && { modelReason }) }
+    const watch = clip(sentence(v.watch).replace(/\s+/g, ' '), 80)
+    return { choice: choice.key as Suggestion['choice'], reason, ...(title && { title }), ...(model && { model }), ...(modelReason && { modelReason }), ...(watch && { watch }) }
   } catch {
     return null
   }
@@ -563,7 +580,13 @@ export const WATCH_DEFAULT_MINUTES = 5
 
 /** True for an objective about reacting to things as they happen ("when a new issue is opened…"): a watch would suit it. */
 export function soundsEventDriven(objective: string): boolean {
-  return /\b(when(ever)?|as soon as|each time|every time)\b.{0,60}\b(new|opens?|opened|arrives?|appears?|posted|published|changes?|is (created|added|merged|released))\b|\bnew (issues?|prs?|pull requests?|releases?|posts?|commits?|emails?|messages?|files?)\b/i.test(objective)
+  return /\b(when(ever)?|as soon as|each time|every time)\b.{0,60}\b(new|opens?|opened|arrives?|appears?|posted|published|changes?|is (created|added|merged|released))\b|\bnew (issues?|prs?|pull requests?|releases?|posts?|commits?|emails?|messages?|files?)\b|\bwatch(es|ing)? (for|out for)\b/i.test(objective)
+}
+
+/** The prompt that has Claude set up a new goal's watch: the goal-watches skill, then update_goal, which the person confirms. */
+export function watchSetupPrompt(name: string, watch: string): string {
+  const what = watch === WATCH_FALLBACK ? '' : ` (${watch})`
+  return `Set up a watch for my new Quarterdeck goal "${name}", so a run starts when something it looks after happens${what}, not only on its daily backstop. Use the goal-watches skill: pick the source, try the command (or a read-only connector tool) yourself in the goal's directory, then add it with update_goal. If it's unclear what to watch, ask me first.`
 }
 
 /** The changes as the person reads them before confirming: one line each, from what is to what will be. */
