@@ -262,7 +262,9 @@ export async function schedulerPass(db: Database, opts: PassOptions): Promise<Pa
       claimed.push(run)
       running++
     }
-    if (decision.trigger === 'interval' || decision.trigger === 'cron') updateGoal(db, plan.id, { next_run_at: nextIntervalRun(db, plan.id, now) })
+    // Any run that starts restarts an interval's clock (Run now at 9:55 means no 10:00 run on an
+    // hourly goal); a cron schedule's next time after now is the slot it already had, so it keeps it
+    if (run || decision.trigger === 'interval' || decision.trigger === 'cron') updateGoal(db, plan.id, { next_run_at: nextIntervalRun(db, plan.id, now) })
   }
   return withWatches({ leader: true, claimed, expired })
 }

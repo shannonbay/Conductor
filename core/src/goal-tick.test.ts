@@ -4,7 +4,7 @@ import {
   openDatabase, createGoal, updateGoal, getGoal, queueRun, getRun, updateRun, addItem, getTask, listMemory, listRuns,
   takeLease, releaseLease, leaseHolder, claimRun, schedulerPass, expireStaleRuns, decideItem, attachAgent, guardToolCallForRun,
   buildOverview, overviewWithEtag, LEASE_MS, insertRun, endRun, updateTask, reviveIfDone, insertMemory,
-  SCHEMA_VERSION, dbSchemaVersion, schemaOutdated, runMigrations,
+  SCHEMA_VERSION, dbSchemaVersion, schemaOutdated, runMigrations, setSchedule, cronNext,
 } from './index.js'
 
 let db: Database
@@ -78,6 +78,28 @@ describe('schedulerPass', () => {
     const r = await schedulerPass(db, { holder: 'A', now: t })
     expect(r.claimed.map((c) => [c.goal_id, c.trigger])).toEqual([['g2', 'interval']])
     expect(getGoal(db, 'g2')!.next_run_at! > t.toISOString()).toBe(true)
+  })
+
+  it('restarts an interval from a run started any other way', async () => {
+    createGoal(db, { ...plan, id: 'g2', name: 'Hourly' }, { objective: 'x' }, { minutes: 60 })
+    const t = new Date()
+    updateGoal(db, 'g2', { next_run_at: new Date(t.getTime() + 5 * 60_000).toISOString() })
+    queueRun(db, 'g2') // Run now, five minutes before the scheduled run
+    const r = await schedulerPass(db, { holder: 'A', now: t })
+    expect(r.claimed.map((c) => [c.goal_id, c.trigger])).toEqual([['g2', 'manual']])
+    expect(getGoal(db, 'g2')!.next_run_at).toBe(new Date(t.getTime() + 60 * 60_000).toISOString())
+  })
+
+  it('keeps a cron slot when a run starts some other way', async () => {
+    createGoal(db, { ...plan, id: 'g2', name: 'Daily' }, { objective: 'x' })
+    setSchedule(db, 'g2', { kind: 'cron', expr: '0 8 * * *' })
+    const t = new Date()
+    const slot = cronNext('0 8 * * *', t).toISOString()
+    updateGoal(db, 'g2', { next_run_at: slot })
+    queueRun(db, 'g2')
+    const r = await schedulerPass(db, { holder: 'A', now: t })
+    expect(r.claimed.map((c) => [c.goal_id, c.trigger])).toEqual([['g2', 'manual']])
+    expect(getGoal(db, 'g2')!.next_run_at).toBe(slot)
   })
 
   it('starts no more than maxConcurrent runs at once', async () => {
