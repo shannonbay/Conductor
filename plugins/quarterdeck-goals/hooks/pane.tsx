@@ -14,12 +14,12 @@ import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, trustMemory, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, readModelAnswer, runCost, runsText, runTokens, spark, updatePrompt } from './model'
+import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, planModeBlocked, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, readModelAnswer, runCost, runsText, runTokens, spark, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
-import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getRuns, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
+import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPlanMode, getPhone, getRejecting, getRuns, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, editFromPane, toggleTodo, workFromPane } from './todos'
-import { GUARD_MISSING } from './runner'
+import { GUARD_MISSING, PLAN_MODE_ON } from './runner'
 import { act, refresh } from './sync'
 
 type Engine = EngineInterface
@@ -73,6 +73,7 @@ export async function renderPane($: Engine, e: E) {
   const s = await getSnapshot($)
   const message = await getNotice($)
   const guardMissing = await getGuardMissing($)
+  const planMode = await getPlanMode($)
   const todos = await getTodos($)
   const addingTo = await getAddingTo($)
   const askingAbout = await getAskingAbout($)
@@ -153,7 +154,8 @@ export async function renderPane($: Engine, e: E) {
         </Box>
       )}
       {phone === 'config_off' && <Text color="yellow">Alerts can't reach your phone: mobile push is off. Turn it on in /config.</Text>}
-      {!s.reachable && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
+      {(planMode || (!s.reachable && planModeBlocked(s.error ?? ''))) && <Text color="yellow">{PLAN_MODE_ON}</Text>}
+      {!s.reachable && !planMode && !planModeBlocked(s.error ?? '') && <Text color="yellow">Offline — showing the last read ({ago(new Date(s.fetchedAt).toISOString(), view.now)}).</Text>}
       {current.length === 0 && done.length === 0 && !todos?.lists.length && welcome($, e)}
       {current.length === 0 && (done.length > 0 || !!todos?.lists.length) && (
         <Box flexDirection="column" marginBottom={1}>

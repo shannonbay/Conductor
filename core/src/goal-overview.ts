@@ -161,6 +161,11 @@ export function describeActivity({ goal, openRun, lastRun, events, items }: Acti
   if (openRun?.status === 'running') {
     if (openRun.waiting_tool && openRun.waiting_since) {
       const tool = openRun.waiting_tool
+      // Quarterdeck's own tools (the brief first) ask only when the session has no allow rule
+      // for them, and that prompt often isn't shown anywhere: say so rather than wait silently
+      if (/^quarterdeck /.test(tool)) {
+        return { state: 'running', text: `Waiting for a permission prompt that may not be showing: ${tool}. Allow Quarterdeck's tools in this session, or cancel the run`, at: openRun.waiting_since, waiting: { tool, since: openRun.waiting_since } }
+      }
       return { state: 'running', text: `Waiting for your permission: ${tool}`, at: openRun.waiting_since, waiting: { tool, since: openRun.waiting_since } }
     }
     // The newest of: what its Quarterdeck calls recorded, and its latest other tool call

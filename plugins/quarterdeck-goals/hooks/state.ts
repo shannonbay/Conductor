@@ -26,6 +26,8 @@ const confirm = atom({ plugin: 'quarterdeck-goals', key: 'confirm' } as const, n
 const activeRun = atom({ plugin: 'quarterdeck-goals', key: 'activeRun' } as const, null)
 const runs = atom({ plugin: 'quarterdeck-goals', key: 'runs' } as const, {})
 const guardMissing = atom({ plugin: 'quarterdeck-goals', key: 'guardMissing' } as const, false)
+/** Set while plan mode refuses the runner's calls: no runs start here until it ends. */
+const planMode = atom({ plugin: 'quarterdeck-goals', key: 'planMode' } as const, false)
 const todos = atom({ plugin: 'quarterdeck-goals', key: 'todos' } as const, null)
 const phone = atom({ plugin: 'quarterdeck-goals', key: 'phone' } as const, 'unknown')
 
@@ -90,6 +92,14 @@ export async function getGuardMissing($: Engine): Promise<boolean> {
   return read($, guardMissing)
 }
 /** Writes only on a change, so the pane redraws only when the guard comes or goes. */
+export async function getPlanMode($: Engine): Promise<boolean> {
+  return read($, planMode)
+}
+
+export async function setPlanMode($: Engine, value: boolean): Promise<void> {
+  if ((await read($, planMode)) !== value) await update($, planMode, () => value)
+}
+
 export async function setGuardMissing($: Engine, value: boolean): Promise<void> {
   if ((await read($, guardMissing)) !== value) await update($, guardMissing, () => value)
 }

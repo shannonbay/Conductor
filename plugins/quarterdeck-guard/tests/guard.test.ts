@@ -70,7 +70,7 @@ test("a run's report is kept by Quarterdeck, not handed back into the chat", asy
   world(on)
   await $.session.start(START)
   const r = await $.tool.call(call({ tool: 'SubagentHandback', report: 'All done', agentId: 'run-agent' }))
-  expect(said(r)).toContain('Report saved by Quarterdeck')
+  expect(said(r)).toContain('do not call SubagentHandback again')
 })
 
 test('the guard says it is there, for quarterdeck-goals to check', async ($, on) => {
