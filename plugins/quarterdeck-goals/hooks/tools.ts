@@ -325,15 +325,20 @@ async function newFromTemplate($: Engine): Promise<string> {
   const template = TEMPLATES.find((t) => t.label === picked)
   if (!template) return picked.trim() && !/^cancel$/i.test(picked.trim()) ? newGoal($, picked) : 'No goal created.'
   let instructions = template.instructions
+  let answer = ''
   if (template.ask) {
-    let answer: string
     try {
       answer = await $.ui.ask(template.ask.question, [template.ask.later, 'Cancel'])
     } catch {
       return 'No goal created.'
     }
     if (answer === 'Cancel' || !answer.trim()) return 'No goal created.'
-    const first = answer === template.ask.later ? template.ask.laterText : template.ask.fill(answer.trim())
+    let first: string
+    try {
+      first = answer === template.ask.later ? template.ask.laterText : template.ask.fill(answer.trim())
+    } catch (err) {
+      return `No goal created: ${err instanceof Error ? err.message : String(err)}.`
+    }
     instructions = [first, template.instructions].filter(Boolean).join(' ')
   }
   if (template.cv) {
@@ -347,17 +352,25 @@ async function newFromTemplate($: Engine): Promise<string> {
     if (cv) instructions = `${instructions} ${cv}`
   }
   const cwd = await $.session.root()
+  let created
   try {
-    await createGoal($, {
+    const watches = template.watches?.(answer)
+    created = await createGoal($, {
       name: template.name, objective: template.objective, working_dir: cwd, schedule: template.schedule, model: template.model,
-      instructions, autonomy: template.autonomy, tool_map: template.tool_map,
+      instructions, autonomy: template.autonomy, tool_map: template.tool_map, ...(watches && { watches }),
     })
+    // With no schedule nothing is due: the first run (setting up, catching up) starts now
+    if (!template.schedule) await runNow($, created.id)
   } catch (err) {
     return `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}`
   }
   await kick($)
   await refresh($)
-  return `Created the goal "${template.name}" in ${cwd}, running ${scheduleLabel(template.schedule)}; the first run starts within a minute.${newGoalModelText(template.model, template.modelReason)} It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`
+  const checks = (created.watches ?? []).map((w) => ` Watch "${w.name}": ${w.result}.`).join('')
+  const when = template.schedule
+    ? `running ${scheduleLabel(template.schedule)}`
+    : `with no schedule: a run starts when its watch sees ${(created.watches ?? []).map((w) => w.name).join(' or ') || 'something new'}`
+  return `Created the goal "${template.name}" in ${cwd}, ${when}; the first run starts within a minute.${checks}${newGoalModelText(template.model, template.modelReason)} It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`
 }
 
 /** How long after /goal-new answers its watch prompt goes into the conversation. */

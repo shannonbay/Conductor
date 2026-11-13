@@ -169,7 +169,8 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
           })
           goals.push(made)
           version++
-          return ok({ id: made.id, next_run_at: made.next_run_at, one_off: oneOff, queued_run: made.open_run?.id ?? null }) as never
+          const watches = Object.keys((input.watches ?? {}) as object).map((name) => ({ name, result: 'works: 0 items there now; a run starts when a new one appears' }))
+          return ok({ id: made.id, next_run_at: made.next_run_at, one_off: oneOff, queued_run: made.open_run?.id ?? null, ...(watches.length && { watches }) }) as never
         }
         case 'goals_tick': {
           if (input.release) return ok({ released: true }) as never

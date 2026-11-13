@@ -159,12 +159,20 @@ export async function setSchedule($: Engine, goalId: string, schedule: Schedule 
   return call($, 'set_schedule', { goal_id: goalId, schedule, ...(oneOff && { one_off: true }) })
 }
 
-export type CreatedGoal = { id: string; next_run_at: string | null; one_off: boolean; queued_run: string | null }
+export type CreatedGoal = {
+  id: string; next_run_at: string | null; one_off: boolean; queued_run: string | null
+  /** How each watch's first check went. */
+  watches?: { name: string; result: string }[]
+}
+
+/** A command watch: prints one line per current item; a new line starts a run. */
+export type CommandWatch = { command: string; every_minutes?: number }
 
 export async function createGoal(
   $: Engine, input: {
     name: string; objective: string; working_dir: string; schedule?: Schedule | null; one_off?: boolean; model?: string | null
     instructions?: string; autonomy?: Record<string, string>; tool_map?: Record<string, string>
+    watches?: Record<string, CommandWatch>
   },
 ): Promise<CreatedGoal> {
   return call<CreatedGoal>($, 'create_goal', input)

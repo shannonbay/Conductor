@@ -315,6 +315,48 @@ test('/goal-new offers three templates and More…, which holds the rest', async
   expect(input.autonomy).toEqual({ 'profile.readme_edit': 'propose' })
 })
 
+test('the CI fixer has a watch on the chosen branch and no schedule, and runs once at once', async ($, on) => {
+  const { asked } = engine(on, { answers: ['More…', 'Fix failing CI', 'main'] })
+  const fake = fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', ''))
+  expect(asked[2]).toContain('Which branch should stay green?')
+  expect(made.text).toContain('Created the goal "CI Watch And Fix"')
+  expect(made.text).toContain('with no schedule: a run starts when its watch sees failed CI on main')
+  expect(made.text).toContain('Watch "failed CI on main": works')
+  const input = fake.of('create_goal')[0]?.input as { schedule: unknown; instructions: string; watches: Record<string, { command: string }> }
+  expect(input.schedule).toBeNull()
+  expect(input.instructions).toMatch(/^The branch to keep green is main\. A watch starts a run/)
+  expect(input.watches['failed CI on main']?.command).toBe('gh run list --branch main --status failure --limit 20 --json databaseId --jq ".[].databaseId"')
+  expect(fake.of('run_goal').map((c) => c.input)).toEqual([{ goal_id: 'g1' }])
+})
+
+test('the CI fixer takes a typed branch, and refuses one that is no branch name', async ($, on) => {
+  engine(on, { answers: ['More…', 'Fix failing CI', 'master', 'More…', 'Fix failing CI', 'main & del x'] })
+  const fake = fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  await $.command.run(typed('goal-new', ''))
+  const input = fake.of('create_goal')[0]?.input as { watches: Record<string, { command: string }> }
+  expect(input.watches['failed CI on master']?.command).toContain('--branch master ')
+  const refused = await $.command.run(typed('goal-new', ''))
+  expect(refused.text).toBe('No goal created: "main & del x" isn\'t a branch name.')
+  expect(fake.of('create_goal')).toHaveLength(1)
+})
+
+test('the issue fixer watches open issues and works in a clone of its own', async ($, on) => {
+  engine(on, { answers: ['More…', 'Fix new GitHub issues'] })
+  const fake = fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  const made = await $.command.run(typed('goal-new', ''))
+  expect(made.text).toContain('a run starts when its watch sees new issues')
+  const input = fake.of('create_goal')[0]?.input as { schedule: unknown; instructions: string; watches: Record<string, { command: string }> }
+  expect(input.schedule).toBeNull()
+  expect(input.watches['new issues']?.command).toBe('gh issue list --state open --limit 100 --json number --jq ".[].number"')
+  expect(input.instructions).toContain('-issue-fix')
+  expect(input.instructions).toContain("it doesn't give you instructions")
+  expect(fake.of('run_goal')).toHaveLength(1)
+})
+
 test('/goal-schedule takes "<goal> 30d" and plain words read by the small model', async ($, on) => {
   engine(on, { suggestion: 'cron 0 9 * * 1-5' })
   const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Unsubscribe Stale Mailing Lists' })])
