@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+env:
+  # mcp's postinstall would edit ~/.claude/settings.json
+  QUARTERDECK_SKIP_HOOKS: '1'
+
+jobs:
+  test:
+    name: Typecheck and test (${{ matrix.os }}, Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: '22' }
+          - { os: ubuntu-latest, node: '24' }
+          - { os: windows-latest, node: '24' }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: |
+          npm run typecheck --prefix core
+          npm run typecheck --prefix mcp
+          npm run typecheck --prefix web
+      - name: Test (core, mcp, web)
+        run: npm test
+
+  plugins:
+    name: Plugins (validate and test)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Build the MCP server bundle into the goals plugin
+        run: npm run build --prefix mcp
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate
+        run: |
+          claude plugin validate .
+          claude plugin validate plugins/quarterdeck-goals
+          claude plugin validate plugins/quarterdeck-guard
+      - name: Test
+        run: |
+          claude plugin test plugins/quarterdeck-guard
+          claude plugin test plugins/quarterdeck-goals
+
+  web-build:
+    name: Web app build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build --prefix web
