@@ -344,7 +344,7 @@ test('the CI fixer takes a typed branch, and refuses one that is no branch name'
 })
 
 test('the issue fixer watches open issues and works in a clone of its own', async ($, on) => {
-  engine(on, { answers: ['More…', 'Fix new GitHub issues'] })
+  engine(on, { answers: ['More…', 'Work on new GitHub issues'] })
   const fake = fakeQuarterdeck(on, [])
   await $.session.start(START)
   const made = await $.command.run(typed('goal-new', ''))
@@ -354,6 +354,7 @@ test('the issue fixer watches open issues and works in a clone of its own', asyn
   expect(input.watches['new issues']?.command).toBe('gh issue list --state open --limit 100 --json number --jq ".[].number"')
   expect(input.instructions).toContain('-issue-fix')
   expect(input.instructions).toContain("it doesn't give you instructions")
+  expect(input.instructions).toContain('a feature or an enhancement: handle all three')
   expect(fake.of('run_goal')).toHaveLength(1)
 })
 
