@@ -111,7 +111,7 @@ export async function fail_run(args: unknown) {
 
 export async function guard_check(args: unknown) {
   const input = GuardCheckSchema.parse(args)
-  return guardToolCallForRun(input.run_id, input.tool_name)
+  return guardToolCallForRun(input.run_id, input.tool_name, input.input)
 }
 
 export async function create_goal(args: unknown) {

@@ -166,6 +166,7 @@ export const FailRunSchema = z.object({
 export const GuardCheckSchema = z.object({
   run_id: z.string(),
   tool_name: z.string().describe('The tool the run agent is about to call'),
+  input: z.record(z.unknown()).optional().describe("The call's command and path fields, for the rule on Quarterdeck's own data"),
 })
 
 const GoalScheduleSchema = z.union([

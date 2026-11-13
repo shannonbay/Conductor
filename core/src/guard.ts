@@ -21,11 +21,25 @@
  * through. The guard sees tool names, not input: `Bash` running curl, or `Read`
  * of a downloaded file, marks nothing unless the goal maps it to `untrusted`.
  *
+ * Quarterdeck's own data: a run may not touch Quarterdeck's folder
+ * (`~/.quarterdeck`, or `~/.conductor` from before the rename) or its database,
+ * wherever `QUARTERDECK_DB` puts it, whatever the goal's tool rules say. Writing
+ * the database directly would let a run approve its own proposals or change its
+ * own autonomy, and the runner folder holds what the standing session starts.
+ * For this one rule the guard looks at a call's input: a shell command that
+ * names the folder, the database file or the variables that point to it, and a
+ * file tool's path inside the folder. Matching names can be got around (a
+ * script written to another file, a path spelled another way); a sandbox for
+ * goal runs is what closes that.
+ *
  * "allow" means only that Quarterdeck doesn't object: the plugin passes such a
  * call on to Claude Code's own permission rules, which decide it. It never
  * answers allow itself.
  */
+import { homedir } from 'os'
+import { join, posix } from 'path'
 import type { Database } from './sqlite.js'
+import { defaultDbPath } from './paths.js'
 import { autonomyFor } from './goal-engine.js'
 import { getGoal, getRun, markRunUntrusted, newId } from './goals.js'
 import type { Goal, GoalRun, ToolCallRecord } from './types.js'
@@ -82,6 +96,81 @@ export function readsUntrusted(toolMap: Goal['tool_map'], toolName: string): boo
   return matchToolCategory(toolMap, toolName) === UNTRUSTED_CATEGORY || matchToolCategory(BUILTIN_UNTRUSTED_MAP, toolName) !== null
 }
 
+/** The reserved category a refusal to touch Quarterdeck's own data is recorded under. */
+export const QUARTERDECK_DATA_CATEGORY = 'quarterdeck-data'
+
+/** Where Quarterdeck keeps its data: its folders, and the database file wherever it is. */
+export interface QuarterdeckDataPaths {
+  /** `~/.quarterdeck` and `~/.conductor`. */
+  dirs: string[]
+  /** The database file (with its `-wal` and `-shm` files) when `QUARTERDECK_DB` puts it elsewhere. */
+  db: string | null
+}
+
+export function quarterdeckDataPaths(env: NodeJS.ProcessEnv = process.env, home: string = homedir()): QuarterdeckDataPaths {
+  const db = defaultDbPath(env, home)
+  const dirs = [join(home, '.quarterdeck'), join(home, '.conductor')]
+  const inDirs = dirs.some((d) => isInside(normPath(db), normPath(d)))
+  return { dirs, db: db === ':memory:' || inDirs ? null : db }
+}
+
+/** A path compared case- and slash-insensitively, as the to-do lists compare folders. */
+const normPath = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+const isInside = (path: string, dir: string) => path === dir || path.startsWith(dir + '/')
+/** `path` against `base`, with either slash and a drive letter or not, the same on every platform. */
+function resolvePath(base: string, path: string): string {
+  const p = path.replace(/\\/g, '/')
+  return posix.normalize(/^([a-z]:)?\//i.test(p) ? p : posix.join(base.replace(/\\/g, '/'), p))
+}
+
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell'])
+const FILE_TOOLS = new Set(['Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Glob', 'Grep'])
+/** A path segment naming Quarterdeck's folder (`~/.quarterdeck`, `$HOME\.conductor`, `cd .quarterdeck`). */
+const DATA_DIR_SEGMENT = /(^|[\\/\s"'`=])\.(quarterdeck|conductor)(?![\w-])/i
+/** The database's file name, with or without its -wal/-shm files. */
+const DB_FILE_NAME = /(^|[\\/\s"'`=])tasks\.db(-wal|-shm)?(?![\w.-])/i
+/** The variables that say where the database is. */
+const DB_VARIABLE = /\b(QUARTERDECK|CONDUCTOR)_DB\b/i
+
+/**
+ * What a call would touch of Quarterdeck's own data, or null: a shell command
+ * naming its folder, database file or the variables that point to it, or a
+ * file tool's path inside the folder or at the database.
+ */
+export function touchesQuarterdeckData(
+  toolName: string,
+  input: Record<string, unknown> | undefined,
+  workingDir: string,
+  paths: QuarterdeckDataPaths = quarterdeckDataPaths(),
+  home: string = homedir(),
+): string | null {
+  if (!input) return null
+  const str = (k: string) => (typeof input[k] === 'string' ? (input[k] as string) : '')
+  if (SHELL_TOOLS.has(toolName)) {
+    const command = str('command')
+    if (!command) return null
+    const found = DATA_DIR_SEGMENT.exec(command) ?? DB_FILE_NAME.exec(command) ?? DB_VARIABLE.exec(command)
+    if (found) return found[0].replace(/^[\\/\s"'`=]/, '')
+    if (paths.db && normPath(command).includes(normPath(paths.db))) return paths.db
+    return null
+  }
+  if (FILE_TOOLS.has(toolName)) {
+    const fields = ['file_path', 'notebook_path', 'path', ...(toolName === 'Glob' ? ['pattern'] : [])]
+    const base = str('path') || workingDir
+    for (const field of fields) {
+      const raw = str(field)
+      if (!raw) continue
+      const expanded = raw.replace(/^~(?=$|[\\/])/, home)
+      const full = normPath(resolvePath(field === 'pattern' ? base : workingDir, expanded))
+      if (paths.dirs.some((d) => isInside(full, normPath(d)))) return raw
+      if (/(^|\/)tasks\.db(-wal|-shm)?$/.test(full)) return raw
+      if (paths.db && [paths.db, `${paths.db}-wal`, `${paths.db}-shm`].some((f) => full === normPath(f))) return raw
+      if (DATA_DIR_SEGMENT.test(raw)) return raw
+    }
+  }
+  return null
+}
+
 function record(db: Database, run: GoalRun, toolName: string, category: string, decision: 'allow' | 'deny', reason: string | null): void {
   db.prepare(`
     INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
@@ -89,15 +178,29 @@ function record(db: Database, run: GoalRun, toolName: string, category: string, 
   `).run(newId('tc'), run.plan_id, run.id, toolName, category, decision, reason, new Date().toISOString())
 }
 
-/** Guard for a call made by a goal run's agent, by the run's id. */
-export function guardToolCallForRun(db: Database, runId: string, toolName: string): GuardDecision {
+/**
+ * Guard for a call made by a goal run's agent, by the run's id. `input` is the
+ * call's input (the plugin sends the command and path fields), for the rule on
+ * Quarterdeck's own data.
+ */
+export function guardToolCallForRun(
+  db: Database, runId: string, toolName: string,
+  input?: Record<string, unknown>, paths: QuarterdeckDataPaths = quarterdeckDataPaths(),
+): GuardDecision {
   const run = db.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId) as GoalRun | undefined
-  return run ? guardRun(db, run, toolName) : { decision: 'allow' }
+  return run ? guardRun(db, run, toolName, input, paths) : { decision: 'allow' }
 }
 
-function guardRun(db: Database, run: GoalRun, toolName: string): GuardDecision {
+function guardRun(db: Database, run: GoalRun, toolName: string, input: Record<string, unknown> | undefined, paths: QuarterdeckDataPaths): GuardDecision {
   const goal = getGoal(db, run.plan_id)
   if (!goal) return { decision: 'allow' }
+  const workingDir = (db.prepare('SELECT working_dir FROM plans WHERE id = ?').get(run.plan_id) as { working_dir: string } | undefined)?.working_dir ?? process.cwd()
+  const touched = touchesQuarterdeckData(toolName, input, workingDir, paths)
+  if (touched !== null) {
+    const reason = `Quarterdeck goal guard: a goal run can't read or change Quarterdeck's own data (${touched}). Use the goal tools (add_item, remember, end_run) instead, and don't try another way round.`
+    record(db, run, toolName, QUARTERDECK_DATA_CATEGORY, 'deny', reason)
+    return { decision: 'deny', category: QUARTERDECK_DATA_CATEGORY, run_id: run.id, reason }
+  }
   if (readsUntrusted(goal.tool_map, toolName)) markRunUntrusted(db, run.id, toolName)
   const category = matchToolCategory(goal.tool_map, toolName)
   if (!category) return { decision: 'allow', run_id: run.id }

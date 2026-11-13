@@ -143,6 +143,15 @@ describe('guard_check', () => {
     expect(await guard_check({ run_id: run.run_id, tool_name: 'Read' })).toMatchObject({ decision: 'allow' })
   })
 
+  it("refuses a run's command that touches Quarterdeck's own data, and goes by the name alone without input", async () => {
+    const id = makeGoal()
+    const run = await claim(id)
+    expect(await guard_check({ run_id: run.run_id, tool_name: 'Bash', input: { command: 'sqlite3 ~/.quarterdeck/tasks.db .dump' } }))
+      .toMatchObject({ decision: 'deny', category: 'quarterdeck-data', reason: expect.stringMatching(/own data/) })
+    expect(await guard_check({ run_id: run.run_id, tool_name: 'Bash', input: { command: 'npm test' } })).toMatchObject({ decision: 'allow' })
+    expect(await guard_check({ run_id: run.run_id, tool_name: 'Bash' })).toMatchObject({ decision: 'allow' })
+  })
+
   it('needs approval for auto actions once the run has read untrusted content, and add_item says why', async () => {
     const id = makeGoal()
     updateGoal(id, { tool_map: { 'mcp__gmail__archive*': 'email.archive' }, autonomy: { 'email.archive': 'auto' } })

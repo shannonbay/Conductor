@@ -8,6 +8,7 @@ import {
   runHealthCheck, listHealth, healthDue, parseHealthValue, buildBrief,
   matchToolCategory, guardToolCallForRun, listToolCalls, standingAllowRules, usableAsAllowRule, readsUntrusted, getRun,
   insertMemory, updateMemory, markRunUntrusted, MEMORY_BRIEF_CHARS,
+  touchesQuarterdeckData, quarterdeckDataPaths, QUARTERDECK_DATA_CATEGORY,
 } from './index.js'
 
 let db: Database
@@ -296,5 +297,68 @@ describe('untrusted content', () => {
       const next = insertRun(db, 'g1', 'manual', 'running')
       expect(buildBrief(db, 'g1', next.id).run!.untrusted).toBeNull()
     })
+  })
+})
+
+describe("Quarterdeck's own data", () => {
+  const HOME = String.raw`C:\Users\me`
+  const WORK = String.raw`C:\Users\me\GitHub\project`
+  const paths = quarterdeckDataPaths({}, HOME)
+  const touches = (tool: string, input: Record<string, unknown>, workingDir = WORK, p = paths) => touchesQuarterdeckData(tool, input, workingDir, p, HOME)
+
+  it('refuses shell commands that name the folder, the database or the variables pointing to it', () => {
+    for (const command of [
+      'sqlite3 ~/.quarterdeck/tasks.db "UPDATE tasks SET approved_at = 1"',
+      String.raw`sqlite3 ..\tasks.db .tables`,
+      'cd "$HOME/.quarterdeck" && ls',
+      String.raw`Get-Content $env:USERPROFILE\.quarterdeck\runner\cli-path`,
+      String.raw`type %USERPROFILE%\.conductor\tasks.db`,
+      'node -e "open(process.env.QUARTERDECK_DB)"',
+      'echo $env:CONDUCTOR_DB',
+      'cp tasks.db-wal /tmp/x',
+    ]) {
+      expect(touches('Bash', { command }), command).not.toBeNull()
+      expect(touches('PowerShell', { command }), command).not.toBeNull()
+    }
+  })
+
+  it('leaves ordinary commands alone, SQLite on other files included', () => {
+    for (const command of ['npm test', 'sqlite3 app.db .tables', 'git log -1', 'cat my-tasks.db', 'ls quarterdeck/', 'gh repo view shannonbay/Quarterdeck']) {
+      expect(touches('Bash', { command }), command).toBeNull()
+    }
+  })
+
+  it('refuses file tools inside the folder or at the database, relative paths included', () => {
+    expect(touches('Write', { file_path: 'C:/Users/me/.quarterdeck/runner/cli-path' })).not.toBeNull()
+    expect(touches('Edit', { file_path: String.raw`c:\users\ME\.Quarterdeck\runner\state.json` })).not.toBeNull()
+    expect(touches('Read', { file_path: '~/.conductor/tasks.db' })).not.toBeNull()
+    expect(touches('Read', { file_path: '../tasks.db' }, String.raw`C:\Users\me\.quarterdeck\runner`)).not.toBeNull()
+    expect(touches('Read', { file_path: String.raw`..\..\..\.quarterdeck\tasks.db` })).not.toBeNull()
+    expect(touches('Grep', { pattern: 'approved', path: String.raw`C:\Users\me\.quarterdeck` })).not.toBeNull()
+    expect(touches('Glob', { pattern: '../../.quarterdeck/**' })).not.toBeNull()
+    expect(touches('Read', { file_path: String.raw`C:\Users\me\GitHub\project\src\a.ts` })).toBeNull()
+    expect(touches('Read', { file_path: 'src/../README.md' })).toBeNull()
+    expect(touches('Grep', { pattern: String.raw`tasks\.db`, path: 'src' })).toBeNull()
+    expect(touches('WebFetch', { url: 'https://example.com/.quarterdeck' })).toBeNull()
+  })
+
+  it('protects a database QUARTERDECK_DB puts elsewhere, not the folder around it', () => {
+    const p = quarterdeckDataPaths({ QUARTERDECK_DB: String.raw`D:\data\qd.sqlite` }, HOME)
+    expect(p.db).toBe(String.raw`D:\data\qd.sqlite`)
+    expect(touches('Bash', { command: 'sqlite3 d:/data/qd.sqlite .tables' }, WORK, p)).not.toBeNull()
+    expect(touches('Write', { file_path: String.raw`D:\data\qd.sqlite-wal` }, WORK, p)).not.toBeNull()
+    expect(touches('Write', { file_path: String.raw`D:\data\notes.txt` }, WORK, p)).toBeNull()
+    expect(quarterdeckDataPaths({ QUARTERDECK_DB: ':memory:' }, HOME).db).toBeNull()
+  })
+
+  it("refuses and records it in a run, whatever the tool rules say, and nothing outside one", () => {
+    updateGoal(db, 'g1', { tool_map: { Bash: 'shell' }, autonomy: { shell: 'auto' } })
+    const run = insertRun(db, 'g1', 'manual', 'running')
+    const command = { command: 'sqlite3 ~/.quarterdeck/tasks.db "UPDATE goals SET autonomy = 1"' }
+    expect(guardToolCallForRun(db, run.id, 'Bash', command, paths)).toMatchObject({ decision: 'deny', category: QUARTERDECK_DATA_CATEGORY, reason: expect.stringMatching(/own data/) })
+    expect(listToolCalls(db, 'g1')[0]).toMatchObject({ tool_name: 'Bash', category: QUARTERDECK_DATA_CATEGORY, decision: 'deny' })
+    expect(guardToolCallForRun(db, run.id, 'Bash', { command: 'npm test' }, paths)).toMatchObject({ decision: 'allow', category: 'shell' })
+    expect(guardToolCallForRun(db, run.id, 'Bash', undefined, paths)).toMatchObject({ decision: 'allow' })
+    expect(guardToolCallForRun(db, 'run_other', 'Bash', command, paths)).toEqual({ decision: 'allow' })
   })
 })

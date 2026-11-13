@@ -66,7 +66,7 @@ export const overviewWithEtag = (detail: core.OverviewDetail = 'all', standingSe
 export const decideItem = (planId: string, taskId: string, input: Parameters<typeof core.decideItem>[3]) => core.decideItem(db, planId, taskId, input)
 export const failRun = (runId: string, status: 'failed' | 'timed_out', reason: string) => core.failRun(db, runId, status, reason)
 export const attachAgent = (runId: string, agentId: string) => core.attachAgent(db, runId, agentId)
-export const guardToolCallForRun = (runId: string, tool: string) => core.guardToolCallForRun(db, runId, tool)
+export const guardToolCallForRun = (runId: string, tool: string, input?: Record<string, unknown>) => core.guardToolCallForRun(db, runId, tool, input)
 export const updateGoal = (planId: string, fields: Parameters<typeof core.updateGoal>[2]) => core.updateGoal(db, planId, fields)
 
 export const deleteMemory = (id: string) => core.deleteMemory(db, id)

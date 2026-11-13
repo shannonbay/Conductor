@@ -12,7 +12,9 @@
  * - A run may use the goal tools. The person's Quarterdeck actions (approve,
  *   reject, cancel, pause...) and the plugin's tools are refused to it. Any
  *   other tool goes through the goal's guard (tool_map + autonomy): "off" and
- *   unapproved "propose" categories are refused with the reason. Everything
+ *   unapproved "propose" categories are refused with the reason, and so is a
+ *   command or path that touches Quarterdeck's own data (its folder or
+ *   database), whatever the tool rules say. Everything
  *   else ("auto", approved, or outside the map) follows the session's own
  *   permission rules: this plugin refuses, it never allows.
  * - A run's report is its end_run summary, shown in the Goals pane; it is kept
@@ -131,10 +133,18 @@ async function callServer($: Engine, name: string, input: Record<string, unknown
   throw missing
 }
 
-async function guardCheck($: Engine, runId: string, tool: string): Promise<Verdict> {
+/** The input fields the guard reads (a command, a path), for its rule on Quarterdeck's own data. Nothing else leaves the call. */
+const INPUT_FIELDS = ['command', 'file_path', 'notebook_path', 'path', 'pattern'] as const
+
+export function callInput(e: unknown): Record<string, string> {
+  const i = (e ?? {}) as Record<string, unknown>
+  return Object.fromEntries(INPUT_FIELDS.filter((k) => typeof i[k] === 'string').map((k) => [k, i[k] as string]))
+}
+
+async function guardCheck($: Engine, runId: string, tool: string, input: Record<string, string>): Promise<Verdict> {
   guardCallsInFlight++
   try {
-    const r = await callServer($, 'guard_check', { run_id: runId, tool_name: tool })
+    const r = await callServer($, 'guard_check', { run_id: runId, tool_name: tool, ...(Object.keys(input).length ? { input } : {}) })
     if (r.deny !== undefined) throw new Error(r.deny)
     const text = resultText(r)
     if (r.isError === true || text.startsWith('Error:')) throw new Error(text)
@@ -279,7 +289,7 @@ export const register: Register = (on) => {
     const scoped = (e as { run_scope?: unknown }).run_scope === runId
     if (serverTool(e.tool) !== null && !isGuardedQuarterdeck(e.tool)) return scoped ? next(e) : next({ ...e, run_scope: runId } as typeof e)
     if (fixedVerdict(e.tool) === null) {
-      const verdict = await guardCheck($, runId, e.tool)
+      const verdict = await guardCheck($, runId, e.tool, callInput(e))
       if (verdict.decision === 'deny') return { deny: verdict.reason ?? "Not allowed by the goal's autonomy." }
     }
     // The pane's "Now:" line: the call starts, and once it has run or been refused,

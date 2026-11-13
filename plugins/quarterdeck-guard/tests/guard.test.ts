@@ -26,15 +26,20 @@ function world(on: On, P = 'mcp__quarterdeck__') {
     return { result: '{}' } as never
   })
   on('tool.call', { tool: `${P}decide_item` }, () => ({ result: '{"ok":true}' }) as never)
+  const inputs: unknown[] = []
   on('tool.call', { tool: `${P}guard_check` }, (_, e) => {
-    const name = (e as unknown as { tool_name: string }).tool_name
+    const { tool_name: name, input } = e as unknown as { tool_name: string; input?: { command?: string } }
+    inputs.push(input)
     return { result: JSON.stringify(name === 'mcp__gmail__delete'
       ? { decision: 'deny', category: 'email.delete', reason: 'email.delete is off for this goal' }
       : name === 'mcp__quarterdeck__unsubscribe_one_click' && !unsubscribeApproved.value
         ? { decision: 'deny', category: 'email.unsubscribe', reason: 'email.unsubscribe needs approval first' }
-        : { decision: 'allow' }) } as never
+        : input?.command?.includes('.quarterdeck')
+          ? { decision: 'deny', category: 'quarterdeck-data', reason: "a goal run can't read or change Quarterdeck's own data" }
+          : { decision: 'allow' }) } as never
   })
-  return { scopes }
+  on('tool.call', { tool: 'Bash' }, () => ({ result: 'ran' }) as never)
+  return { scopes, inputs }
 }
 
 const call = (input: Record<string, unknown>) => input as never
@@ -80,6 +85,18 @@ test("a run's other tools go through the goal's guard", async ($, on) => {
   await $.session.start(START)
   const r = await $.tool.call(call({ tool: 'mcp__gmail__delete', id: 'm1', agentId: 'run-agent' }))
   expect(said(r)).toContain('email.delete is off')
+})
+
+test("a run's command and paths go to the guard (only those fields), which refuses one that touches Quarterdeck's data", async ($, on) => {
+  const { inputs } = world(on)
+  await $.session.start(START)
+  const r = await $.tool.call(call({ tool: 'Bash', command: 'sqlite3 ~/.quarterdeck/tasks.db .dump', description: 'dump', agentId: 'run-agent' }))
+  expect(said(r)).toContain("Quarterdeck's own data")
+  expect(inputs.at(-1)).toEqual({ command: 'sqlite3 ~/.quarterdeck/tasks.db .dump' })
+  const ok = await $.tool.call(call({ tool: 'Bash', command: 'npm test', agentId: 'run-agent' }))
+  expect(said(ok)).toBe('ran')
+  await $.tool.call(call({ tool: 'mcp__gmail__delete', id: 'm1', agentId: 'run-agent' }))
+  expect(inputs.at(-1)).toBeUndefined()
 })
 
 test("a run stopped by the usage limit is reported to Quarterdeck; an ordinary turn isn't", async ($, on) => {
