@@ -373,6 +373,7 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
     return (
       <Box key={key} flexDirection="column" marginTop={1}>
         <Text color="yellow">? {item.title}</Text>
+        {item.notes && <Text dimColor>  {item.notes}</Text>}
         {view.open === key && Input ? (
           <Box flexDirection="column">
             <Input key={`answer-${key}`} label="Your answer (saved to the goal's memory)" submitLabel="Send" autoFocus onSubmit={reply} />
@@ -399,6 +400,7 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
           {item.summary ?? ''}
         </Text>
       )}
+      {item.notes && <Text dimColor>  {item.notes}</Text>}
       {view.open === key && Input ? (
         <Box flexDirection="column">
           <Input key={`feedback-${key}`} label="What should change? (saved to the goal's memory)" submitLabel="Send back" autoFocus onSubmit={sendBack} />

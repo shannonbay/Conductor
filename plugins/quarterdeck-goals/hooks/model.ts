@@ -37,12 +37,12 @@ export type OverviewGoal = {
   watch_failing?: boolean
 }
 
-type OverviewItem = { id: string; goal: string; action?: { category?: string; summary?: string } | null; asks_person?: boolean }
+type OverviewItem = { id: string; goal: string; action?: { category?: string; summary?: string } | null; asks_person?: boolean; notes?: string | null }
 
 export const EMPTY: Snapshot = { reachable: false, error: null, goals: [], fetchedAt: 0, etag: null, hold: null }
 
 function toItem(t: OverviewItem): Item {
-  return { id: t.id, title: t.goal, category: t.action?.category ?? null, summary: t.action?.summary ?? null, ...(t.asks_person && { asksPerson: true }) }
+  return { id: t.id, title: t.goal, category: t.action?.category ?? null, summary: t.action?.summary ?? null, ...(t.asks_person && { asksPerson: true }), ...(t.notes && { notes: t.notes }) }
 }
 
 export function toCard(g: OverviewGoal): GoalCard {
@@ -209,7 +209,7 @@ export function summarize(goals: GoalCard[], now: number): string {
       `Open items: ${g.openItemCount}.`,
       g.needsYou.length === 0
         ? 'Nothing waiting for approval.'
-        : `Waiting for you:\n${g.needsYou.map((i) => `- item ${i.id}: ${i.title}${i.asksPerson ? ' [a question for you: answer with answer_item, or approve_item when done]' : ''}${i.category ? ` [${i.category}]` : ''}${i.summary ? ` — ${i.summary}` : ''}`).join('\n')}`,
+        : `Waiting for you:\n${g.needsYou.map((i) => `- item ${i.id}: ${i.title}${i.asksPerson ? ' [a question for you: answer with answer_item, or approve_item when done]' : ''}${i.category ? ` [${i.category}]` : ''}${i.summary ? ` — ${i.summary}` : ''}${i.notes ? `\n  ${i.notes}` : ''}`).join('\n')}`,
     ]
     return lines.filter(Boolean).join('\n')
   }).join('\n\n')

@@ -486,10 +486,11 @@ test('a category approved every time lately can be switched to auto, after a sec
 
 test('a run\'s question waits under Needs you with Answer and Done', async ($, on) => {
   engine(on)
-  const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Jobs', needs_you: [question('1', 'Which job sites should I search?'), question('2', 'Connect Gmail')] })])
+  const fake = fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Jobs', needs_you: [question('1', 'Which job sites should I search?', 'Seek has most roles; LinkedIn has recruiters. I\'d search both.'), question('2', 'Connect Gmail')] })])
   await $.session.start(START)
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /\? Which job sites should I search\?/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Seek has most roles; LinkedIn has recruiters/ })).toBeDefined() // the run's context, not just the title
   expect(await ui.find({ key: 'approve-g1/1' })).toBeUndefined() // not a proposal
   await ui.press({ key: 'answer-btn-g1/1' })
   await ui.input({ key: 'answer-g1/1', text: 'Seek and LinkedIn' })

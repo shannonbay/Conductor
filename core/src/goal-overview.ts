@@ -29,7 +29,7 @@ const MEMORY = 10
  * grow with how much runs write. The full text is in goal_detail and the
  * goal page.
  */
-const CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400, watch: 300 }
+const CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400, watch: 300, context: 1000 }
 
 function clip(text: string | null, max: number): string | null {
   if (text === null || text.length <= max) return text
@@ -78,7 +78,9 @@ export type ItemView = ReturnType<typeof itemView>
 function overviewItem(t: Task) {
   const v = itemView(t)
   const action = v.action as { category: string; summary: string } | null
-  const short = { ...v, goal: clip(v.goal, CLIP.title)!, notes: clip(v.notes, CLIP.notes), result: clip(v.result, CLIP.result) }
+  // A question's notes are its context (the options, what the run would do): it can't be answered without them
+  const notesMax = v.asks_person && v.awaiting_review ? CLIP.context : CLIP.notes
+  const short = { ...v, goal: clip(v.goal, CLIP.title)!, notes: clip(v.notes, notesMax), result: clip(v.result, CLIP.result) }
   return action ? { ...short, action: { category: action.category, summary: clip(action.summary, CLIP.title)! } } : short
 }
 
@@ -207,6 +209,8 @@ export type OverviewDetail = 'all' | readonly string[]
 const NEEDS_YOU = 5
 /** The longest text a card's fields carry (its title line, objective and waiting items). */
 const CARD_TEXT = 160
+/** How many of a card's questions carry their context (the rest show it once their goal is expanded). */
+const CARD_CONTEXT = 1
 
 /** `standingSession`: the standing session's id (`quarterdeck runner`), to say when it is the one starting runs. */
 export function buildOverview(db: Database, detail: OverviewDetail = 'all', standingSession: string | null = null) {
@@ -278,6 +282,8 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
         // On a card, each waiting item carries only what its row shows
         needs_you: g.needs_you.slice(0, NEEDS_YOU).map((i) => ({
           id: i.id, goal: clip(i.goal, CARD_TEXT)!, asks_person: i.asks_person,
+          // A question can't be answered without its context, so a card keeps the first few's
+          ...(i.asks_person && i.notes && g.needs_you.filter((q) => q.asks_person).indexOf(i) < CARD_CONTEXT ? { notes: i.notes } : {}),
           action: i.action ? { category: (i.action as { category: string }).category, summary: clip((i.action as { summary: string }).summary, CARD_TEXT)! } : null,
         })),
         runs: g.runs.slice(0, 1), open_items: [], memory: [], instructions: '', tool_map: {}, watches: [],
