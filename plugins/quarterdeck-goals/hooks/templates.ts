@@ -187,6 +187,7 @@ export const TEMPLATES: Template[] = [
     watches: () => ({
       'new issues': { command: 'gh issue list --state open --limit 100 --json number --jq ".[].number"', every_minutes: 5 },
       [ISSUE_FIX_CI_WATCH]: { command: `gh run list --event pull_request --status failure --limit 30 --json databaseId,headBranch --jq ".[] | select(.headBranch | startswith(\\"${ISSUE_FIX_BRANCH}\\")) | .databaseId"`, every_minutes: 5 },
+      [ISSUE_FIX_CONFLICT_WATCH]: { command: `gh pr list --state open --limit 50 --json number,headRefName,headRefOid,mergeable --jq ".[] | select((.headRefName | startswith(\\"${ISSUE_FIX_BRANCH}\\")) and .mergeable == \\"CONFLICTING\\") | (.number | tostring) + \\"@\\" + .headRefOid"`, every_minutes: 5 },
     }),
     model: 'opus',
     modelReason: 'it writes fixes and features for you to review',
@@ -221,6 +222,8 @@ export const CI_FIX = [
 export const ISSUE_FIX_BRANCH = 'issue-fix/'
 /** The issue fixer's second watch: failed CI runs on its own pull requests. */
 export const ISSUE_FIX_CI_WATCH = 'failed CI on its pull requests'
+/** The issue fixer's third watch: its own pull requests that no longer merge cleanly, as <number>@<head sha>. */
+export const ISSUE_FIX_CONFLICT_WATCH = 'merge conflicts on its pull requests'
 
 /** The issue fixer's standing instructions. */
 export const ISSUE_FIX = [
@@ -230,7 +233,8 @@ export const ISSUE_FIX = [
   `An issue may report a bug or ask for a feature or an enhancement: handle all three, each on its own branch in your clone, named ${ISSUE_FIX_BRANCH}<number>-<a few words>. For a bug, fix it, with a test when the repo has tests. For a feature or enhancement, build what the issue asks and no more, in the project's existing style and design, with tests; if it is large or the design choice isn't obvious, ask me first (add_item with ask_person) with the approach you'd take, and build it once I answer.`,
   'Then propose one code.pull_request item (external_ref github-issue:<number>) saying what you changed. Push and open the pull request (linking the issue) only once I approve, then complete the item.',
   "If an issue is unclear, or isn't something this project should do, don't build it: say why in your summary. Remember which issues you've handled.",
-  `A second watch starts a run when CI fails on one of your pull requests: watch_events lists the failed run ids under "${ISSUE_FIX_CI_WATCH}". For each, find its branch with gh run view <id> --json headBranch. If that pull request is closed or merged, or a later run on the branch has passed, add nothing. Otherwise read the failure with gh run view <id> --log-failed, fix it on that branch in your clone, run the checks that failed until they pass, and propose one code.pull_request item (external_ref ci-run:<id>) saying what failed and what you changed. Push to the same branch only once I approve, then complete the item. If the failure isn't caused by your change (a flaky test, something already broken on the default branch), change nothing and say so in your summary. Never force-push, or change the CI workflow to make it pass.`,
+  `A second watch starts a run when CI fails on one of your pull requests: watch_events lists the failed run ids under "${ISSUE_FIX_CI_WATCH}". For each, find its branch with gh run view <id> --json headBranch. If that pull request is closed or merged, or a later run on the branch has passed, add nothing. Otherwise read the failure with gh run view <id> --log-failed, fix it on that branch in your clone, run the checks that failed until they pass, and propose one code.pull_request item (external_ref ci-run:<id>) saying what failed and what you changed. Push to the same branch only once I approve, then complete the item. If the failure isn't caused by your change (a flaky test, something already broken on the default branch), change nothing and say so in your summary. Never change the CI workflow to make it pass.`,
+  `A third watch starts a run when one of your pull requests no longer merges cleanly: watch_events lists <number>@<head sha> under "${ISSUE_FIX_CONFLICT_WATCH}". For each, skip it if the pull request is closed or merged, or its head isn't that sha any more. Otherwise, in your clone, fetch, check out its branch and rebase it onto the latest of the pull request's base branch (gh pr view <number> --json baseRefName: it isn't always the default branch, since a pull request can be based on another). Resolve each conflict keeping what both sides meant; if one needs a design decision you can't make from the code, abort the rebase and ask me (add_item with ask_person) instead. Run the checks until they pass, then propose one code.pull_request item (external_ref pr-conflict:<number>@<sha>) naming the files that conflicted and how you resolved each. Once I approve, push with git push --force-with-lease and complete the item. That is the only force-push allowed: only to your own ${ISSUE_FIX_BRANCH} branches, only after a rebase I approved; never force-push otherwise. If a pull request based on that branch now conflicts too, handle it the same way in the same run.`,
   "The first run (no watch_events) only sets up the clone and lists the issues already open in its summary; fix those only when I ask.",
 ].join(' ')
 
