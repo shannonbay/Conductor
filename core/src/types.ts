@@ -181,7 +181,9 @@ export interface Watch {
   /** For a tool watch: a regular expression whose first group (or whole match) is one line. */
   match: string | null
   every_minutes: number
-  /** Lines seen so far, newest check first. */
+  /** 'new': a line never seen before is an event. 'change': when the output differs from the last check, its lines that weren't in that check are events. */
+  fires: WatchFires
+  /** Lines seen so far, newest check first ('change': the last check's lines only). */
   seen: string[]
   /** When the first check that worked recorded what was there; null before it. */
   baseline_at: string | null
@@ -195,11 +197,13 @@ export interface Watch {
   created_at: string
 }
 
+export type WatchFires = 'new' | 'change'
+
 /** What the person sets on a watch. */
 export type WatchSpec =
-  | { command: string; every_minutes?: number }
+  | { command: string; every_minutes?: number; fires?: WatchFires }
   /** A tool the plugin calls (a connector's search): `match` turns its answer into lines. */
-  | { tool: string; input?: Record<string, unknown>; match?: string; every_minutes?: number }
+  | { tool: string; input?: Record<string, unknown>; match?: string; every_minutes?: number; fires?: WatchFires }
 
 export interface WatchEvent {
   id: string

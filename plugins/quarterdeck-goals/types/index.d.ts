@@ -89,6 +89,8 @@ export type GoalCard = {
 export type Watch = {
   name: string
   everyMinutes: number
+  /** True when it starts a run on any change to its output, not only on a line it hasn't seen. */
+  onChange: boolean
   /** The command it runs. */
   runs: string
   lastFiredAt: string | null

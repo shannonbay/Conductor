@@ -237,7 +237,9 @@ async function firstChecks(goalId: string): Promise<{ name: string; result: stri
       name: w.name,
       result: r.error
         ? `the command failed (${r.error}); it is tried again every ${w.every_minutes} min`
-        : `works: ${r.lines} ${r.lines === 1 ? 'item' : 'items'} there now; a run starts when a new one appears`,
+        : w.fires === 'change'
+          ? `works: ${r.lines} ${r.lines === 1 ? 'line' : 'lines'} now; a run starts when its output changes`
+          : `works: ${r.lines} ${r.lines === 1 ? 'item' : 'items'} there now; a run starts when a new one appears`,
     })
   }
   return results

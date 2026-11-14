@@ -603,7 +603,7 @@ function details($: Engine, e: E, view: View, g: GoalCard) {
       {modelLine($, e, view, g)}
       {g.watches.map((w) => (
         <Text key={`watch-${g.id}/${w.name}`} dimColor>
-          Also runs when "{w.name}" sees something new (checked every {w.everyMinutes} min{w.lastFiredAt ? `, last ${ago(w.lastFiredAt, view.now)}` : ''})
+          Also runs when "{w.name}" sees something new ({w.onChange ? 'on change, ' : ''}checked every {w.everyMinutes} min{w.lastFiredAt ? `, last ${ago(w.lastFiredAt, view.now)}` : ''})
           {w.failing && <Text color="red"> · can't check: {w.error ?? 'the command fails'}</Text>}
         </Text>
       ))}

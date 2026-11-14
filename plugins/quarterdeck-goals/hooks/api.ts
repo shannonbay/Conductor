@@ -172,7 +172,7 @@ export type CreatedGoal = {
 }
 
 /** A command watch: prints one line per current item; a new line starts a run. */
-export type CommandWatch = { command: string; every_minutes?: number }
+export type CommandWatch = { command: string; every_minutes?: number; fires?: 'new' | 'change' }
 
 export async function createGoal(
   $: Engine, input: {

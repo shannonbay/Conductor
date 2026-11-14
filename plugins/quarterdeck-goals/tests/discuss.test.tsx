@@ -118,6 +118,10 @@ test('update_goal shows a new watch\'s whole command before it is set, and says 
   expect(String((await $.tool.call({ tool: 'mcp__quarterdeck-goals__goal_detail', goal: 'unsub' } as never)).result)).toContain('- new issues: every 5 min, runs gh issue list')
   await $.tool.call({ tool: 'mcp__quarterdeck-goals__update_goal', goal: 'unsub', watches: { 'new issues': { command: 'gh pr list', every_minutes: 15 }, old: null } } as never)
   expect(asked.asked[1]).toBe('Change the goal "Unsubscribe"?\n• Watch changed "new issues": every 15 min this command runs on your computer, and a run starts when it prints a line it hasn\'t before: gh pr list\n• Watch removed: old')
+  // A watch on a state says it fires when its output changes, and passes the mode through
+  await $.tool.call({ tool: 'mcp__quarterdeck-goals__update_goal', goal: 'unsub', watches: { tree: { command: 'git describe --always --dirty', fires: 'change' } } } as never)
+  expect(asked.asked[2]).toBe('Change the goal "Unsubscribe"?\n• New watch "tree": every 5 min this command runs on your computer, and a run starts when its output changes: git describe --always --dirty')
+  expect(fake.of('update_goal')[2]?.input).toEqual({ goal_id: 'g1', watches: { tree: { command: 'git describe --always --dirty', fires: 'change' } } })
 })
 
 test('update_goal shows a tool watch\'s tool and whole input before it is set', async ($, on) => {

@@ -15,6 +15,7 @@ A goal runs on a schedule. A **watch** also starts a run when something new appe
 - The first check only records what is there. It starts nothing.
 - A check that fails (non-zero exit or longer than 30 seconds) changes nothing and starts nothing. After three failures in a row the Goals pane shows the watch as failing.
 - Several new lines, or lines that arrive while a run is going, make one run, not one each.
+- With `fires: "change"` (default `"new"`), the watch compares each check only with the one before: see "Watching a state" below.
 
 So print **stable identifiers**, not text that changes. A line with a comment count or a "2 hours ago" in it looks new at every check.
 
@@ -65,6 +66,30 @@ A web page or file that changes (one line: a hash of its content, so any change 
 
 ```
 node -e "fetch(process.argv[1]).then(r=>{if(!r.ok)process.exit(1);return r.text()}).then(t=>console.log(require('crypto').createHash('sha256').update(t).digest('hex'))).catch(()=>process.exit(1))" https://example.com/status
+```
+
+## Watching a state: `fires: "change"`
+
+A normal watch fires once per line it has never printed, so a state that flips back and forth (a working tree clean, then dirty, then clean again; a health check up, then down) fires only the first time. For a state, set `fires: "change"`:
+
+- A check whose lines differ from the last check's (the same lines in another order are no change) is an event; each line that wasn't in the last check is listed in `watch_events`.
+- Output that becomes empty is one `(none)` event.
+- Only the last check is remembered. Changing a watch's `fires` starts it over, like changing its command.
+
+A repository's working tree (one line: the commit, with `-dirty` while there are uncommitted changes):
+
+```
+git describe --always --dirty
+```
+
+Whether a service answers (one line: its status code, or `down`):
+
+```
+node -e "fetch(process.argv[1]).then(r=>console.log(r.status)).catch(()=>console.log('down'))" https://example.com/health
+```
+
+```
+watches: { "working tree": { command: "git describe --always --dirty", fires: "change" } }
 ```
 
 ## Tool watches: what only a connector reaches

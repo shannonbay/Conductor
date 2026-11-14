@@ -135,6 +135,7 @@ export const TOOLS = [
               input: { type: 'object', description: "The tool's arguments. Ask for ids only, and few results" },
               match: { type: 'string', description: 'A regular expression over the tool\'s answer; each match (its first group) is one item. Left out: every "id" in a JSON answer' },
               every_minutes: { type: 'number', description: 'How often to check (default 5, at least 1)' },
+              fires: { type: 'string', enum: ['new', 'change'], description: "'new' (default): a line never seen before starts a run. 'change': for a state (git status, a health URL): a run starts when the output differs from the last check" },
             },
           },
         },

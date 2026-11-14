@@ -290,7 +290,7 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
         suggestions: getAutonomySuggestions(db, plan.id),
         // Without when each last checked: that changes every few minutes and would redraw the pane for nothing
         watches: watches.map((w) => ({
-          name: w.name, kind: w.kind, every_minutes: w.every_minutes, runs: clip(describeWatch(w), CLIP.watch)!,
+          name: w.name, kind: w.kind, every_minutes: w.every_minutes, fires: w.fires, runs: clip(describeWatch(w), CLIP.watch)!,
           last_fired_at: w.last_fired_at, failing: watchFailing(w), error: watchFailing(w) ? clip(w.last_error, CLIP.notes) : null,
         })),
         watch_count: watches.length,
