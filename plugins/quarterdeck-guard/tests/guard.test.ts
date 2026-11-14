@@ -66,11 +66,13 @@ test("the person's Quarterdeck actions are refused to a run, to other agents and
   }
 })
 
-test("a run's report is kept by Quarterdeck, not handed back into the chat", async ($, on) => {
-  world(on)
+test("a run's handback goes on, so Claude Code counts its report delivered", async ($, on) => {
+  const { inputs } = world(on)
+  on('tool.call', { tool: 'SubagentHandback' }, () => ({ result: 'delivered' }) as never)
   await $.session.start(START)
-  const r = await $.tool.call(call({ tool: 'SubagentHandback', report: 'All done', agentId: 'run-agent' }))
-  expect(said(r)).toContain('do not call SubagentHandback again')
+  const r = await $.tool.call(call({ tool: 'SubagentHandback', message: 'All done', agentId: 'run-agent' }))
+  expect(said(r)).toBe('delivered')
+  expect(inputs).toEqual([])
 })
 
 test('the guard says it is there, for quarterdeck-goals to check', async ($, on) => {

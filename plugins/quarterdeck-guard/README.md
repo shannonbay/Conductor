@@ -44,7 +44,8 @@ Everything else goes on to your permission rules unchanged.
 
 - **Changes a tool's input**: adds `run_scope` (the run's id) to a Quarterdeck server call that doesn't already carry it, so the call acts on that run's goal and never on the plan open in your own conversation. A call that already carries it is left exactly as it is (auto mode refuses a call whose input changes after its review).
 - **The goal's guard**: before any other tool runs, asks `guard_check` (with the call's `command`, `file_path`, `notebook_path`, `path` and `pattern` fields, for the rule on Quarterdeck's own data); on "deny" the call is refused with the reason, and otherwise it goes on unchanged, reported to `run_progress` as it starts and when it has finished.
-- **Answers in place of a tool**: `SubagentHandback`, the tool a subagent's report would come back to your conversation through, is answered "Report saved by Quarterdeck (end_run)" without running, because a run reports in the Goals pane. And this plugin's own `status` tool (`mcp__quarterdeck-guard__status`, read-only) answers that runs are guarded, with the number of runs it knows and its last few turn ends; quarterdeck-goals starts no run without it.
+- **The handback goes on**: `SubagentHandback`, the tool a subagent's report comes back to your conversation through, runs as usual without a guard check, so Claude Code counts the report delivered and doesn't ask the run to send it again; `session.receive` (below) then keeps the report out of your chat, because a run reports in the Goals pane.
+- **Answers in place of a tool**: this plugin's own `status` tool (`mcp__quarterdeck-guard__status`, read-only) answers that runs are guarded, with the number of runs it knows and its last few turn ends; quarterdeck-goals starts no run without it.
 
 **Other hooks:**
 
