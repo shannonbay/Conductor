@@ -322,6 +322,11 @@ export function runMigrations(db: Database): void {
     ['one_off', 'INTEGER NOT NULL DEFAULT 0'],
     // The model its runs use (an alias or a full id); null: the model of the session that starts the run
     ['model', 'TEXT'],
+    // A short status a run sets through end_run, shown in the goal's one-line summary until a later run changes it
+    ['status_note', 'TEXT'],
+    ['status_note_at', 'TEXT'],
+    // What the run that set it had read (mail, a web page, watch events): the pane marks such a status
+    ['status_note_untrusted', 'TEXT'],
   ]
   for (const [col, def] of addedGoalColumns) {
     try { db.exec(`ALTER TABLE goals ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }

@@ -146,6 +146,12 @@ export interface Goal {
   one_off: boolean
   /** The model its runs use: an alias (haiku, sonnet, opus) or a full id. null: the model of the session that starts the run. */
   model: string | null
+  /** A short plain-text status the last run that set one gave through end_run ("clean", "2 PRs awaiting review"). */
+  status_note: string | null
+  /** When that run ended (its ended_at). */
+  status_note_at: string | null
+  /** The untrusted content that run had read before setting it, if any. */
+  status_note_untrusted: string | null
 }
 
 export type NewGoal = Pick<Goal, 'plan_id' | 'objective'> & Partial<Omit<Goal, 'plan_id' | 'objective' | 'limits'>> & { limits?: Partial<GoalLimits> }

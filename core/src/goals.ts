@@ -29,6 +29,9 @@ function deserializeGoal(r: Row): Goal {
     last_health_at: (r.last_health_at as string | null | undefined) ?? null,
     one_off: Boolean(r.one_off),
     model: (r.model as string | null | undefined) ?? null,
+    status_note: (r.status_note as string | null | undefined) ?? null,
+    status_note_at: (r.status_note_at as string | null | undefined) ?? null,
+    status_note_untrusted: (r.status_note_untrusted as string | null | undefined) ?? null,
   } as Goal
 }
 

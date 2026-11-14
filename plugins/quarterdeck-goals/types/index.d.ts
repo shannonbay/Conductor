@@ -62,6 +62,11 @@ export type GoalCard = {
   oneOff: boolean
   /** The model its runs use (an alias or a full id); null: the model of the session that starts each run. */
   model: string | null
+  /**
+   * A short plain-text status the goal's runs set through end_run, shown in its one-line summary.
+   * `stale`: the last run failed or ended without setting it. `untrusted`: what the run that set it had read.
+   */
+  statusNote: { text: string; stale: boolean; untrusted: string | null } | null
   instructions: string
   /** Action category → off | propose | auto (unlisted: propose). */
   autonomy: Record<string, string>

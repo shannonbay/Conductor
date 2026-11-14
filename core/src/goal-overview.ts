@@ -35,6 +35,20 @@ function clip(text: string | null, max: number): string | null {
   if (text === null || text.length <= max) return text
   return `${text.slice(0, max - 1).trimEnd()}…`
 }
+/**
+ * The goal's status (set by a run through end_run), or null. It is stale when
+ * the last finished run failed, or ended later without setting it: it still
+ * shows, dimmed, since it is the last word a run gave. `untrusted` is what the
+ * run that set it had read, so the pane can mark it.
+ */
+export function statusNote(goal: Goal, runs: GoalRun[]): { text: string; at: string | null; stale: boolean; untrusted: string | null } | null {
+  if (!goal.status_note) return null
+  const last = runs.find((r) => r.status !== 'queued' && r.status !== 'running' && r.status !== 'skipped')
+  const stale = !!last && (last.status === 'failed' || last.status === 'timed_out'
+    || (!!last.ended_at && !!goal.status_note_at && last.ended_at > goal.status_note_at))
+  return { text: goal.status_note, at: goal.status_note_at, stale, untrusted: goal.status_note_untrusted }
+}
+
 /** Done one-off goals listed, newest first. */
 const DONE = 10
 /** Recent events read to find a running agent's latest step. */
@@ -239,6 +253,7 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
         status: goal.status,
         one_off: goal.one_off,
         model: goal.model,
+        status_note: statusNote(goal, runs),
         instructions: clip(goal.instructions, CLIP.instructions)!,
         autonomy: goal.autonomy,
         tool_map: goal.tool_map,

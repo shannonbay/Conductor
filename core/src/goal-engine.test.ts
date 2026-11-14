@@ -3,7 +3,7 @@ import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, updateGoal, getGoal, insertRun, getRun, updateRun, insertMemory, listMemory, getMemory, updateTask, getTask, getPlan,
   addItem, buildBrief, queueRun, startRun, endRun, failRun, archiveResolved, withinActiveHours, decideTick, nextIntervalRun, recordSkip,
-  approveTask, rejectTask, checkCompletion, GoalError, listRuns, MEMORY_BRIEF_CHARS,
+  approveTask, rejectTask, checkCompletion, GoalError, listRuns, MEMORY_BRIEF_CHARS, STATUS_NOTE_MAX, cleanStatusNote, statusNote,
 } from './index.js'
 
 let db: Database
@@ -183,6 +183,45 @@ describe('run lifecycle', () => {
     expect(ended).toMatchObject({ status: 'completed', summary: 'Handled 2 emails.', items_created: 2, items_resolved: 1 })
     expect(getGoal(db, 'g1')!.last_run_at).not.toBeNull()
     expect(() => endRun(db, run.id, 'again')).toThrow(/already ended/)
+  })
+
+  it('endRun sets the goal status, keeps it when left out and clears it when empty', () => {
+    const first = startRun(db, queueRun(db, 'g1').id, null)
+    endRun(db, first.id, 'Checked.', '  2 PRs\n awaiting\treview ')
+    expect(getGoal(db, 'g1')).toMatchObject({ status_note: '2 PRs awaiting review', status_note_at: getRun(db, first.id)!.ended_at, status_note_untrusted: null })
+    const second = startRun(db, queueRun(db, 'g1').id, null)
+    endRun(db, second.id, 'Nothing new.')
+    expect(getGoal(db, 'g1')!.status_note).toBe('2 PRs awaiting review')
+    const third = startRun(db, queueRun(db, 'g1').id, null)
+    endRun(db, third.id, 'Cleared.', '')
+    expect(getGoal(db, 'g1')).toMatchObject({ status_note: null, status_note_at: null })
+  })
+
+  it('endRun cleans the status to short plain text and notes what an untrusted run had read', () => {
+    const run = startRun(db, queueRun(db, 'g1').id, null)
+    updateRun(db, run.id, { untrusted_at: now, untrusted_source: 'mail' })
+    const esc = String.fromCharCode(27)
+    endRun(db, run.id, 'Done.', `${esc}[31mbroken${esc}[0m ${String.fromCharCode(0x202e)}x ${'y'.repeat(60)}`)
+    const goal = getGoal(db, 'g1')!
+    expect(goal.status_note_untrusted).toBe('mail')
+    expect([...goal.status_note!].length).toBe(STATUS_NOTE_MAX)
+    expect(goal.status_note!.startsWith('broken x yyy')).toBe(true)
+    expect(goal.status_note!.endsWith('…')).toBe(true)
+    expect(cleanStatusNote('clean')).toBe('clean')
+  })
+
+  it('statusNote is stale once a later run ends without setting it, or the last run failed', () => {
+    const first = startRun(db, queueRun(db, 'g1').id, null)
+    endRun(db, first.id, 'Checked.', 'clean')
+    expect(statusNote(getGoal(db, 'g1')!, listRuns(db, 'g1', 5))).toMatchObject({ text: 'clean', stale: false, untrusted: null })
+    const second = startRun(db, queueRun(db, 'g1').id, null)
+    endRun(db, second.id, 'Nothing new.')
+    updateRun(db, second.id, { ended_at: new Date(Date.now() + 1000).toISOString() })
+    expect(statusNote(getGoal(db, 'g1')!, listRuns(db, 'g1', 5))!.stale).toBe(true)
+    const third = startRun(db, queueRun(db, 'g1').id, null)
+    endRun(db, third.id, 'Checked.', 'clean')
+    updateRun(db, third.id, { status: 'failed' })
+    expect(statusNote(getGoal(db, 'g1')!, listRuns(db, 'g1', 5))!.stale).toBe(true)
   })
 
   it('endRun requires a summary', () => {

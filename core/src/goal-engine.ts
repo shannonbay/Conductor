@@ -277,8 +277,35 @@ export function startRun(db: Database, runId: string, sessionId: string | null):
   return getRun(db, runId)!
 }
 
-/** Finishes a run with the agent's summary, counts its items, and archives old resolved items. */
-export function endRun(db: Database, runId: string, summary: string): GoalRun {
+/** The longest goal status a run can set: it sits in the goal's one-line summary. */
+export const STATUS_NOTE_MAX = 40
+
+/** Control characters, zero-width and text-direction marks: they could hide or reorder what the pane shows. */
+function isHidden(code: number): boolean {
+  return code < 0x20 || (code >= 0x7f && code <= 0x9f) || (code >= 0x200b && code <= 0x200f)
+    || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)
+}
+
+/**
+ * A run's goal status as the pane shows it: plain text on one line (control
+ * characters and escape sequences dropped, whitespace collapsed), capped at
+ * STATUS_NOTE_MAX characters. Empty means clear it.
+ */
+export function cleanStatusNote(text: string): string {
+  const plain = [...text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')] // ANSI escape sequences
+    .map((c) => (isHidden(c.codePointAt(0)!) ? ' ' : c)) // control and direction characters
+    .join('')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const chars = [...plain]
+  return chars.length > STATUS_NOTE_MAX ? `${chars.slice(0, STATUS_NOTE_MAX - 1).join('').trimEnd()}…` : plain
+}
+
+/**
+ * Finishes a run with the agent's summary, counts its items, and archives old resolved items.
+ * `status`, when given, becomes the goal's status (an empty one clears it); left out, the goal keeps the one it has.
+ */
+export function endRun(db: Database, runId: string, summary: string, status?: string): GoalRun {
   const run = getRun(db, runId)
   if (!run) throw new GoalError(`Run ${runId} not found.`)
   if (run.status !== 'running' && run.status !== 'queued') throw new GoalError(`Run ${runId} already ended (${run.status}).`)
@@ -288,6 +315,12 @@ export function endRun(db: Database, runId: string, summary: string): GoalRun {
   const resolved = (db.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?")
     .get(run.plan_id, run.started_at) as { n: number }).n
   updateRun(db, runId, { status: 'completed', summary: summary.trim(), ended_at: now, items_created: created, items_resolved: resolved })
+  if (status !== undefined) {
+    const note = cleanStatusNote(status)
+    updateGoal(db, run.plan_id, note
+      ? { status_note: note, status_note_at: now, status_note_untrusted: run.untrusted_source ?? null }
+      : { status_note: null, status_note_at: null, status_note_untrusted: null })
+  }
   archiveResolved(db, run.plan_id)
   finishIfDone(db, run.plan_id)
   return getRun(db, runId)!
