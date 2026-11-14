@@ -103,7 +103,7 @@ export const TOOLS = [
   },
   {
     name: 'update_goal',
-    description: "Changes a Quarterdeck goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), watches, the model its runs use, or pause / resume. A watch starts a run when something happens (a new issue, a feed entry, a file, an email): it is a shell command, run every few minutes in the goal's directory, that prints one line per current item, or a read-only connector tool called every few minutes; an item not there before starts a run, which is told the new ones. The answer says whether each new watch's command worked. Try the command or the tool yourself first; the goal-watches skill has recipes. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
+    description: "Changes a Quarterdeck goal: name, objective, standing instructions, autonomy per action category (off / propose / auto; null puts one back to the default, propose), merging one action category into another, tool rules (tool name pattern → category; null removes one), memory to add or forget (ids from goal_detail), watches, the model its runs use, or pause / resume. A watch starts a run when something happens (a new issue, a feed entry, a file, an email): it is a shell command, run every few minutes in the goal's directory, that prints one line per current item, or a read-only connector tool called every few minutes; an item not there before starts a run, which is told the new ones. The answer says whether each new watch's command worked. Try the command or the tool yourself first; the goal-watches skill has recipes. The person sees each change and is asked to confirm first. For the schedule use set_schedule.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -113,6 +113,11 @@ export const TOOLS = [
         instructions: { type: 'string', description: 'The new standing instructions in full; "" clears them' },
         autonomy: { type: 'object', additionalProperties: { type: ['string', 'null'], enum: ['off', 'propose', 'auto', null] } },
         tool_map: { type: 'object', additionalProperties: { type: ['string', 'null'] } },
+        merge_categories: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: "Old action category → the category to merge it into, when runs used two names for one kind of action: past items, the autonomy setting and tool rules take the new name, so earlier approvals count together toward Switch to auto. The merged category keeps its own autonomy if it has one",
+        },
         add_memory: {
           type: 'array',
           items: { type: 'object', properties: { kind: { type: 'string', enum: ['fact', 'rule', 'preference'] }, text: { type: 'string' }, pinned: { type: 'boolean' } }, required: ['kind', 'text'] },
@@ -228,7 +233,7 @@ export async function runTool($: Engine, name: ToolName, input: Record<string, u
 
   if (name === 'update_goal') {
     // Only the change fields: the call also carries the engine's own (tool, tool_use_id)
-    const keys = ['name', 'objective', 'instructions', 'autonomy', 'tool_map', 'add_memory', 'forget_memory', 'watches', 'status', 'model'] as const
+    const keys = ['name', 'objective', 'instructions', 'autonomy', 'tool_map', 'merge_categories', 'add_memory', 'forget_memory', 'watches', 'status', 'model'] as const
     const changes = Object.fromEntries(keys.filter((k) => input[k] !== undefined).map((k) => [k, input[k]])) as GoalChanges
     const lines = describeGoalChanges(goal, changes)
     if (lines.length === 0) return fail(`Nothing to change in ${goal.name}: give at least one new value.`)

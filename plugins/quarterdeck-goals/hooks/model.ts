@@ -588,6 +588,8 @@ export type GoalChanges = {
   instructions?: string
   autonomy?: Record<string, string | null>
   tool_map?: Record<string, string | null>
+  /** Old action category → the one to merge it into (past items, autonomy and tool rules). */
+  merge_categories?: Record<string, string>
   add_memory?: { kind: string; text: string; pinned?: boolean }[]
   forget_memory?: string[]
   /** Watch name → what it runs; null removes it. */
@@ -622,6 +624,11 @@ export function describeGoalChanges(g: GoalCard, c: GoalChanges): string[] {
   if (c.instructions !== undefined && c.instructions !== g.instructions) lines.push(c.instructions.trim() ? `Instructions → ${c.instructions}` : 'Instructions: cleared')
   for (const [cat, mode] of Object.entries(c.autonomy ?? {})) lines.push(`${cat}: ${g.autonomy[cat] ?? 'propose'} → ${mode ?? 'propose (default)'}`)
   for (const [pat, cat] of Object.entries(c.tool_map ?? {})) lines.push(cat === null ? `Tool rule removed: ${pat}` : `Tool rule: ${pat} → ${cat}${cat === 'untrusted' ? ' (reads outside content: auto actions then need approval for the rest of the run)' : ''}`)
+  for (const [from, to] of Object.entries(c.merge_categories ?? {})) {
+    // The merged category keeps its own autonomy; it takes the old one's only when it has none
+    const mode = g.autonomy[to.trim()] ?? g.autonomy[from.trim()] ?? 'propose'
+    lines.push(`Merge category ${from.trim()} into ${to.trim()}: its past items and tool rules move to ${to.trim()}, which is then ${mode}`)
+  }
   for (const m of c.add_memory ?? []) lines.push(`Remember (${m.kind}${m.pinned ? ', pinned' : ''}): ${m.text}`)
   for (const id of c.forget_memory ?? []) lines.push(`Forget: ${g.memory.find((m) => m.id === id)?.text ?? id}`)
   // A watch's command runs unattended: the person reads all of it, never a clipped one
