@@ -55,6 +55,44 @@ test('pressing a to-do expands it; Plan and Start send it to this conversation',
   await ui.unmount()
 })
 
+test('Start while Claude is mid-turn waits with Cancel; Cancel sends nothing, and an uncancelled one goes when the turn ends', async ($, on) => {
+  const { prompts } = engine(on)
+  const fake = fakeQuarterdeck(on, [], { todos: [roadmap()] })
+  // The conversation's own turns, as Claude Code reports them
+  on('turn.start', (_, e) => ({ turnId: e.turnId }) as never)
+  on('turn.complete', () => ({ text: '' }) as never)
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'todo-toggle-p1' })
+  await ui.press({ key: 'todo-open-p1/1.3' })
+  expect(await ui.find({ key: 'todo-cancel-p1/1.3' })).toBeUndefined()
+
+  await $.turn.start({ text: 'something else', turnId: 't1' } as never)
+  await ui.press({ key: 'todo-start-p1/1.3' })
+  expect((await ui.find({ key: 'todo-start-p1/1.3' }))?.props.label).toBe('Sending…')
+  expect((await ui.find({ key: 'todo-cancel-p1/1.3' }))?.props.label).toBe('Cancel')
+  expect(prompts).toEqual([])
+
+  await ui.press({ key: 'todo-cancel-p1/1.3' })
+  expect(await ui.find({ key: 'todo-cancel-p1/1.3' })).toBeUndefined()
+  expect((await ui.find({ key: 'todo-start-p1/1.3' }))?.props.label).toBe('Start')
+  expect((await ui.find({ key: 'todo-plan-p1/1.3' }))?.props.label).toBe('Plan')
+  expect((await ui.find({ key: 'todo-tick-p1/1.3' }))?.props.label).toBe('☐')
+  expect(fake.of('todo_set')).toEqual([])
+
+  // Held again, not cancelled: it goes when the turn ends, and Cancel goes away
+  await ui.press({ key: 'todo-start-p1/1.3' })
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'Done.' } as never)
+  await new Promise((r) => setTimeout(r, 0))
+  await ui.press({ key: 'todo-toggle-p1' })
+  await ui.press({ key: 'todo-toggle-p1' })
+  expect(prompts).toHaveLength(1)
+  expect(prompts[0]).toContain("Let's work on this now")
+  expect(fake.of('todo_set').at(-1)?.input).toMatchObject({ item_id: '1.3', status: 'active' })
+  expect(await ui.find({ key: 'todo-cancel-p1/1.3' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test("Plan runs Claude Code's /plan first when the session has it, then sends the to-do", async ($, on) => {
   const { prompts } = engine(on)
   fakeQuarterdeck(on, [], { todos: [roadmap()] })

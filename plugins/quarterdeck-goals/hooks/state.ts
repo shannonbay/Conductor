@@ -6,7 +6,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { ActiveRun, Confirm, PhoneState, RunEntry, Snapshot, Todos } from '../types'
+import type { ActiveRun, Confirm, HeldTodo, PhoneState, RunEntry, Snapshot, Todos } from '../types'
 import { EMPTY } from './model'
 
 type Engine = EngineInterface
@@ -19,6 +19,8 @@ const addingTo = atom({ plugin: 'quarterdeck-goals', key: 'addingTo' } as const,
 const askingAbout = atom({ plugin: 'quarterdeck-goals', key: 'askingAbout' } as const, null)
 const discussing = atom({ plugin: 'quarterdeck-goals', key: 'discussing' } as const, null)
 const editingTodo = atom({ plugin: 'quarterdeck-goals', key: 'editingTodo' } as const, null)
+/** To-dos whose Plan / Start waits for the conversation's turn to end, oldest first. */
+const heldTodos = atom({ plugin: 'quarterdeck-goals', key: 'heldTodos' } as const, [])
 const busy = atom({ plugin: 'quarterdeck-goals', key: 'busy' } as const, null)
 const notice = atom({ plugin: 'quarterdeck-goals', key: 'notice' } as const, null)
 const expanded = atom({ plugin: 'quarterdeck-goals', key: 'expanded' } as const, [])
@@ -152,6 +154,13 @@ export async function getDiscussing($: Engine): Promise<string | null> {
 }
 export async function setDiscussing($: Engine, value: string | null): Promise<void> {
   await update($, discussing, () => value)
+}
+
+export async function getHeldTodos($: Engine): Promise<HeldTodo[]> {
+  return read($, heldTodos)
+}
+export async function setHeldTodos($: Engine, change: (held: HeldTodo[]) => HeldTodo[]): Promise<void> {
+  await update($, heldTodos, change)
 }
 
 export async function getEditingTodo($: Engine): Promise<string | null> {

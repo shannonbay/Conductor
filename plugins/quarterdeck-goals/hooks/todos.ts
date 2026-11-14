@@ -7,11 +7,11 @@
  */
 import type { EngineInterface } from 'claude-code'
 
-import type { TodoItem, TodoList } from '../types'
+import type { HeldTodo, TodoItem, TodoList } from '../types'
 import { addTodo, editTodo, fetchTodos, setTodo } from './api'
 import { clip } from './model'
 import { act, refresh, refreshTodos } from './sync'
-import { setAskingAbout, setEditingTodo } from './state'
+import { getHeldTodos, setAskingAbout, setEditingTodo, setHeldTodos } from './state'
 
 type Engine = EngineInterface
 
@@ -149,6 +149,43 @@ export async function editFromPane($: Engine, list: TodoList, item: TodoItem, te
   }
   return ok
 }
+/**
+ * Whether the conversation's own turn is under way (its turn.start seen, its
+ * turn.complete not yet). Claude Code can't take a prompt back once it is
+ * submitted, so while this is set Plan / Start hold the to-do here instead,
+ * where Cancel can drop it, and send it when the turn ends. A reload forgets
+ * it: then a press sends straight away, as before.
+ */
+let midTurn = false
+
+const heldKey = (h: { list: { id: string }; item: { id: string } }) => `${h.list.id}/${h.item.id}`
+
+/** The conversation's turn began (main loop only). */
+export function turnStarted(): void {
+  midTurn = true
+}
+
+/** The conversation's turn ended: send the oldest held to-do (its own turn sends the next when it ends). */
+export async function turnEnded($: Engine): Promise<void> {
+  midTurn = false
+  const [next] = await getHeldTodos($)
+  if (!next) return
+  await setHeldTodos($, (held) => held.filter((h) => heldKey(h) !== heldKey(next)))
+  await act($, `todo-${next.mode}:${heldKey(next)}`, next.mode === 'plan' ? 'plan it' : 'start it', () => workOnTodo($, next.list, next.item, next.mode))
+}
+
 export function workFromPane($: Engine, list: TodoList, item: TodoItem, mode: 'plan' | 'start'): Promise<boolean> {
+  if (midTurn) return holdTodo($, { list, item, mode })
   return act($, `todo-${mode}:${list.id}/${item.id}`, mode === 'plan' ? 'plan it' : 'start it', () => workOnTodo($, list, item, mode))
+}
+
+/** Keeps a to-do back until the turn ends; nothing about it changes until it is sent. A second press changes Plan to Start or back. */
+async function holdTodo($: Engine, held: HeldTodo): Promise<boolean> {
+  await setHeldTodos($, (all) => [...all.filter((h) => heldKey(h) !== heldKey(held)), held])
+  return true
+}
+
+/** Cancel beside Sending…: the held to-do is never sent, and its Plan / Start come back. */
+export async function cancelHeldTodo($: Engine, list: TodoList, item: TodoItem): Promise<void> {
+  await setHeldTodos($, (all) => all.filter((h) => heldKey(h) !== `${list.id}/${item.id}`))
 }
