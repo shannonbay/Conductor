@@ -369,8 +369,13 @@ async function newFromTemplate($: Engine): Promise<string> {
   const checks = (created.watches ?? []).map((w) => ` Watch "${w.name}": ${w.result}.`).join('')
   const when = template.schedule
     ? `running ${scheduleLabel(template.schedule)}`
-    : `with no schedule: a run starts when its watch sees ${(created.watches ?? []).map((w) => w.name).join(' or ') || 'something new'}`
+    : `with no schedule: a run starts when its watch sees ${orList((created.watches ?? []).map((w) => w.name)) || 'something new'}`
   return `Created the goal "${template.name}" in ${cwd}, ${when}; the first run starts within a minute.${checks}${newGoalModelText(template.model, template.modelReason)} It needs ${template.needs}. It asks before it acts: approve or reject its proposals under Needs you. Change anything by discussing the goal.${await phoneHint($)}`
+}
+
+/** "a", "a or b", "a, b or c". */
+function orList(names: string[]): string {
+  return names.length < 3 ? names.join(' or ') : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`
 }
 
 /** How long after /goal-new answers its watch prompt goes into the conversation. */

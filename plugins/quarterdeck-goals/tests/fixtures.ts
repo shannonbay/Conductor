@@ -29,7 +29,7 @@ export const BAND = {
 
 export const SURFACES = ['terminal', 'desktop'] as const
 
-type Item = { id: string; goal: string; action?: { category: string; summary: string } | null; asks_person?: boolean }
+type Item = { id: string; goal: string; action?: { category: string; summary: string } | null; asks_person?: boolean; notes?: string }
 type FakeGoal = {
   id: string
   name: string
@@ -76,8 +76,8 @@ export function proposal(id: string, title: string): Item {
 }
 
 /** A run's question or request for the person (add_item with ask_person). */
-export function question(id: string, title: string): Item {
-  return { id, goal: title, action: null, asks_person: true } as Item
+export function question(id: string, title: string, notes?: string): Item {
+  return { id, goal: title, action: null, asks_person: true, ...(notes && { notes }) } as Item
 }
 
 export type Call = { tool: string; input: Record<string, unknown> }

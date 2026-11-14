@@ -207,6 +207,24 @@ describe('buildOverview', () => {
     expect(o.goals.find((g) => g.id === 'big1')!.needs_you).toHaveLength(5)
   })
 
+  it('a question carries its context (notes) on a card and in detail, within bounds', () => {
+    const context = 'Two ways: (a) stop the agent once its handback is answered; (b) let the handback through. I would do (a).'
+    addItem(db, 'g1', null, { goal: 'Issue #8: which approach?', notes: context, ask_person: true })
+    expect(buildOverview(db).goals[0]!.needs_you[0]).toMatchObject({ asks_person: true, notes: context })
+    expect(buildOverview(db, []).goals[0]!.needs_you[0]).toMatchObject({ asks_person: true, notes: context })
+    const long = 'x'.repeat(5000)
+    for (let i = 0; i < 12; i++) {
+      const id = `q${i}`
+      createGoal(db, { id, name: `Goal ${i}`, description: null, status: 'active', working_dir: '/tmp', created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+        { objective: long, instructions: long })
+      for (let n = 0; n < 15; n++) addItem(db, id, null, { goal: long, notes: long, ask_person: true })
+    }
+    expect(JSON.stringify(buildOverview(db, [])).length).toBeLessThan(45_000)
+    expect(JSON.stringify(buildOverview(db, ['q0']).goals.find((g) => g.id === 'q0')).length).toBeLessThan(30_000)
+    const card = buildOverview(db, []).goals.find((g) => g.id === 'q1')!.needs_you
+    expect(card.filter((i) => 'notes' in i)).toHaveLength(1)
+  })
+
   it("leaves the actions params out (the goal page shows them)", () => {
     addItem(db, 'g1', null, { goal: 'Reply to Bob', action: { category: 'email.send', summary: 'Send reply', params: { body: 'x'.repeat(5000) } } })
     const item = buildOverview(db).goals[0]!.needs_you[0]!
