@@ -171,3 +171,50 @@ test('the paused warning goes once the guard plugin loads, and the queued run st
   expect(spawned.map((x) => x.prompt)).toEqual(['Run Inbox'])
   await ui.unmount()
 })
+
+const PLAN_MODE_REFUSAL = "wasn't run: this call needs a person's approval, and a mod's own call can't ask for it."
+
+test('a run whose agent ends while plan mode refuses fail_run is finished at the next pass, not left open', async ($, on) => {
+  const { clock, finish } = engine(on)
+  settle = () => clock.settle()
+  const errors: Record<string, string> = {}
+  const fake = fakeQuarterdeck(on, [queued()], { errors })
+  await $.session.start(START)
+  await settle()
+  errors.fail_run = `fail_run ${PLAN_MODE_REFUSAL}`
+  finish('agent-1')
+  await clock.advance(30_000)
+  await clock.settle()
+  expect(fake.ended).toEqual({})
+  // still tracked, so the next pass tries again
+  expect(fake.of('goals_tick').at(-1)?.input.tracked_run_ids).toEqual(['r1'])
+  delete errors.fail_run
+  await clock.advance(30_000)
+  await clock.settle()
+  expect(fake.ended).toEqual({ r1: 'failed' })
+  expect(fake.of('goals_tick').at(-1)?.input.tracked_run_ids).toEqual([])
+})
+
+test('while plan mode refuses the tick the pane says so instead of "Offline", and it clears when plan mode ends', async ($, on) => {
+  const { clock } = engine(on)
+  settle = () => clock.settle()
+  const errors: Record<string, string> = {}
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox' })], { errors })
+  await $.session.start(START)
+  await settle()
+  errors.goals_tick = `goals_tick ${PLAN_MODE_REFUSAL}`
+  errors.goals_overview = `goals_overview ${PLAN_MODE_REFUSAL}`
+  await clock.advance(30_000)
+  await clock.settle()
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /^Plan mode is on/ }))?.text).toContain('standing session')
+  expect(await ui.find({ type: 'Text', text: /^Offline/ })).toBeFalsy()
+  await ui.unmount()
+  delete errors.goals_tick
+  delete errors.goals_overview
+  await clock.advance(60_000)
+  await clock.settle()
+  const after = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await after.find({ type: 'Text', text: /^Plan mode is on/ })).toBeFalsy()
+  await after.unmount()
+})

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, updateGoal, getGoal, insertRun, getRun, updateRun, insertMemory, listMemory, getMemory, updateTask, getTask, getPlan,
@@ -121,17 +121,30 @@ describe('buildBrief', () => {
   })
 
   it('reports decisions made since the previous run only', () => {
-    addItem(db, 'g1', null, { goal: 'old', action: { category: 'email.send', summary: 'old' } })
-    approveTask(db, 'g1', '1')
-    const prev = insertRun(db, 'g1', 'manual', 'running')
-    endRun(db, prev.id, 'first run')
-    addItem(db, 'g1', null, { goal: 'new', action: { category: 'email.send', summary: 'new' } })
-    rejectTask(db, 'g1', '2', 'casual please')
-    const run = insertRun(db, 'g1', 'interval', 'running')
-    const b = buildBrief(db, 'g1', run.id)
-    expect(b.decisions_since_last_run).toEqual([expect.objectContaining({ item: '2', decision: 'rejected', feedback: 'casual please' })])
-    expect(b.recent_runs).toEqual([expect.objectContaining({ summary: 'first run' })])
-    expect(b.run).toMatchObject({ id: run.id, trigger: 'interval' })
+    // Step a fake clock so each step gets its own timestamp: on a fast machine the
+    // rejection could land in the same millisecond the previous run started.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    try {
+      let t = Date.parse('2026-01-01T00:00:00.000Z')
+      const tick = () => vi.setSystemTime((t += 1000))
+      tick()
+      addItem(db, 'g1', null, { goal: 'old', action: { category: 'email.send', summary: 'old' } })
+      approveTask(db, 'g1', '1')
+      tick()
+      const prev = insertRun(db, 'g1', 'manual', 'running')
+      endRun(db, prev.id, 'first run')
+      tick()
+      addItem(db, 'g1', null, { goal: 'new', action: { category: 'email.send', summary: 'new' } })
+      rejectTask(db, 'g1', '2', 'casual please')
+      tick()
+      const run = insertRun(db, 'g1', 'interval', 'running')
+      const b = buildBrief(db, 'g1', run.id)
+      expect(b.decisions_since_last_run).toEqual([expect.objectContaining({ item: '2', decision: 'rejected', feedback: 'casual please' })])
+      expect(b.recent_runs).toEqual([expect.objectContaining({ summary: 'first run' })])
+      expect(b.run).toMatchObject({ id: run.id, trigger: 'interval' })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('includes pinned memory always and other memory within the budget', () => {

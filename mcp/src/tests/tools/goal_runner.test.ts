@@ -240,6 +240,17 @@ describe('one-off goals and schedules at creation', () => {
     await run_goal({ goal_id: id })
     expect(getGoal(id)!.status).toBe('active')
   })
+
+  it('set_schedule on a done one-off brings it back as a scheduled goal (#5)', async () => {
+    const { id } = await create_goal({ name: 'Tidy', objective: 'Delete installers', working_dir: tmpdir(), one_off: true })
+    const run = (await tick('session-A')).claimed[0]!
+    await withScope({ planId: id, runId: run.run_id }, () => end_run({ summary: 'Deleted 3.' }))
+    expect(getGoal(id)!.status).toBe('retired')
+    const r = await set_schedule({ goal_id: id, schedule: { kind: 'cron', expr: '11 22 * * *' } })
+    expect(r).toMatchObject({ one_off: false, revived: true })
+    expect(r.next_run_at).not.toBeNull()
+    expect(getGoal(id)).toMatchObject({ status: 'active', one_off: false })
+  })
 })
 
 describe('update_goal and report_run_end', () => {
