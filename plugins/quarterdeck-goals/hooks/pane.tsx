@@ -15,7 +15,7 @@ import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, rej
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, isWorking, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, planModeBlocked, readModelAnswer, runCost, runsText, runTokens, spark, SPINNER_FRAMES, SPINNER_MS, updatePrompt } from './model'
-import { connectRemote } from './alerts'
+import { connectRemote, markActive } from './alerts'
 import { sendToChat } from './chat'
 import { advanceSpinner, getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getHeldTodos, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getPlanMode, getRejecting, getRuns, getSnapshot, getSpinnerFrame, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, cancelHeldTodo, editFromPane, toggleTodo, workFromPane } from './todos'
@@ -49,6 +49,45 @@ type View = {
   frame: number
 }
 
+/**
+ * The pane's parts, with every Button press and Input submit first marking the
+ * person active: someone working in the pane is there, so alerts aren't relayed
+ * to their phone meanwhile (see alerts.ts). The wrappers are made once per part,
+ * so a redraw (the spinner's, say) sees the same component and keeps an Input's draft.
+ */
+function parts($: Engine, e: E) {
+  const ui = $.ui.resolve(e)
+  return { ...ui, Button: pressed($, ui.Button), Input: submitted($, ui.Input) }
+}
+
+const wrapped = new WeakMap<object, unknown>()
+
+function present($: Engine): void {
+  void $.clock.now().then((t) => markActive($, t))
+}
+
+function pressed<B extends (p: never) => unknown>($: Engine, Plain: B): B {
+  const known = wrapped.get(Plain)
+  if (known) return known as B
+  const P = Plain as unknown as (p: { onPress?: () => unknown; children?: unknown }) => unknown
+  const Button = (p: { onPress?: () => unknown; children?: unknown }) => (
+    <P {...p} onPress={() => { present($); return p.onPress?.() }}>{p.children}</P>
+  )
+  wrapped.set(Plain, Button)
+  return Button as unknown as B
+}
+
+function submitted<I extends (p: never) => unknown>($: Engine, Plain: I): I {
+  const known = wrapped.get(Plain)
+  if (known) return known as I
+  const P = Plain as unknown as (p: { onSubmit?: (v: string) => unknown }) => unknown
+  const Input = (p: { onSubmit?: (v: string) => unknown }) => (
+    <P {...p} onSubmit={(v: string) => { present($); return p.onSubmit?.(v) }} />
+  )
+  wrapped.set(Plain, Input)
+  return Input as unknown as I
+}
+
 /** The colour of every action you can press that is drawn as plain words: the theme's own, so it follows the person's theme. */
 const ACTION_COLOR = 'suggestion'
 
@@ -58,7 +97,7 @@ const ACTION_COLOR = 'suggestion'
  * that are content you press (a goal's name, a to-do's text, ☐) stay uncoloured.
  */
 function action($: Engine, e: E, p: { key: string; label: string; hotkey?: string; onPress: () => void }) {
-  const { Button, Text } = $.ui.resolve(e)
+  const { Button, Text } = parts($, e)
   return (
     <Button key={p.key} plain label={p.label} hotkey={p.hotkey} onPress={p.onPress}>
       <Text color={ACTION_COLOR}>{p.label}</Text>
@@ -88,7 +127,7 @@ function canRun(g: GoalCard): boolean {
 }
 
 export async function renderPane($: Engine, e: E) {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const { Box, Text, Button } = parts($, e)
   const s = await getSnapshot($)
   const message = await getNotice($)
   const guardMissing = await getGuardMissing($)
@@ -204,7 +243,7 @@ export async function renderPane($: Engine, e: E) {
 
 /** A blank pane (no goals, no to-dos): what Quarterdeck is and how to start. */
 function welcome($: Engine, e: E) {
-  const { Box, Text } = $.ui.resolve(e)
+  const { Box, Text } = parts($, e)
   return (
     <Box key="welcome" flexDirection="column" marginBottom={1}>
       <Text>Welcome to Quarterdeck.</Text>
@@ -222,7 +261,7 @@ function welcome($: Engine, e: E) {
  * number, for the full card), the tokens its last run used and when it runs next.
  */
 function quietLine($: Engine, e: E, view: View, g: GoalCard, index: number, gap: number) {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const { Box, Text, Button } = parts($, e)
   const run = lastRun(g)
   const facts = [
     g.status === 'active' ? '' : ` · ${g.status}`,
@@ -242,7 +281,7 @@ function quietLine($: Engine, e: E, view: View, g: GoalCard, index: number, gap:
 }
 
 function goalCard($: Engine, e: E, view: View, g: GoalCard, index: number) {
-  const { Box, Text, Button, Link } = $.ui.resolve(e)
+  const { Box, Text, Button, Link } = parts($, e)
   const isOpen = view.shown.includes(g.id)
   const run = lastRun(g)
   const toggle = () => void toggleExpanded($, g.id).then(() => refresh($))
@@ -291,7 +330,7 @@ function goalCard($: Engine, e: E, view: View, g: GoalCard, index: number) {
  * auto here, after a second press, since runs then act without asking.
  */
 function autoSuggestion($: Engine, e: E, view: View, g: GoalCard, s: GoalCard['suggestions'][number]) {
-  const { Box, Text, Button, Link } = $.ui.resolve(e)
+  const { Box, Text, Button, Link } = parts($, e)
   const key = `${g.id}-${s.category}`
   const confirming = view.pending?.kind === 'auto' && view.pending.goalId === g.id && view.pending.category === s.category
   return (
@@ -326,7 +365,7 @@ function autoSuggestion($: Engine, e: E, view: View, g: GoalCard, s: GoalCard['s
 
 /** One line: what the goal's agent is doing now, or what happens next. */
 function activityLine($: Engine, e: E, view: View, g: GoalCard) {
-  const { Box, Text } = $.ui.resolve(e)
+  const { Box, Text } = parts($, e)
   const { state, text, at, waiting } = g.activity
   if (!text) return null
   if (state === 'running' && waiting) {
@@ -356,7 +395,7 @@ function activityLine($: Engine, e: E, view: View, g: GoalCard) {
 }
 
 function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['needsYou'][number]) {
-  const { Box, Text, Button, Input } = $.ui.resolve(e)
+  const { Box, Text, Button, Input } = parts($, e)
   const key = `${g.id}/${item.id}`
   const isFirst = view.first === key
   const sendBack = (text: string) => {
@@ -428,7 +467,7 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
 }
 
 function controls($: Engine, e: E, view: View, g: GoalCard) {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const { Box, Text, Button } = parts($, e)
   const isCancelling = view.pending?.kind === 'cancel-run' && view.pending.goalId === g.id
   const isDeleting = view.pending?.kind === 'delete-goal' && view.pending.goalId === g.id
 
@@ -509,7 +548,7 @@ function controls($: Engine, e: E, view: View, g: GoalCard) {
 }
 
 function details($: Engine, e: E, view: View, g: GoalCard) {
-  const { Box, Text, Button, Link, Input } = $.ui.resolve(e)
+  const { Box, Text, Button, Link, Input } = parts($, e)
   // Discuss opens a box for the person's question, like a to-do's Ask…; Enter on an empty box asks the usual one
   const discussBox = (kind: 'goal' | 'run', id: string, run?: GoalCard['runs'][number]) => (
     <Box key={`discuss-${kind}-box-${id}`} flexDirection="column">
@@ -606,7 +645,7 @@ const DONE_SECTION = '__done__'
 
 /** Done one-off goals, collapsed: each with its last run's summary and Run again. */
 function doneSection($: Engine, e: E, view: View, done: GoalCard[]) {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const { Box, Text, Button } = parts($, e)
   const isOpen = view.shown.includes(DONE_SECTION)
   return (
     <Box key="done" flexDirection="column" marginBottom={1}>
@@ -636,7 +675,7 @@ function doneSection($: Engine, e: E, view: View, done: GoalCard[]) {
  * question; Enter on an empty box asks for Claude's opinion.
  */
 function todoSection($: Engine, e: E, view: View, todos: Todos, addingTo: string | null, askingAbout: string | null, editing: string | null, held: Map<string, 'plan' | 'start'>) {
-  const { Box, Text, Button, Input } = $.ui.resolve(e)
+  const { Box, Text, Button, Input } = parts($, e)
   return (
     <Box key="todos" flexDirection="column" marginBottom={1}>
       {todos.lists.map((list) => {
@@ -767,7 +806,7 @@ function todoSection($: Engine, e: E, view: View, todos: Todos, addingTo: string
  * subagent's), it says which, so the setting never claims more than it does.
  */
 function modelLine($: Engine, e: E, view: View, g: GoalCard) {
-  const { Box, Text } = $.ui.resolve(e)
+  const { Box, Text } = parts($, e)
   const used = lastRun(g)?.model ?? null
   const differs = used !== null && g.model !== null && !sameModel(g.model, used)
   return (
@@ -807,7 +846,7 @@ async function chooseModel($: Engine, g: GoalCard): Promise<void> {
 }
 
 function allowSection($: Engine, e: E, view: View, g: GoalCard) {
-  const { Box, Text, Button } = $.ui.resolve(e)
+  const { Box, Text, Button } = parts($, e)
   const { rules, skipped } = allowRules(g)
   if (rules.length === 0 && skipped.length === 0) return null
   const key = `rules:${g.id}`

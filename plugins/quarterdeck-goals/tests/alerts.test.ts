@@ -161,6 +161,29 @@ test('while the person is away, an alert is relayed to Claude to push; not while
   expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(1)
 })
 
+test('pressing something in the Goals pane counts as being there, so an alert is not relayed', async ($, on) => {
+  const { prompts, clock } = engine(on)
+  const goals = [goal({ id: 'g1', name: 'Inbox' })]
+  const fake = fakeQuarterdeck(on, goals)
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' }) // the person expands a goal, typing nothing
+  await clock.advance(61_000)
+  goals[0]!.needs_you.push(proposal('12', 'Archive the newsletter'))
+  fake.bump()
+  await poll(clock)
+  expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(0)
+  const r = await $.tool.call({ tool: 'mcp__quarterdeck-goals__goals_status' } as never)
+  expect(String(r.result)).toContain('Phone: not relayed (you were active in the last 5 minutes).')
+
+  await clock.advance(5 * 60_000) // away from the pane long enough
+  goals[0]!.needs_you.push(proposal('13', 'Archive another'))
+  fake.bump()
+  await poll(clock)
+  expect(prompts.filter((p) => p.includes('PushNotification'))).toHaveLength(1)
+  await ui.unmount()
+})
+
 test('a proposal that arrives while the plugin restarts still raises its alert', async ($, on) => {
   on('session.end', () => ({ sessionId: 'test-session' }) as never)
   const { toasts, clock } = engine(on)
