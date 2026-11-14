@@ -75,7 +75,7 @@ export const AddItemSchema = z.object({
   external_ref: z.string().min(1).optional().describe(
     'Stable ID of the thing this is about, e.g. "gmail:18c2f…". If an item with this ref already exists it is returned instead of creating a duplicate.'),
   action: z.object({
-    category: z.string().min(1).describe('Action category, e.g. "email.send". Its autonomy mode is in the brief.'),
+    category: z.string().min(1).describe('Action category, e.g. "email.send". Reuse one from known_categories in the brief when it fits the action; invent a new one only for a different kind of action. Its autonomy mode is in the brief.'),
     summary: z.string().min(1).describe('One line the human will read when approving, e.g. "Send reply confirming Thursday 2pm"'),
     params: z.record(z.unknown()).optional().describe('Exact details needed to carry the action out later (ids, draft id, labels)'),
   }).optional().describe(
