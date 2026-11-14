@@ -243,6 +243,7 @@ export const UpdateGoalSchema = z.object({
   instructions: z.string().optional().describe('Standing instructions; "" clears them'),
   autonomy: z.record(Mode.nullable()).optional().describe('Category → off | propose | auto; null removes the category'),
   tool_map: z.record(z.string().nullable()).optional().describe('Tool name pattern → category; null removes the rule'),
+  merge_categories: z.record(z.string().trim().min(1)).optional().describe('Old action category → the category to merge it into: past items, autonomy and tool rules take the new name, so earlier approvals count toward the Switch to auto suggestion'),
   add_memory: z.array(z.object({ kind: z.enum(['fact', 'rule', 'preference']), text: z.string().trim().min(1), pinned: z.boolean().optional() })).optional(),
   forget_memory: z.array(z.string()).optional().describe('Memory ids to forget'),
   watches: z.record(WatchSchema.nullable()).optional().describe('Watch name → what it checks; null removes the watch. A run starts when a watch sees something new'),
