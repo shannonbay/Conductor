@@ -151,6 +151,10 @@ export interface GoalBrief {
   goal: { id: string; name: string; objective: string; instructions: string; status: Goal['status'] }
   run: {
     id: string; trigger: TriggerKind; started_at: string; limits: Goal['limits']
+    /** When the run is stopped: started_at + max_run_minutes. */
+    deadline: string
+    /** When the goal's schedule next starts a run on its own; null when it has no schedule (only watches, webhooks, health or Run now start one). */
+    next_scheduled_run: string | null
     /** Set once the run has read untrusted content: its auto categories then need proposing, like propose ones. */
     untrusted: { since: string; source: string } | null
   } | null
@@ -235,6 +239,8 @@ export function buildBrief(db: Database, planId: string, runId?: string): GoalBr
     goal: { id: planId, name: plan.name, objective: goal.objective, instructions: goal.instructions, status: goal.status },
     run: run ? {
       id: run.id, trigger: run.trigger, started_at: run.started_at, limits: goal.limits,
+      deadline: new Date(Date.parse(run.started_at) + goal.limits.max_run_minutes * 60_000).toISOString(),
+      next_scheduled_run: nextScheduledRun(db, planId, new Date(run.started_at)),
       untrusted: marked?.untrusted_at && marked.untrusted_source ? { since: marked.untrusted_at, source: marked.untrusted_source } : null,
     } : null,
     autonomy: { default: 'propose', categories: goal.autonomy },

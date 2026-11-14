@@ -3,7 +3,7 @@ import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, updateGoal, getGoal, insertRun, getRun, updateRun, insertMemory, listMemory, getMemory, updateTask, getTask, getPlan,
   addItem, buildBrief, queueRun, startRun, endRun, failRun, archiveResolved, withinActiveHours, decideTick, nextIntervalRun, recordSkip,
-  approveTask, rejectTask, checkCompletion, GoalError, listRuns, MEMORY_BRIEF_CHARS, STATUS_NOTE_MAX, cleanStatusNote, statusNote,
+  approveTask, rejectTask, checkCompletion, GoalError, listRuns, MEMORY_BRIEF_CHARS, STATUS_NOTE_MAX, cleanStatusNote, statusNote, setSchedule,
 } from './index.js'
 
 let db: Database
@@ -156,6 +156,19 @@ describe('buildBrief', () => {
     expect(b.memory.length + b.memory_omitted).toBe(3)
     expect(b.memory_omitted).toBeGreaterThan(0)
     expect(getMemory(db, pinned.id)!.last_used_at).not.toBeNull()
+  })
+
+  it("gives the run its deadline and when the schedule next starts one", () => {
+    const run = insertRun(db, 'g1', 'manual', 'running')
+    const started = Date.parse(getRun(db, run.id)!.started_at)
+    const minutes = getGoal(db, 'g1')!.limits.max_run_minutes
+    const b = buildBrief(db, 'g1', run.id)
+    expect(b.run!.deadline).toBe(new Date(started + minutes * 60_000).toISOString())
+    // No schedule: nothing starts a later run on its own
+    expect(b.run!.next_scheduled_run).toBeNull()
+
+    setSchedule(db, 'g1', { kind: 'interval', minutes: 60 })
+    expect(buildBrief(db, 'g1', run.id).run!.next_scheduled_run).toBe(new Date(started + 60 * 60_000).toISOString())
   })
 
   it('rejects a run from another goal', () => {
