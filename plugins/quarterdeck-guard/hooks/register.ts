@@ -283,7 +283,7 @@ export const register: Register = (on) => {
   on('tool.call', async ($, e, next) => {
     const runId = await runIdFor($, e.agentId)
     if (!runId) return next(e)
-    if ((e.tool as string) === 'SubagentHandback') return { result: { success: true, message: 'Report saved by Quarterdeck (end_run).' } } as never
+    if ((e.tool as string) === 'SubagentHandback') return { result: { success: true, message: 'Report received: Quarterdeck takes it from here (end_run records the run). Stop now and do not call SubagentHandback again.' } } as never
     // A call that already carries its run goes on untouched: auto mode reviews a call
     // before this hook, and refuses one whose input changes after its review
     const scoped = (e as { run_scope?: unknown }).run_scope === runId

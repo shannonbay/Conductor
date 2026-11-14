@@ -161,6 +161,14 @@ describe("a run's progress", () => {
     expect(activity().text).toBe('Using Gmail label_thread')
   })
 
+  it("says a wait on Quarterdeck's own tool may have no prompt showing", () => {
+    const run = claimRun(db, 'g1', { holder: 'A' })!
+    reportRunProgress(db, run.run_id, { event: 'waiting', tool: 'quarterdeck get_goal_brief' })
+    const activity = buildOverview(db).goals[0]!.activity
+    expect(activity.text).toMatch(/^Waiting for a permission prompt that may not be showing: quarterdeck get_goal_brief/)
+    expect(activity.waiting?.tool).toBe('quarterdeck get_goal_brief')
+  })
+
   it('changes nothing once the run has ended', () => {
     const run = claimRun(db, 'g1', { holder: 'A' })!
     reportRunEnd(db, run.run_id, { answer: 'x', reason: 'error' })
