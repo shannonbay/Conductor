@@ -68,6 +68,26 @@ describe('addItem', () => {
   })
 })
 
+describe('known categories', () => {
+  it('lists autonomy keys and used categories, most used first, with an example', () => {
+    addItem(db, 'g1', null, { goal: 'a', action: { category: 'github.pr', summary: 'Open PR #1' } })
+    addItem(db, 'g1', null, { goal: 'b', action: { category: 'github.pr', summary: 'Open PR #2' } })
+    const known = buildBrief(db, 'g1').known_categories
+    expect(known[0]).toMatchObject({ category: 'github.pr', mode: 'propose', uses: 2 })
+    expect(known[0]!.example).toMatch(/Open PR #/)
+    expect(known.map((k) => k.category)).toEqual(['github.pr', 'email.archive', 'email.delete'])
+    expect(known.find((k) => k.category === 'email.archive')).toMatchObject({ mode: 'auto', uses: 0 })
+  })
+
+  it('notes similar existing categories when a new one shares their first segment', () => {
+    addItem(db, 'g1', null, { goal: 'a', action: { category: 'github.pr', summary: 'Open PR' } })
+    const r = addItem(db, 'g1', null, { goal: 'b', action: { category: 'github.push', summary: 'Push' } })
+    expect(r.similar_categories).toEqual(['github.pr'])
+    expect(addItem(db, 'g1', null, { goal: 'c', action: { category: 'github.pr', summary: 'Open PR' } }).similar_categories).toBeUndefined()
+    expect(addItem(db, 'g1', null, { goal: 'd', action: { category: 'calendar.add', summary: 'Add' } }).similar_categories).toBeUndefined()
+  })
+})
+
 describe('proposals and review', () => {
   function propose() {
     return addItem(db, 'g1', null, { goal: 'Reply to Alice', action: { category: 'email.send', summary: 'Send reply' } }).task

@@ -21,6 +21,12 @@ export interface GoalChanges {
   autonomy?: Record<string, AutonomyMode | null>
   /** Tool name pattern → category; null removes the rule. */
   tool_map?: Record<string, string | null>
+  /**
+   * Old category → the category to merge it into: past items' actions, the
+   * autonomy setting and tool rules take the new name, so earlier approvals
+   * count toward the "Switch to auto" suggestion.
+   */
+  merge_categories?: Record<string, string>
   add_memory?: { kind: MemoryKind; text: string; pinned?: boolean }[]
   /** Memory ids to deactivate. */
   forget_memory?: string[]
@@ -40,6 +46,9 @@ export function applyGoalChanges(db: Database, planId: string, changes: GoalChan
   if (!goal || !plan) throw new GoalError(`Goal ${planId} not found.`)
   for (const [category, mode] of Object.entries(changes.autonomy ?? {})) {
     if (mode !== null && !MODES.has(mode)) throw new GoalError(`"${mode}" isn't a mode for ${category}: use off, propose or auto.`)
+  }
+  for (const [from, to] of Object.entries(changes.merge_categories ?? {})) {
+    if (!from.trim() || !to.trim() || from.trim() === to.trim()) throw new GoalError(`Can't merge "${from}" into "${to}": give two different category names.`)
   }
   const model = changes.model === undefined ? undefined : normalizeModel(changes.model) // throws on a name that can't be a model
   for (const id of changes.forget_memory ?? []) {
@@ -78,6 +87,20 @@ export function applyGoalChanges(db: Database, planId: string, changes: GoalChan
         done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} → ${category}${category === UNTRUSTED_CATEGORY ? ' (reads outside content)' : ''}`)
       }
       updateGoal(db, planId, { tool_map: toolMap })
+    }
+    for (const [rawFrom, rawTo] of Object.entries(changes.merge_categories ?? {})) {
+      const from = rawFrom.trim(), to = rawTo.trim()
+      const items = db.prepare(`UPDATE tasks SET state = json_set(state, '$.action.category', ?)
+        WHERE plan_id = ? AND json_extract(state, '$.action.category') = ?`).run(to, planId, from).changes
+      const current = getGoal(db, planId)!
+      const autonomy = { ...current.autonomy }
+      if (from in autonomy) {
+        if (!(to in autonomy)) autonomy[to] = autonomy[from]!
+        delete autonomy[from]
+      }
+      const toolMap = Object.fromEntries(Object.entries(current.tool_map).map(([pattern, c]) => [pattern, c === from ? to : c]))
+      updateGoal(db, planId, { autonomy, tool_map: toolMap })
+      done.push(`merged ${from} into ${to} (${items} ${items === 1 ? 'item' : 'items'})`)
     }
     for (const m of changes.add_memory ?? []) {
       insertMemory(db, { plan_id: planId, kind: m.kind, text: m.text, source: 'human', pinned: m.pinned ?? false })

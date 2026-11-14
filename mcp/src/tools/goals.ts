@@ -49,6 +49,7 @@ export async function get_goal_brief(args: unknown) {
       'First carry out items with approved_to_execute (their action was approved), then complete them with set_status.',
       'Revise items rejected in decisions_since_last_run using the feedback: update the proposal with update_task state_patch {"action": {category, summary, params}} so the human sees the new version, then set_status completed to send it for review again — or abandon it with a reason.',
       'Look for new work; add each piece with add_item (use external_ref so it is never duplicated).',
+      'For an action, reuse a category from known_categories when one fits it; invent a new category only for a different kind of action.',
       'Respect autonomy: "auto" categories you may do and then record with add_item; "propose" categories go through add_item and wait for approval; "off" categories you must not do.',
       'Save anything worth knowing next time with remember. Finish with end_run and a short summary.',
     ],
@@ -88,6 +89,9 @@ export async function add_item(args: unknown) {
       : result.mode === 'auto'
       ? 'Recorded as done.'
       : 'Item created.',
+    ...(result.similar_categories && {
+      note: `"${input.action!.category}" is a new category for this goal, but it already has ${result.similar_categories.map((c) => `"${c}"`).join(', ')}. If this is the same kind of action, use that name next time so approvals count together.`,
+    }),
   }
 }
 

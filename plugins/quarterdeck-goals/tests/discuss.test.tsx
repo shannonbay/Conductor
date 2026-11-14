@@ -94,6 +94,15 @@ test('update_goal applies confirmed changes', async ($, on) => {
   expect(fake.of('update_goal')[0]?.input).toEqual({ goal_id: 'g1', autonomy: { 'email.delete': 'off' } })
 })
 
+test('update_goal passes a confirmed category merge to the server', async ($, on) => {
+  const asked = engine(on, { answer: 'Apply changes' })
+  const fake = fakeQuarterdeck(on, [failed()])
+  await $.session.start(START)
+  await $.tool.call({ tool: 'mcp__quarterdeck-goals__update_goal', goal: 'unsub', merge_categories: { 'email.trash': 'email.delete' } } as never)
+  expect(asked.asked[0]).toContain('• Merge category email.trash into email.delete')
+  expect(fake.of('update_goal')[0]?.input).toEqual({ goal_id: 'g1', merge_categories: { 'email.trash': 'email.delete' } })
+})
+
 test('update_goal shows a new watch\'s whole command before it is set, and says how its first check went', async ($, on) => {
   const asked = engine(on, { answer: 'Apply changes' })
   const fake = fakeQuarterdeck(on, [failed()])

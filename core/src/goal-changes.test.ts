@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import type { Database } from './sqlite.js'
 import {
   openDatabase, createGoal, getGoal, getPlan, listMemory, insertMemory, queueRun, getRun, claimRun, schedulerPass, buildOverview,
-  applyGoalChanges, normalizeModel, reportRunEnd, reportRunProgress, insertEvent, getRunHold, setRunHold, parseLimitReset, isUsageLimit,
+  applyGoalChanges, normalizeModel, reportRunEnd, reportRunProgress, insertEvent, getRunHold, setRunHold, parseLimitReset, isUsageLimit, addItem, getTask,
 } from './index.js'
 
 let db: Database
@@ -174,5 +174,22 @@ describe("a run's progress", () => {
     reportRunEnd(db, run.run_id, { answer: 'x', reason: 'error' })
     expect(reportRunProgress(db, run.run_id, { event: 'waiting', tool: 'Bash: ls' })).toEqual({ updated: false })
     expect(getRun(db, run.run_id)!.waiting_tool).toBeNull()
+  })
+})
+
+describe('merge_categories', () => {
+  it('renames past items, autonomy and tool rules to the merged category', () => {
+    const now = new Date().toISOString()
+    createGoal(db, { id: 'm1', name: 'M', description: null, status: 'active', working_dir: '/tmp', created_at: now, updated_at: now }, {
+      objective: 'x', autonomy: { 'git.push': 'auto' },
+    })
+    applyGoalChanges(db, 'm1', { tool_map: { 'mcp__x__push': 'git.push' } })
+    addItem(db, 'm1', null, { goal: 'a', action: { category: 'git.push', summary: 'push' } })
+    addItem(db, 'm1', null, { goal: 'b', action: { category: 'github.pr', summary: 'pr' } })
+    expect(applyGoalChanges(db, 'm1', { merge_categories: { 'git.push': 'github.pr' } })).toEqual(['merged git.push into github.pr (1 item)'])
+    expect((getTask(db, 'm1', '1')!.state.action as { category: string }).category).toBe('github.pr')
+    expect(getGoal(db, 'm1')!.autonomy).toEqual({ 'github.pr': 'auto' })
+    expect(getGoal(db, 'm1')!.tool_map).toEqual({ 'mcp__x__push': 'github.pr' })
+    expect(() => applyGoalChanges(db, 'm1', { merge_categories: { a: 'a' } })).toThrow(/two different/)
   })
 })

@@ -252,6 +252,14 @@ test("a goal's model shows in its detail and in a change the person confirms", a
   expect(describeGoalChanges(g, { model: 'sonnet' })).toEqual([])
 })
 
+test('a category merge shows where it goes and the mode it ends with', async () => {
+  const g = card({ id: 'g1', name: 'Fixer', autonomy: { 'git.push': 'auto' } })
+  expect(describeGoalChanges(g, { merge_categories: { 'git.push': 'github.pr' } }))
+    .toEqual(['Merge category git.push into github.pr: its past items and tool rules move to github.pr, which is then auto'])
+  expect(describeGoalChanges(g, { merge_categories: { 'github.issue': 'git.push' } })[0]).toMatch(/which is then auto$/)
+  expect(describeGoalChanges(g, { merge_categories: { a: 'b' } })[0]).toMatch(/which is then propose$/)
+})
+
 test('runCost names the model a run used', async () => {
   expect(runCost({ tokens: 48_000, startedAt: '2026-11-07T07:00:00Z', endedAt: '2026-11-07T07:02:00Z', model: 'claude-opus-5-5' })).toBe('Opus 5.5 · 48k tokens · 2m')
 })
