@@ -384,7 +384,7 @@ test('the issue fixer watches open issues and its own pull requests\' CI and con
   expect(made.text).toContain('a run starts when its watch sees new issues, failed CI on its pull requests or merge conflicts on its pull requests')
   const input = fake.of('create_goal')[0]?.input as { schedule: unknown; instructions: string; watches: Record<string, { command: string }> }
   expect(input.schedule).toBeNull()
-  expect(input.watches['new issues']?.command).toBe('gh issue list --state open --limit 100 --json number --jq ".[].number"')
+  expect(input.watches['new issues']?.command).toBe('gh issue list --state open --limit 100 --search "-label:\\"help wanted\\"" --json number --jq ".[].number"')
   expect(input.watches['failed CI on its pull requests']?.command).toBe('gh run list --event pull_request --status failure --limit 30 --json databaseId,headBranch --jq ".[] | select(.headBranch | startswith(\\"issue-fix/\\")) | .databaseId"')
   expect(input.watches['merge conflicts on its pull requests']?.command).toBe('gh pr list --state open --limit 50 --json number,headRefName,headRefOid,mergeable --jq ".[] | select((.headRefName | startswith(\\"issue-fix/\\")) and .mergeable == \\"CONFLICTING\\") | (.number | tostring) + \\"@\\" + .headRefOid"')
   expect(input.instructions).toContain('baseRefName')

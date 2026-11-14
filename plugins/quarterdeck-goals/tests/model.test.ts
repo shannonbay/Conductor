@@ -307,3 +307,10 @@ test('only the two GitHub fixer templates say what their status means, with a gi
     expect(text).toContain('"clean"')
   }
 })
+
+test('the issue fixer skips help-wanted issues and signs its pull requests', () => {
+  const issueFixer = TEMPLATES.find((t) => t.name === 'Issue Fixer')!
+  expect(issueFixer.watches!('')['new issues'].command).toContain('--search "-label:\\"help wanted\\""')
+  expect(ISSUE_FIX).toContain('Skip issues labelled help wanted')
+  expect(ISSUE_FIX).toContain("Opened by a [Quarterdeck](https://github.com/shannonbay/Quarterdeck) goal (<this goal's name>).")
+})
