@@ -747,7 +747,10 @@ test('a clipped question or proposal opens to its full text, fetched once with g
   await ui.press({ key: 'read-g1/7' }) // reopens without fetching again
   expect(fake.of('get_item')).toHaveLength(1)
 
-  await ui.press({ key: 'read-g1/11' })
+  await ui.press({ key: 'read-notes-g1/7' }) // the notes line closes it too
+  expect((await ui.find({ key: 'read-g1/7' }))?.props.label).toBe('▸ ? Which approach…')
+
+  await ui.press({ key: 'read-summary-g1/11' }) // pressing the summary line opens a proposal
   expect((await ui.find({ key: 'read-g1/11' }))?.props.label).toBe('▾ ● Reply to Alice about Thursday at 2pm')
   expect((await ui.find({ type: 'Text', text: /She asked twice/ }))?.text).toContain('She asked twice')
   await ui.unmount()

@@ -413,17 +413,26 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
   const readKey = `item:${key}`
   const reading = item.clipped === true && view.shown.includes(readKey)
   const shownItem = reading ? { ...item, ...view.full[key] } : item
+  const toggle = async () => {
+    await toggleExpanded($, readKey)
+    if (!reading && !view.full[key]) await act($, `read:${key}`, 'read it in full', async () => setFullItem($, key, await getItem($, g.id, item.id)))
+    else await refresh($)
+  }
   const titleLine = (mark: string) => {
     if (!item.clipped) return <Text color="yellow">{mark} {item.title}</Text>
     const label = `${reading ? '▾' : '▸'} ${mark} ${shownItem.title}`
-    const toggle = async () => {
-      await toggleExpanded($, readKey)
-      if (!reading && !view.full[key]) await act($, `read:${key}`, 'read it in full', async () => setFullItem($, key, await getItem($, g.id, item.id)))
-      else await refresh($)
-    }
     return (
       <Button key={`read-${key}`} plain label={label} onPress={() => void toggle()}>
         <Text color="yellow">{label}</Text>
+      </Button>
+    )
+  }
+  // The dim lines under the title (action summary, notes) open and close it too
+  const dimLine = (part: string, text: string) => {
+    if (!item.clipped) return <Text dimColor>{text}</Text>
+    return (
+      <Button key={`read-${part}-${key}`} plain label={text} onPress={() => void toggle()}>
+        <Text dimColor>{text}</Text>
       </Button>
     )
   }
@@ -445,7 +454,7 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
     return (
       <Box key={key} flexDirection="column" marginTop={1}>
         {titleLine('?')}
-        {shownItem.notes && <Text dimColor>  {shownItem.notes}</Text>}
+        {shownItem.notes && dimLine('notes', `  ${shownItem.notes}`)}
         {view.open === key && Input ? (
           <Box flexDirection="column">
             <Input key={`answer-${key}`} label="Your answer (saved to the goal's memory)" submitLabel="Send" autoFocus onSubmit={reply} />
@@ -465,14 +474,8 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
   return (
     <Box key={key} flexDirection="column" marginTop={1}>
       {titleLine('●')}
-      {(shownItem.category || shownItem.summary) && (
-        <Text dimColor>
-          {'  '}
-          {shownItem.category ? `${shownItem.category}: ` : ''}
-          {shownItem.summary ?? ''}
-        </Text>
-      )}
-      {shownItem.notes && <Text dimColor>  {shownItem.notes}</Text>}
+      {(shownItem.category || shownItem.summary) && dimLine('summary', `  ${shownItem.category ? `${shownItem.category}: ` : ''}${shownItem.summary ?? ''}`)}
+      {shownItem.notes && dimLine('notes', `  ${shownItem.notes}`)}
       {view.open === key && Input ? (
         <Box flexDirection="column">
           <Input key={`feedback-${key}`} label="What should change? (saved to the goal's memory)" submitLabel="Send back" autoFocus onSubmit={sendBack} />
