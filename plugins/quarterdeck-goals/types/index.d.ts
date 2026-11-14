@@ -180,6 +180,8 @@ declare module 'claude-code' {
       todos: Todos | null
       /** Whether phone alerts can get through, learned from the last push and from messages sent from the phone. */
       phone: PhoneState
+      /** The spinner's frame on a working goal's title; moves on only while a run works. */
+      spinnerFrame: number
     }
   }
 }

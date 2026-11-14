@@ -175,6 +175,30 @@ test('a memory a marked run wrote shows a warning and Trust clears it', async ($
   await ui.unmount()
 })
 
+test("a working run's goal title spins, a run waiting for permission doesn't, and the spinner stops with the run", async ($, on) => {
+  const { clock } = engine(on)
+  const goals = [
+    goal({ id: 'g1', name: 'Inbox', open_run: { id: 'r1', status: 'running' }, activity: { state: 'running', text: 'Reading mail', at: null } }),
+    goal({ id: 'g2', name: 'Invoices', open_run: { id: 'r2', status: 'running' }, activity: { state: 'running', text: 'Waiting', at: null, waiting: { tool: 'Bash', since: '2026-11-07T07:59:00Z' } } as never }),
+  ]
+  fakeQuarterdeck(on, goals)
+  await $.session.start(START)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ type: 'Text', text: /Inbox$/ }))?.text).toBe('⠋ Inbox')
+  expect((await ui.find({ key: 'toggle-g1' }))?.props.label).toBe('▸ Inbox')
+  await clock.advance(120)
+  await clock.settle()
+  expect((await ui.find({ type: 'Text', text: /Inbox$/ }))?.text).toBe('⠙ Inbox')
+  expect(await ui.find({ type: 'Text', text: /^. Invoices$/ })).toBeUndefined()
+
+  await ui.press({ key: 'cancel-run-g1' })
+  await ui.press({ key: 'cancel-run-yes-g1' })
+  expect(await ui.find({ type: 'Text', text: /^. Inbox$/ })).toBeUndefined()
+  expect((await ui.find({ key: 'toggle-g1' }))?.props.label).toBe('▸ Inbox')
+  await ui.unmount()
+})
+
 test('pause and resume, and cancel a run only after confirming', async ($, on) => {
   engine(on)
   const goals = [goal({ id: 'g1', name: 'Inbox', open_run: { id: 'r1', status: 'running' } })]

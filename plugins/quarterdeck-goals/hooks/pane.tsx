@@ -14,10 +14,10 @@ import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
 import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, trustMemory, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
-import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, readModelAnswer, runCost, runsText, runTokens, spark, updatePrompt } from './model'
+import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, isWorking, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, readModelAnswer, runCost, runsText, runTokens, spark, SPINNER_FRAMES, SPINNER_MS, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
-import { getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getRuns, getSnapshot, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
+import { advanceSpinner, getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getRejecting, getRuns, getSnapshot, getSpinnerFrame, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, editFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING } from './runner'
 import { act, refresh } from './sync'
@@ -45,6 +45,8 @@ type View = {
   mine: string[]
   /** The standing session holds the scheduler lease (so it started the other runs). */
   standing: boolean
+  /** The spinner's frame, for a goal whose run is working. */
+  frame: number
 }
 
 /** The colour of every action you can press that is drawn as plain words: the theme's own, so it follows the person's theme. */
@@ -62,6 +64,23 @@ function action($: Engine, e: E, p: { key: string; label: string; hotkey?: strin
       <Text color={ACTION_COLOR}>{p.label}</Text>
     </Button>
   )
+}
+
+/** The spinner's next frame is already scheduled. */
+let spinning = false
+
+/**
+ * Each draw that shows a working goal schedules the spinner's next frame,
+ * which draws again. A closed pane, or one with no working run, draws no more
+ * and so stops it: nobody watching (the standing session) costs nothing.
+ */
+function spinOn($: Engine): void {
+  if (spinning) return
+  spinning = true
+  $.clock.after(SPINNER_MS, () => {
+    spinning = false
+    void advanceSpinner($)
+  })
 }
 
 function canRun(g: GoalCard): boolean {
@@ -129,7 +148,9 @@ export async function renderPane($: Engine, e: E) {
     runnable: current.find((g, i) => canRun(g) && !oneLine[i])?.id ?? null,
     mine: Object.values(await getRuns($)).map((r) => r.goalId),
     standing: s.standing === true,
+    frame: await getSpinnerFrame($),
   }
+  if (current.some(isWorking)) spinOn($)
 
   return (
     <Box flexDirection="column">
@@ -225,7 +246,14 @@ function goalCard($: Engine, e: E, view: View, g: GoalCard, index: number) {
   return (
     <Box key={g.id} flexDirection="column" marginBottom={1}>
       <Box>
-        <Button key={`toggle-${g.id}`} plain label={`${isOpen ? '▾' : '▸'} ${g.name}`} hotkey={index < 9 ? String(index + 1) : undefined} onPress={toggle} />
+        {isWorking(g)
+          ? (
+            // While its run works, a spinner stands in for ▸ / ▾ and the name takes the run's colour
+            <Button key={`toggle-${g.id}`} plain label={`${isOpen ? '▾' : '▸'} ${g.name}`} hotkey={index < 9 ? String(index + 1) : undefined} onPress={toggle}>
+              <Text color="cyan">{SPINNER_FRAMES[view.frame % SPINNER_FRAMES.length]} {g.name}</Text>
+            </Button>
+          )
+          : <Button key={`toggle-${g.id}`} plain label={`${isOpen ? '▾' : '▸'} ${g.name}`} hotkey={index < 9 ? String(index + 1) : undefined} onPress={toggle} />}
         <Text dimColor> {g.status}</Text>
         {g.openRun && <Text color="cyan"> · run {g.openRun.status}</Text>}
       </Box>

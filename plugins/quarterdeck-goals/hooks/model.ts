@@ -117,6 +117,20 @@ export function isQuiet(g: GoalCard): boolean {
     && g.suggestions.length === 0
 }
 
+/** The frames of the spinner a goal's title shows while its run is working (Claude Code's own kind). */
+export const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
+
+/** How often the spinner moves on, while some goal's run is working. */
+export const SPINNER_MS = 120
+
+/**
+ * The goal's run is working: running, and not stopped at a permission
+ * prompt (that one shows a still ⏸, as nothing moves until the person answers).
+ */
+export function isWorking(g: Pick<GoalCard, 'openRun' | 'activity'>): boolean {
+  return g.openRun?.status === 'running' && !g.activity.waiting
+}
+
 /**
  * Finds a goal by name: exact, then prefix, then substring, ignoring case.
  * More than one match at the first level that matches is ambiguous.
@@ -172,7 +186,7 @@ export function statusText(s: Snapshot): string | undefined {
   if (s.goals.length === 0) return undefined
   const waiting = s.goals.reduce((n, g) => n + g.needsYou.length, 0)
   const asking = s.goals.filter((g) => g.openRun?.status === 'running' && g.activity.waiting).map((g) => g.name)
-  const running = s.goals.filter((g) => g.openRun?.status === 'running' && !g.activity.waiting).map((g) => g.name)
+  const running = s.goals.filter(isWorking).map((g) => g.name)
   const parts = [
     waiting > 0 ? `${waiting} need${waiting === 1 ? 's' : ''} you` : null,
     asking.length > 0 ? `${asking.join(', ')} waiting for your permission` : null,
