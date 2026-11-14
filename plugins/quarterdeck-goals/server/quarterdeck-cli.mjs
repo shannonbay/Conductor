@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Quarterdeck MCP server 0.23.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.24.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 // Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
 const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
@@ -88,6 +88,26 @@ var init_sqlite = __esm({
         return first === void 0 ? void 0 : Object.values(first)[0];
       }
     };
+  }
+});
+
+// ../core/src/paths.ts
+import { existsSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+function envVar(name, env = process.env) {
+  return env[`QUARTERDECK_${name}`] ?? env[`CONDUCTOR_${name}`];
+}
+function defaultDbPath(env = process.env, home = homedir()) {
+  const set = envVar("DB", env);
+  if (set) return set;
+  const path = join(home, ".quarterdeck", "tasks.db");
+  const old = join(home, ".conductor", "tasks.db");
+  return !existsSync(path) && existsSync(old) ? old : path;
+}
+var init_paths = __esm({
+  "../core/src/paths.ts"() {
+    "use strict";
   }
 });
 
@@ -1040,12 +1060,12 @@ var init_goals = __esm({
 
 // ../core/src/gates.ts
 import { spawn, spawnSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync as existsSync2 } from "fs";
 function runVerifyCommand(command2, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S, opts = {}) {
   const tailChars = opts.tailChars ?? OUTPUT_TAIL_CHARS;
   const started = Date.now();
   const done = (r) => ({ ...r, duration_ms: Date.now() - started });
-  if (!existsSync(cwd)) {
+  if (!existsSync2(cwd)) {
     return Promise.resolve(done({ passed: false, exit_code: null, output: `Working directory not found: ${cwd}`, timed_out: false }));
   }
   return new Promise((resolve2) => {
@@ -1417,6 +1437,8 @@ var init_health = __esm({
 });
 
 // ../core/src/guard.ts
+import { homedir as homedir2 } from "os";
+import { join as join2, posix } from "path";
 function canonicalToolName(name) {
   return name.startsWith(PLUGIN_QUARTERDECK_TOOL_PREFIX) ? QUARTERDECK_TOOL_PREFIX + name.slice(PLUGIN_QUARTERDECK_TOOL_PREFIX.length) : name;
 }
@@ -1434,19 +1456,63 @@ function matchToolCategory(rawMap, rawName) {
 function readsUntrusted(toolMap, toolName) {
   return matchToolCategory(toolMap, toolName) === UNTRUSTED_CATEGORY || matchToolCategory(BUILTIN_UNTRUSTED_MAP, toolName) !== null;
 }
+function quarterdeckDataPaths(env = process.env, home = homedir2()) {
+  const db = defaultDbPath(env, home);
+  const dirs = [join2(home, ".quarterdeck"), join2(home, ".conductor")];
+  const inDirs = dirs.some((d) => isInside(normPath(db), normPath(d)));
+  return { dirs, db: db === ":memory:" || inDirs ? null : db };
+}
+function resolvePath(base, path) {
+  const p = path.replace(/\\/g, "/");
+  return posix.normalize(/^([a-z]:)?\//i.test(p) ? p : posix.join(base.replace(/\\/g, "/"), p));
+}
+function touchesQuarterdeckData(toolName, input, workingDir, paths = quarterdeckDataPaths(), home = homedir2()) {
+  if (!input) return null;
+  const str2 = (k) => typeof input[k] === "string" ? input[k] : "";
+  if (SHELL_TOOLS.has(toolName)) {
+    const command2 = str2("command");
+    if (!command2) return null;
+    const found = DATA_DIR_SEGMENT.exec(command2) ?? DB_FILE_NAME.exec(command2) ?? DB_VARIABLE.exec(command2);
+    if (found) return found[0].replace(/^[\\/\s"'`=]/, "");
+    if (paths.db && normPath(command2).includes(normPath(paths.db))) return paths.db;
+    return null;
+  }
+  if (FILE_TOOLS.has(toolName)) {
+    const fields = ["file_path", "notebook_path", "path", ...toolName === "Glob" ? ["pattern"] : []];
+    const base = str2("path") || workingDir;
+    for (const field of fields) {
+      const raw = str2(field);
+      if (!raw) continue;
+      const expanded = raw.replace(/^~(?=$|[\\/])/, home);
+      const full = normPath(resolvePath(field === "pattern" ? base : workingDir, expanded));
+      if (paths.dirs.some((d) => isInside(full, normPath(d)))) return raw;
+      if (/(^|\/)tasks\.db(-wal|-shm)?$/.test(full)) return raw;
+      if (paths.db && [paths.db, `${paths.db}-wal`, `${paths.db}-shm`].some((f) => full === normPath(f))) return raw;
+      if (DATA_DIR_SEGMENT.test(raw)) return raw;
+    }
+  }
+  return null;
+}
 function record(db, run, toolName, category, decision, reason) {
   db.prepare(`
     INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(newId("tc"), run.plan_id, run.id, toolName, category, decision, reason, (/* @__PURE__ */ new Date()).toISOString());
 }
-function guardToolCallForRun(db, runId, toolName) {
+function guardToolCallForRun(db, runId, toolName, input, paths = quarterdeckDataPaths()) {
   const run = db.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId);
-  return run ? guardRun(db, run, toolName) : { decision: "allow" };
+  return run ? guardRun(db, run, toolName, input, paths) : { decision: "allow" };
 }
-function guardRun(db, run, toolName) {
+function guardRun(db, run, toolName, input, paths) {
   const goal = getGoal(db, run.plan_id);
   if (!goal) return { decision: "allow" };
+  const workingDir = db.prepare("SELECT working_dir FROM plans WHERE id = ?").get(run.plan_id)?.working_dir ?? process.cwd();
+  const touched = touchesQuarterdeckData(toolName, input, workingDir, paths);
+  if (touched !== null) {
+    const reason2 = `Quarterdeck goal guard: a goal run can't read or change Quarterdeck's own data (${touched}). Use the goal tools (add_item, remember, end_run) instead, and don't try another way round.`;
+    record(db, run, toolName, QUARTERDECK_DATA_CATEGORY, "deny", reason2);
+    return { decision: "deny", category: QUARTERDECK_DATA_CATEGORY, run_id: run.id, reason: reason2 };
+  }
   if (readsUntrusted(goal.tool_map, toolName)) markRunUntrusted(db, run.id, toolName);
   const category = matchToolCategory(goal.tool_map, toolName);
   if (!category) return { decision: "allow", run_id: run.id };
@@ -1503,10 +1569,11 @@ function standingAllowRules(db) {
 function listToolCalls(db, planId, limit = 50) {
   return db.prepare("SELECT * FROM goal_tool_calls WHERE plan_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?").all(planId, limit);
 }
-var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX, UNTRUSTED_CATEGORY, BUILTIN_UNTRUSTED, BUILTIN_UNTRUSTED_MAP;
+var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX, UNTRUSTED_CATEGORY, BUILTIN_UNTRUSTED, BUILTIN_UNTRUSTED_MAP, QUARTERDECK_DATA_CATEGORY, normPath, isInside, SHELL_TOOLS, FILE_TOOLS, DATA_DIR_SEGMENT, DB_FILE_NAME, DB_VARIABLE;
 var init_guard = __esm({
   "../core/src/guard.ts"() {
     "use strict";
+    init_paths();
     init_goal_engine();
     init_goals();
     QUARTERDECK_TOOL_PREFIX = "mcp__quarterdeck__";
@@ -1520,6 +1587,14 @@ var init_guard = __esm({
       ...["get_*", "search_*", "list_drafts", "download_*"].flatMap((t) => [`mcp__*Gmail*__${t}`, `mcp__*gmail*__${t}`])
     ];
     BUILTIN_UNTRUSTED_MAP = Object.fromEntries(BUILTIN_UNTRUSTED.map((p) => [p, UNTRUSTED_CATEGORY]));
+    QUARTERDECK_DATA_CATEGORY = "quarterdeck-data";
+    normPath = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    isInside = (path, dir) => path === dir || path.startsWith(dir + "/");
+    SHELL_TOOLS = /* @__PURE__ */ new Set(["Bash", "PowerShell"]);
+    FILE_TOOLS = /* @__PURE__ */ new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep"]);
+    DATA_DIR_SEGMENT = /(^|[\\/\s"'`=])\.(quarterdeck|conductor)(?![\w-])/i;
+    DB_FILE_NAME = /(^|[\\/\s"'`=])tasks\.db(-wal|-shm)?(?![\w.-])/i;
+    DB_VARIABLE = /\b(QUARTERDECK|CONDUCTOR)_DB\b/i;
   }
 });
 
@@ -2672,6 +2747,7 @@ __export(src_exports, {
   OUTPUT_TAIL_CHARS: () => OUTPUT_TAIL_CHARS,
   PLUGIN_QUARTERDECK_TOOL_PREFIX: () => PLUGIN_QUARTERDECK_TOOL_PREFIX,
   PROMOTE_AFTER: () => PROMOTE_AFTER,
+  QUARTERDECK_DATA_CATEGORY: () => QUARTERDECK_DATA_CATEGORY,
   QUARTERDECK_TOOL_PREFIX: () => QUARTERDECK_TOOL_PREFIX,
   REVISION_TRIGGERS: () => REVISION_TRIGGERS,
   SCHEMA_VERSION: () => SCHEMA_VERSION,
@@ -2795,6 +2871,7 @@ __export(src_exports, {
   parseCron: () => parseCron,
   parseHealthValue: () => parseHealthValue,
   parseLimitReset: () => parseLimitReset,
+  quarterdeckDataPaths: () => quarterdeckDataPaths,
   queueForWatchEvents: () => queueForWatchEvents,
   queueRun: () => queueRun,
   readsUntrusted: () => readsUntrusted,
@@ -2827,6 +2904,7 @@ __export(src_exports, {
   toLines: () => toLines,
   todoLists: () => todoLists,
   touchPlan: () => touchPlan,
+  touchesQuarterdeckData: () => touchesQuarterdeckData,
   updateGoal: () => updateGoal,
   updateMemory: () => updateMemory,
   updatePlan: () => updatePlan,
@@ -2838,19 +2916,8 @@ __export(src_exports, {
   watchFailing: () => watchFailing,
   withinActiveHours: () => withinActiveHours
 });
-import { existsSync as existsSync2, mkdirSync } from "fs";
-import { homedir } from "os";
-import { dirname, join } from "path";
-function envVar(name, env = process.env) {
-  return env[`QUARTERDECK_${name}`] ?? env[`CONDUCTOR_${name}`];
-}
-function defaultDbPath(env = process.env, home = homedir()) {
-  const set = envVar("DB", env);
-  if (set) return set;
-  const path = join(home, ".quarterdeck", "tasks.db");
-  const old = join(home, ".conductor", "tasks.db");
-  return !existsSync2(path) && existsSync2(old) ? old : path;
-}
+import { mkdirSync } from "fs";
+import { dirname } from "path";
 function openDatabase(path = defaultDbPath()) {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
@@ -2863,6 +2930,7 @@ var init_src = __esm({
   "../core/src/index.ts"() {
     "use strict";
     init_sqlite();
+    init_paths();
     init_migrate();
     init_sqlite();
     init_types();
@@ -2878,22 +2946,23 @@ var init_src = __esm({
     init_goal_overview();
     init_todos();
     init_goal_changes();
+    init_paths();
     init_migrate();
   }
 });
 
 // src/doctor.ts
 import { existsSync as existsSync4, readFileSync as readFileSync2, readdirSync, statSync as statSync2 } from "fs";
-import { homedir as homedir3 } from "os";
-import { dirname as dirname3, join as join3, resolve } from "path";
+import { homedir as homedir4 } from "os";
+import { dirname as dirname3, join as join4, resolve } from "path";
 import { fileURLToPath as fileURLToPath2 } from "url";
 
 // src/runner-session.ts
 import { execFileSync } from "child_process";
 import { randomUUID as randomUUID4 } from "crypto";
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync, rmSync, statSync, writeFileSync } from "fs";
-import { homedir as homedir2, userInfo } from "os";
-import { dirname as dirname2, join as join2 } from "path";
+import { homedir as homedir3, userInfo } from "os";
+import { dirname as dirname2, join as join3 } from "path";
 import { fileURLToPath } from "url";
 var SESSION_NAME = "Quarterdeck goals";
 var TASK_NAME = "Quarterdeck goals runner";
@@ -3108,19 +3177,19 @@ function install(deps, opts = {}) {
   checkMode(opts.permissionMode);
   const given = opts.permissionMode ?? deps.readState()?.permissionMode;
   const permissionMode = given ?? DEFAULT_PERMISSION_MODE;
-  const launcher = join2(deps.dir, "launch.mjs");
+  const launcher = join3(deps.dir, "launch.mjs");
   deps.writeFile(launcher, LAUNCHER);
-  deps.writeFile(join2(deps.dir, "cli-path"), deps.cliPath);
+  deps.writeFile(join3(deps.dir, "cli-path"), deps.cliPath);
   const lines = [];
   if (deps.platform === "win32") {
-    const file = join2(deps.dir, "task.xml");
+    const file = join3(deps.dir, "task.xml");
     deps.writeFile(file, "\uFEFF" + taskXml({ user: deps.user, node: deps.node, launcher }), "utf16le");
     deps.schtasks(["/create", "/tn", TASK_NAME, "/xml", file, "/f"]);
     lines.push(`Created the scheduled task "${TASK_NAME}": it checks at logon and every ${ENSURE_MINUTES} minutes that the standing session is running.`);
   } else {
     const units = systemdUnits({ node: deps.node, launcher, dir: deps.dir, path: deps.path });
-    deps.writeFile(join2(deps.systemdDir, `${UNIT_NAME}.service`), units.service);
-    deps.writeFile(join2(deps.systemdDir, `${UNIT_NAME}.timer`), units.timer);
+    deps.writeFile(join3(deps.systemdDir, `${UNIT_NAME}.service`), units.service);
+    deps.writeFile(join3(deps.systemdDir, `${UNIT_NAME}.timer`), units.timer);
     deps.systemctl(["daemon-reload"]);
     deps.systemctl(["enable", "--now", `${UNIT_NAME}.timer`]);
     lines.push(`Created the systemd user timer ${UNIT_NAME}.timer: it checks at login and every ${ENSURE_MINUTES} minutes that the standing session is running.`);
@@ -3151,7 +3220,7 @@ function startByTask(deps, opts = {}) {
     deps.sleep(500);
     made = liveState(deps);
   }
-  if (!made) throw new Error(`${keepAliveName(deps.platform).replace(/^t/, "T")} ran but no session appeared. See ${join2(deps.dir, "ensure.log")}.`);
+  if (!made) throw new Error(`${keepAliveName(deps.platform).replace(/^t/, "T")} ran but no session appeared. See ${join3(deps.dir, "ensure.log")}.`);
   return { started: true, sessionId: made.sessionId, text: `Started the standing session (${made.sessionId}). It appears as "${SESSION_NAME}" in the Claude app and at claude.ai/code.${questionNote(deps, made.pid)}` };
 }
 function questionNote(deps, pid) {
@@ -3178,16 +3247,16 @@ function uninstall(deps) {
       deps.systemctl(["disable", "--now", `${UNIT_NAME}.timer`]);
     } catch {
     }
-    deps.removeFile(join2(deps.systemdDir, `${UNIT_NAME}.timer`));
-    deps.removeFile(join2(deps.systemdDir, `${UNIT_NAME}.service`));
+    deps.removeFile(join3(deps.systemdDir, `${UNIT_NAME}.timer`));
+    deps.removeFile(join3(deps.systemdDir, `${UNIT_NAME}.service`));
     try {
       deps.systemctl(["daemon-reload"]);
     } catch {
     }
     lines.push(had ? `Deleted the systemd timer ${UNIT_NAME}.timer.` : `There was no systemd timer ${UNIT_NAME}.timer.`);
   }
-  deps.removeFile(join2(deps.dir, "launch.mjs"));
-  deps.removeFile(join2(deps.dir, "task.xml"));
+  deps.removeFile(join3(deps.dir, "launch.mjs"));
+  deps.removeFile(join3(deps.dir, "task.xml"));
   lines.push(stop(deps).text);
   return lines.join("\n");
 }
@@ -3201,25 +3270,25 @@ function taskInstalled(deps) {
     return false;
   }
 }
-function runnerDir(home = homedir2()) {
-  return join2(home, ".quarterdeck", "runner");
+function runnerDir(home = homedir3()) {
+  return join3(home, ".quarterdeck", "runner");
 }
 function currentBuild(scriptDir = dirname2(fileURLToPath(import.meta.url))) {
-  const plugin = [join2(scriptDir, ".."), join2(scriptDir, "..", "..", "plugins", "quarterdeck-goals")].find((d) => existsSync3(join2(d, ".claude-plugin", "plugin.json")));
+  const plugin = [join3(scriptDir, ".."), join3(scriptDir, "..", "..", "plugins", "quarterdeck-goals")].find((d) => existsSync3(join3(d, ".claude-plugin", "plugin.json")));
   if (!plugin) return "unknown";
   let version = "unknown";
   try {
-    version = String(JSON.parse(readFileSync(join2(plugin, ".claude-plugin", "plugin.json"), "utf8")).version);
+    version = String(JSON.parse(readFileSync(join3(plugin, ".claude-plugin", "plugin.json"), "utf8")).version);
   } catch {
   }
-  const bundle = join2(plugin, "server", "quarterdeck-mcp.mjs");
+  const bundle = join3(plugin, "server", "quarterdeck-mcp.mjs");
   return existsSync3(bundle) ? `${version}+${Math.round(statSync(bundle).mtimeMs)}` : version;
 }
 function readStateText(file) {
   return readFileSync(file, "utf8").replace(/^﻿/, "");
 }
-function transcriptPath(dir, sessionId, configDir = process.env.CLAUDE_CONFIG_DIR || join2(homedir2(), ".claude")) {
-  return join2(configDir, "projects", dir.replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`);
+function transcriptPath(dir, sessionId, configDir = process.env.CLAUDE_CONFIG_DIR || join3(homedir3(), ".claude")) {
+  return join3(configDir, "projects", dir.replace(/[^a-zA-Z0-9]/g, "-"), `${sessionId}.jsonl`);
 }
 function sessionEnv() {
   const env = { ...process.env };
@@ -3235,7 +3304,7 @@ function tmux(args, env) {
   }
 }
 function onPath(name, path) {
-  for (const d of path.split(":")) if (d && existsSync3(join2(d, name))) return join2(d, name);
+  for (const d of path.split(":")) if (d && existsSync3(join3(d, name))) return join3(d, name);
   return null;
 }
 function spawnInTmux(dir, args) {
@@ -3283,7 +3352,7 @@ async function realDeps() {
   const core = await Promise.resolve().then(() => (init_src(), src_exports));
   const dir = runnerDir();
   mkdirSync2(dir, { recursive: true });
-  const stateFile = join2(dir, "state.json");
+  const stateFile = join3(dir, "state.json");
   const withDb = (fn) => {
     const db = core.openDatabase(core.defaultDbPath());
     try {
@@ -3381,7 +3450,7 @@ async function realDeps() {
     removeFile: (path) => rmSync(path, { force: true }),
     schtasks: (args) => execFileSync("schtasks.exe", args, { encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"] }),
     systemctl: (args) => execFileSync("systemctl", ["--user", ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }),
-    systemdDir: join2(process.env.XDG_CONFIG_HOME || join2(homedir2(), ".config"), "systemd", "user"),
+    systemdDir: join3(process.env.XDG_CONFIG_HOME || join3(homedir3(), ".config"), "systemd", "user"),
     path: process.env.PATH ?? "",
     wsl: process.platform === "linux" && (() => {
       try {
@@ -3466,7 +3535,7 @@ function defaultOptions() {
   return {
     repoRoot: findRepoRoot(dirname3(fileURLToPath2(import.meta.url))),
     cwd: process.cwd(),
-    home: homedir3(),
+    home: homedir4(),
     env: process.env,
     nodeVersion: process.versions.node,
     fetchTimeoutMs: 2e3
@@ -3474,7 +3543,7 @@ function defaultOptions() {
 }
 function findRepoRoot(from) {
   for (let dir = from; ; dir = dirname3(dir)) {
-    if (existsSync4(join3(dir, "core", "src")) && existsSync4(join3(dir, "mcp", "src"))) return dir;
+    if (existsSync4(join4(dir, "core", "src")) && existsSync4(join4(dir, "mcp", "src"))) return dir;
     if (dirname3(dir) === dir) return resolve(from, "..", "..");
   }
 }
@@ -3531,8 +3600,8 @@ async function checkDatabase(o) {
 }
 function checkBuild(o, pkg) {
   const name = `${pkg}/ build`;
-  const srcDir = join3(o.repoRoot, pkg, "src");
-  const entry = join3(o.repoRoot, pkg, "dist", "index.js");
+  const srcDir = join4(o.repoRoot, pkg, "src");
+  const entry = join4(o.repoRoot, pkg, "dist", "index.js");
   if (!existsSync4(srcDir)) return ok(name, "not a Quarterdeck checkout (installed plugin) \u2014 skipped");
   if (!existsSync4(entry)) return fail(name, `${pkg}/dist/index.js is missing`, `Run \`npm run build --prefix ${pkg}\`.`);
   const newestSrc = newestMtime(srcDir);
@@ -3541,17 +3610,17 @@ function checkBuild(o, pkg) {
 }
 function checkBundle(o) {
   const name = "Plugin server bundle";
-  const srcDir = join3(o.repoRoot, "mcp", "src");
-  const bundle = join3(o.repoRoot, "plugins", "quarterdeck-goals", "server", "quarterdeck-mcp.mjs");
+  const srcDir = join4(o.repoRoot, "mcp", "src");
+  const bundle = join4(o.repoRoot, "plugins", "quarterdeck-goals", "server", "quarterdeck-mcp.mjs");
   if (!existsSync4(srcDir)) return ok(name, "not a Quarterdeck checkout (installed plugin) \u2014 skipped");
   if (!existsSync4(bundle)) return fail(name, "plugins/quarterdeck-goals/server/quarterdeck-mcp.mjs is missing, so the plugin has no server", "Run `npm run build --prefix mcp`, then /reload-plugins.");
   const built = statSync2(bundle).mtimeMs;
-  return Math.max(newestMtime(srcDir), newestMtime(join3(o.repoRoot, "core", "src"))) > built + 1e3 ? warn(name, "source files changed since the last build", "Run `npm run build --prefix mcp`, then /reload-plugins.") : ok(name, "up to date");
+  return Math.max(newestMtime(srcDir), newestMtime(join4(o.repoRoot, "core", "src"))) > built + 1e3 ? warn(name, "source files changed since the last build", "Run `npm run build --prefix mcp`, then /reload-plugins.") : ok(name, "up to date");
 }
 function checkServerSetup(o) {
   const name = "quarterdeck MCP server";
-  const user = readJson(join3(o.home, ".claude.json")).mcpServers ?? {};
-  const projectFile = [join3(o.cwd, ".mcp.json"), join3(o.repoRoot, ".mcp.json")].find((f) => existsSync4(f));
+  const user = readJson(join4(o.home, ".claude.json")).mcpServers ?? {};
+  const projectFile = [join4(o.cwd, ".mcp.json"), join4(o.repoRoot, ".mcp.json")].find((f) => existsSync4(f));
   const project = projectFile ? readJson(projectFile).mcpServers ?? {} : {};
   const plugin = enabledPlugins(o)[PLUGIN] === true;
   const byHand = [user.quarterdeck && "added for your user", project.quarterdeck && `in ${projectFile}`].filter(Boolean);
@@ -3579,7 +3648,7 @@ function checkServerSetup(o) {
 }
 function checkPermissionRules(o) {
   if (enabledPlugins(o)[PLUGIN] !== true) return null;
-  const files = [join3(o.home, ".claude", "settings.json"), join3(o.cwd, ".claude", "settings.json"), join3(o.cwd, ".claude", "settings.local.json")];
+  const files = [join4(o.home, ".claude", "settings.json"), join4(o.cwd, ".claude", "settings.json"), join4(o.cwd, ".claude", "settings.local.json")];
   const stale = files.filter((f) => {
     const perms = readJson(f).permissions;
     return perms !== void 0 && JSON.stringify(perms).includes("mcp__quarterdeck__");
@@ -3592,7 +3661,7 @@ function checkPermissionRules(o) {
   );
 }
 function checkUpdates(o) {
-  const known = readJson(join3(o.home, ".claude", "plugins", "known_marketplaces.json"));
+  const known = readJson(join4(o.home, ".claude", "plugins", "known_marketplaces.json"));
   const m = known.quarterdeck;
   if (!m) return null;
   const name = "Updates";
@@ -3604,7 +3673,7 @@ function checkUpdates(o) {
   );
 }
 function checkHooks(o) {
-  const file = join3(o.home, ".claude", "settings.json");
+  const file = join4(o.home, ".claude", "settings.json");
   if (!existsSync4(file)) return ok("Claude Code hooks", "none installed (none needed)");
   let text;
   try {
@@ -3640,12 +3709,12 @@ function checkRenameLeftovers(o) {
       return {};
     }
   };
-  const user = read(join3(o.home, ".claude.json"));
-  const repo = read(join3(o.repoRoot, ".mcp.json"));
-  const enabled = read(join3(o.home, ".claude", "settings.json")).enabledPlugins ?? {};
+  const user = read(join4(o.home, ".claude.json"));
+  const repo = read(join4(o.repoRoot, ".mcp.json"));
+  const enabled = read(join4(o.home, ".claude", "settings.json")).enabledPlugins ?? {};
   const found = [];
   const fixes = [];
-  if (!o.env.QUARTERDECK_DB && !o.env.CONDUCTOR_DB && existsSync4(join3(o.home, ".conductor", "tasks.db")) && !existsSync4(join3(o.home, ".quarterdeck", "tasks.db"))) {
+  if (!o.env.QUARTERDECK_DB && !o.env.CONDUCTOR_DB && existsSync4(join4(o.home, ".conductor", "tasks.db")) && !existsSync4(join4(o.home, ".quarterdeck", "tasks.db"))) {
     found.push("your goals are still in ~/.conductor");
     fixes.push("with Claude Code and the web app closed, rename ~/.conductor to ~/.quarterdeck");
   }
@@ -3693,7 +3762,7 @@ async function checkGoals(o, plugins) {
 }
 async function checkRunner(o, deps) {
   const name = "Standing session";
-  if (!existsSync4(join3(o.home, ".quarterdeck", "runner", "launch.mjs"))) return null;
+  if (!existsSync4(join4(o.home, ".quarterdeck", "runner", "launch.mjs"))) return null;
   try {
     const d = deps ?? await realDeps();
     const s = status(d);
@@ -3747,7 +3816,7 @@ function readJson(file) {
   }
 }
 function enabledPlugins(o) {
-  return readJson(join3(o.home, ".claude", "settings.json")).enabledPlugins ?? {};
+  return readJson(join4(o.home, ".claude", "settings.json")).enabledPlugins ?? {};
 }
 function firstLine2(s) {
   return s.split("\n")[0];
@@ -3755,7 +3824,7 @@ function firstLine2(s) {
 function newestMtime(dir) {
   let newest = 0;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const p = join3(dir, entry.name);
+    const p = join4(dir, entry.name);
     if (entry.isDirectory()) newest = Math.max(newest, newestMtime(p));
     else if (/\.ts$/.test(entry.name) && !/\.test\.ts$/.test(entry.name)) newest = Math.max(newest, statSync2(p).mtimeMs);
   }

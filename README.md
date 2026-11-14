@@ -19,6 +19,10 @@ The idea behind it: persistent intent may matter more than persistent memory.
 - **It remembers.** Each goal keeps its own memory, its open items (never handling the same email twice) and its run history, outside any one conversation.
 - **You see what it costs.** Each run shows its tokens and time, e.g. `· 48k tokens · 2m`.
 
+![A friend's "Sell Personal Items" goal in the Goals pane, asking for the make and model, condition, defects, asking price and lowest acceptable price of a reverb unit, a Luxman amp and a dolly before it lists them, with Answer and Done buttons](docs/needs-you-sell-gear.jpg)
+
+*A friend's goal selling his old audio gear stops to ask for condition notes and his floor price instead of guessing.*
+
 Start with `/goal-new`: pick a ready-made goal (unsubscribe from mailing lists, a weekly job scan with your CV, tidy Downloads, inbox triage, keep your GitHub profile current, fix failing CI, work on new GitHub issues) or type your own. Schedules can be plain words: "30d", "weekdays at 9", "the first of every month".
 
 ## Example: from issue to merged PR

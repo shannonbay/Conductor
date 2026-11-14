@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.23.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.24.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 // Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
 const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
@@ -6882,6 +6882,26 @@ var init_sqlite = __esm({
   }
 });
 
+// ../core/src/paths.ts
+import { existsSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+function envVar(name, env = process.env) {
+  return env[`QUARTERDECK_${name}`] ?? env[`CONDUCTOR_${name}`];
+}
+function defaultDbPath(env = process.env, home = homedir()) {
+  const set = envVar("DB", env);
+  if (set) return set;
+  const path = join(home, ".quarterdeck", "tasks.db");
+  const old = join(home, ".conductor", "tasks.db");
+  return !existsSync(path) && existsSync(old) ? old : path;
+}
+var init_paths = __esm({
+  "../core/src/paths.ts"() {
+    "use strict";
+  }
+});
+
 // ../core/src/migrate.ts
 function dbSchemaVersion(db2) {
   return Number(db2.pragma("user_version", { simple: true }) ?? 0);
@@ -7798,12 +7818,12 @@ var init_goals = __esm({
 
 // ../core/src/gates.ts
 import { spawn, spawnSync } from "child_process";
-import { existsSync } from "fs";
+import { existsSync as existsSync2 } from "fs";
 function runVerifyCommand(command, cwd, timeoutS = DEFAULT_VERIFY_TIMEOUT_S, opts = {}) {
   const tailChars = opts.tailChars ?? OUTPUT_TAIL_CHARS;
   const started = Date.now();
   const done = (r) => ({ ...r, duration_ms: Date.now() - started });
-  if (!existsSync(cwd)) {
+  if (!existsSync2(cwd)) {
     return Promise.resolve(done({ passed: false, exit_code: null, output: `Working directory not found: ${cwd}`, timed_out: false }));
   }
   return new Promise((resolve) => {
@@ -8145,6 +8165,8 @@ var init_health = __esm({
 });
 
 // ../core/src/guard.ts
+import { homedir as homedir2 } from "os";
+import { join as join2, posix } from "path";
 function canonicalToolName(name) {
   return name.startsWith(PLUGIN_QUARTERDECK_TOOL_PREFIX) ? QUARTERDECK_TOOL_PREFIX + name.slice(PLUGIN_QUARTERDECK_TOOL_PREFIX.length) : name;
 }
@@ -8162,19 +8184,63 @@ function matchToolCategory(rawMap, rawName) {
 function readsUntrusted(toolMap, toolName) {
   return matchToolCategory(toolMap, toolName) === UNTRUSTED_CATEGORY || matchToolCategory(BUILTIN_UNTRUSTED_MAP, toolName) !== null;
 }
+function quarterdeckDataPaths(env = process.env, home = homedir2()) {
+  const db2 = defaultDbPath(env, home);
+  const dirs = [join2(home, ".quarterdeck"), join2(home, ".conductor")];
+  const inDirs = dirs.some((d) => isInside(normPath(db2), normPath(d)));
+  return { dirs, db: db2 === ":memory:" || inDirs ? null : db2 };
+}
+function resolvePath(base, path) {
+  const p = path.replace(/\\/g, "/");
+  return posix.normalize(/^([a-z]:)?\//i.test(p) ? p : posix.join(base.replace(/\\/g, "/"), p));
+}
+function touchesQuarterdeckData(toolName, input, workingDir, paths = quarterdeckDataPaths(), home = homedir2()) {
+  if (!input) return null;
+  const str2 = (k) => typeof input[k] === "string" ? input[k] : "";
+  if (SHELL_TOOLS.has(toolName)) {
+    const command = str2("command");
+    if (!command) return null;
+    const found = DATA_DIR_SEGMENT.exec(command) ?? DB_FILE_NAME.exec(command) ?? DB_VARIABLE.exec(command);
+    if (found) return found[0].replace(/^[\\/\s"'`=]/, "");
+    if (paths.db && normPath(command).includes(normPath(paths.db))) return paths.db;
+    return null;
+  }
+  if (FILE_TOOLS.has(toolName)) {
+    const fields = ["file_path", "notebook_path", "path", ...toolName === "Glob" ? ["pattern"] : []];
+    const base = str2("path") || workingDir;
+    for (const field of fields) {
+      const raw = str2(field);
+      if (!raw) continue;
+      const expanded = raw.replace(/^~(?=$|[\\/])/, home);
+      const full = normPath(resolvePath(field === "pattern" ? base : workingDir, expanded));
+      if (paths.dirs.some((d) => isInside(full, normPath(d)))) return raw;
+      if (/(^|\/)tasks\.db(-wal|-shm)?$/.test(full)) return raw;
+      if (paths.db && [paths.db, `${paths.db}-wal`, `${paths.db}-shm`].some((f) => full === normPath(f))) return raw;
+      if (DATA_DIR_SEGMENT.test(raw)) return raw;
+    }
+  }
+  return null;
+}
 function record2(db2, run, toolName, category, decision, reason) {
   db2.prepare(`
     INSERT INTO goal_tool_calls (id, plan_id, run_id, tool_name, category, decision, reason, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(newId("tc"), run.plan_id, run.id, toolName, category, decision, reason, (/* @__PURE__ */ new Date()).toISOString());
 }
-function guardToolCallForRun(db2, runId, toolName) {
+function guardToolCallForRun(db2, runId, toolName, input, paths = quarterdeckDataPaths()) {
   const run = db2.prepare("SELECT * FROM goal_runs WHERE id = ? AND status IN ('queued', 'running')").get(runId);
-  return run ? guardRun(db2, run, toolName) : { decision: "allow" };
+  return run ? guardRun(db2, run, toolName, input, paths) : { decision: "allow" };
 }
-function guardRun(db2, run, toolName) {
+function guardRun(db2, run, toolName, input, paths) {
   const goal = getGoal(db2, run.plan_id);
   if (!goal) return { decision: "allow" };
+  const workingDir = db2.prepare("SELECT working_dir FROM plans WHERE id = ?").get(run.plan_id)?.working_dir ?? process.cwd();
+  const touched = touchesQuarterdeckData(toolName, input, workingDir, paths);
+  if (touched !== null) {
+    const reason2 = `Quarterdeck goal guard: a goal run can't read or change Quarterdeck's own data (${touched}). Use the goal tools (add_item, remember, end_run) instead, and don't try another way round.`;
+    record2(db2, run, toolName, QUARTERDECK_DATA_CATEGORY, "deny", reason2);
+    return { decision: "deny", category: QUARTERDECK_DATA_CATEGORY, run_id: run.id, reason: reason2 };
+  }
   if (readsUntrusted(goal.tool_map, toolName)) markRunUntrusted(db2, run.id, toolName);
   const category = matchToolCategory(goal.tool_map, toolName);
   if (!category) return { decision: "allow", run_id: run.id };
@@ -8207,10 +8273,11 @@ function guardRun(db2, run, toolName) {
   record2(db2, run, toolName, category, "deny", reason);
   return { decision: "deny", category, run_id: run.id, reason };
 }
-var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX, UNTRUSTED_CATEGORY, BUILTIN_UNTRUSTED, BUILTIN_UNTRUSTED_MAP;
+var QUARTERDECK_TOOL_PREFIX, PLUGIN_QUARTERDECK_TOOL_PREFIX, UNTRUSTED_CATEGORY, BUILTIN_UNTRUSTED, BUILTIN_UNTRUSTED_MAP, QUARTERDECK_DATA_CATEGORY, normPath, isInside, SHELL_TOOLS, FILE_TOOLS, DATA_DIR_SEGMENT, DB_FILE_NAME, DB_VARIABLE;
 var init_guard = __esm({
   "../core/src/guard.ts"() {
     "use strict";
+    init_paths();
     init_goal_engine();
     init_goals();
     QUARTERDECK_TOOL_PREFIX = "mcp__quarterdeck__";
@@ -8224,6 +8291,14 @@ var init_guard = __esm({
       ...["get_*", "search_*", "list_drafts", "download_*"].flatMap((t) => [`mcp__*Gmail*__${t}`, `mcp__*gmail*__${t}`])
     ];
     BUILTIN_UNTRUSTED_MAP = Object.fromEntries(BUILTIN_UNTRUSTED.map((p) => [p, UNTRUSTED_CATEGORY]));
+    QUARTERDECK_DATA_CATEGORY = "quarterdeck-data";
+    normPath = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    isInside = (path, dir) => path === dir || path.startsWith(dir + "/");
+    SHELL_TOOLS = /* @__PURE__ */ new Set(["Bash", "PowerShell"]);
+    FILE_TOOLS = /* @__PURE__ */ new Set(["Read", "Write", "Edit", "MultiEdit", "NotebookEdit", "Glob", "Grep"]);
+    DATA_DIR_SEGMENT = /(^|[\\/\s"'`=])\.(quarterdeck|conductor)(?![\w-])/i;
+    DB_FILE_NAME = /(^|[\\/\s"'`=])tasks\.db(-wal|-shm)?(?![\w.-])/i;
+    DB_VARIABLE = /\b(QUARTERDECK|CONDUCTOR)_DB\b/i;
   }
 });
 
@@ -9344,19 +9419,8 @@ var init_todos = __esm({
 });
 
 // ../core/src/index.ts
-import { existsSync as existsSync2, mkdirSync } from "fs";
-import { homedir } from "os";
-import { dirname, join } from "path";
-function envVar(name, env = process.env) {
-  return env[`QUARTERDECK_${name}`] ?? env[`CONDUCTOR_${name}`];
-}
-function defaultDbPath(env = process.env, home = homedir()) {
-  const set = envVar("DB", env);
-  if (set) return set;
-  const path = join(home, ".quarterdeck", "tasks.db");
-  const old = join(home, ".conductor", "tasks.db");
-  return !existsSync2(path) && existsSync2(old) ? old : path;
-}
+import { mkdirSync } from "fs";
+import { dirname } from "path";
 function openDatabase(path = defaultDbPath()) {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db2 = new Database(path);
@@ -9369,6 +9433,7 @@ var init_src = __esm({
   "../core/src/index.ts"() {
     "use strict";
     init_sqlite();
+    init_paths();
     init_migrate();
     init_sqlite();
     init_types();
@@ -9384,6 +9449,7 @@ var init_src = __esm({
     init_goal_overview();
     init_todos();
     init_goal_changes();
+    init_paths();
     init_migrate();
   }
 });
@@ -21913,7 +21979,8 @@ var FailRunSchema = external_exports.object({
 });
 var GuardCheckSchema = external_exports.object({
   run_id: external_exports.string(),
-  tool_name: external_exports.string().describe("The tool the run agent is about to call")
+  tool_name: external_exports.string().describe("The tool the run agent is about to call"),
+  input: external_exports.record(external_exports.unknown()).optional().describe("The call's command and path fields, for the rule on Quarterdeck's own data")
 });
 var GoalScheduleSchema = external_exports.union([
   external_exports.object({
@@ -22105,7 +22172,7 @@ var overviewWithEtag2 = (detail = "all", standingSession = null) => overviewWith
 var decideItem2 = (planId, taskId, input) => decideItem(db, planId, taskId, input);
 var failRun2 = (runId, status, reason) => failRun(db, runId, status, reason);
 var attachAgent2 = (runId, agentId) => attachAgent(db, runId, agentId);
-var guardToolCallForRun2 = (runId, tool) => guardToolCallForRun(db, runId, tool);
+var guardToolCallForRun2 = (runId, tool, input) => guardToolCallForRun(db, runId, tool, input);
 var updateGoal2 = (planId, fields) => updateGoal(db, planId, fields);
 var deleteMemory2 = (id) => deleteMemory(db, id);
 var setSchedule2 = (planId, schedule) => setSchedule(db, planId, schedule);
@@ -22891,16 +22958,16 @@ import { existsSync as existsSync5 } from "fs";
 
 // src/runner-session.ts
 import { existsSync as existsSync3, mkdirSync as mkdirSync2, readFileSync, rmSync, statSync, writeFileSync } from "fs";
-import { homedir as homedir2, userInfo } from "os";
-import { dirname as dirname2, join as join2 } from "path";
-function runnerDir(home = homedir2()) {
-  return join2(home, ".quarterdeck", "runner");
+import { homedir as homedir3, userInfo } from "os";
+import { dirname as dirname2, join as join3 } from "path";
+function runnerDir(home = homedir3()) {
+  return join3(home, ".quarterdeck", "runner");
 }
 function recordCliPath(serverDir, dir = runnerDir()) {
   try {
-    const cli = join2(serverDir, "quarterdeck-cli.mjs");
-    if (!existsSync3(join2(dir, "launch.mjs")) || !existsSync3(cli)) return;
-    const file = join2(dir, "cli-path");
+    const cli = join3(serverDir, "quarterdeck-cli.mjs");
+    if (!existsSync3(join3(dir, "launch.mjs")) || !existsSync3(cli)) return;
+    const file = join3(dir, "cli-path");
     if (existsSync3(file) && readFileSync(file, "utf8").trim() === cli) return;
     writeFileSync(file, cli);
   } catch {
@@ -22908,7 +22975,7 @@ function recordCliPath(serverDir, dir = runnerDir()) {
 }
 function standingSessionId(dir = runnerDir()) {
   try {
-    return JSON.parse(readStateText(join2(dir, "state.json"))).sessionId ?? null;
+    return JSON.parse(readStateText(join3(dir, "state.json"))).sessionId ?? null;
   } catch {
     return null;
   }
@@ -22935,7 +23002,7 @@ var RUNNER_USAGE = [
 // src/update-check.ts
 init_src();
 import { existsSync as existsSync4, readFileSync as readFileSync2 } from "fs";
-import { dirname as dirname3, join as join3 } from "path";
+import { dirname as dirname3, join as join4 } from "path";
 import { fileURLToPath } from "url";
 var RELEASE_MANIFEST_URL = "https://raw.githubusercontent.com/shannonbay/Quarterdeck/release/plugins/quarterdeck-goals/.claude-plugin/plugin.json";
 var CHECK_EVERY_MS = 6 * 60 * 6e4;
@@ -22975,10 +23042,10 @@ function createUpdateCheck(deps) {
 }
 function installedVersion(scriptDir = dirname3(fileURLToPath(import.meta.url)), env = process.env) {
   if (/^(0|false|off|no)$/i.test(envVar("UPDATE_CHECK", env) ?? "")) return null;
-  const plugin = join3(scriptDir, "..");
-  if (existsSync4(join3(plugin, "..", "..", "mcp", "src"))) return null;
+  const plugin = join4(scriptDir, "..");
+  if (existsSync4(join4(plugin, "..", "..", "mcp", "src"))) return null;
   try {
-    const version2 = JSON.parse(readFileSync2(join3(plugin, ".claude-plugin", "plugin.json"), "utf8")).version;
+    const version2 = JSON.parse(readFileSync2(join4(plugin, ".claude-plugin", "plugin.json"), "utf8")).version;
     return typeof version2 === "string" && VERSION.test(version2) ? version2 : null;
   } catch {
     return null;
@@ -23076,7 +23143,7 @@ async function fail_run(args) {
 }
 async function guard_check(args) {
   const input = GuardCheckSchema.parse(args);
-  return guardToolCallForRun2(input.run_id, input.tool_name);
+  return guardToolCallForRun2(input.run_id, input.tool_name, input.input);
 }
 async function create_goal(args) {
   const input = CreateGoalSchema.parse(args);
