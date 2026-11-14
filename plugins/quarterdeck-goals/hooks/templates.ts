@@ -208,6 +208,10 @@ export function branchName(answer: string): string {
 const OWN_CLONE = (suffix: string) =>
   `Work in a clone of your own: on first use, clone this repo (its GitHub remote) into a sibling folder named after this one with -${suffix} on the end, and say where in your summary. Never change files, branches or the stash in this folder: it's mine. For each fix, fetch and branch from the latest default branch.`
 
+/** What a GitHub fixer's goal status means, with a github_pr check so it stays current between runs. */
+export const STATUS = (open: string, pr: string) =>
+  `Status: end each run with a status saying how the goal stands: "${open}" while a ${pr} you opened waits (the oldest, if there are several; add "+N more" for the rest), otherwise "clean". With a ${pr} status, attach a status_check (kind github_pr, this repo as owner/name, its number, holds_while ["OPEN"], otherwise {"MERGED": "PR #<number> merged", "CLOSED": "PR #<number> closed"}), so it updates without a run.`
+
 /** The CI fixer's standing instructions, after which branch. */
 export const CI_FIX = [
   'A watch starts a run when a CI run on that branch fails: watch_events lists the new failed run ids.',
@@ -216,6 +220,7 @@ export const CI_FIX = [
   'Otherwise fix it on a new branch in your clone, run the checks that failed until they pass, and propose one code.pull_request item (external_ref ci-run:<id>) saying what broke and how you fixed it. Push and open the pull request only once I approve, then complete that item and propose merging it as a separate code.merge item; merge only once I approve that too.',
   "The first run (no watch_events) only sets up the clone and checks the newest run on the branch; if it failed, handle it as above.",
   'Never push to the branch directly, force-push, or change the CI workflow to make it pass.',
+  STATUS('fix PR #<number> open', 'fix PR'),
 ].join(' ')
 
 /** The issue fixer's branches start with this, which is how its CI watch tells its own pull requests apart. */
@@ -237,6 +242,7 @@ export const ISSUE_FIX = [
   `A second watch starts a run when CI fails on one of your pull requests: watch_events lists the failed run ids under "${ISSUE_FIX_CI_WATCH}". For each, find its branch with gh run view <id> --json headBranch. If that pull request is closed or merged, or a later run on the branch has passed, add nothing. Otherwise read the failure with gh run view <id> --log-failed, fix it on that branch in your clone, run the checks that failed until they pass, and propose one code.pull_request item (external_ref ci-run:<id>) saying what failed and what you changed. Push to the same branch only once I approve, then complete the item. If the failure isn't caused by your change (a flaky test, something already broken on the default branch), change nothing and say so in your summary. Never force-push, or change the CI workflow to make it pass.`,
   `A third watch starts a run when one of your pull requests no longer merges cleanly: watch_events lists <number>@<head sha> under "${ISSUE_FIX_CONFLICT_WATCH}". For each, skip it if the pull request is closed or merged, or its head isn't that sha any more. Otherwise, in your clone, fetch, check out its branch and merge the latest of the pull request's base branch into it (git merge origin/<base>; find the base with gh pr view <number> --json baseRefName: it isn't always the default branch, since a pull request can be based on another). Never rebase: pushing a rebase needs a force-push. Resolve each conflict keeping what both sides meant; if one needs a design decision you can't make from the code, abort the merge (git merge --abort) and ask me (add_item with ask_person) instead. Run the checks until they pass, commit the merge, then propose one code.pull_request item (external_ref pr-conflict:<number>@<sha>) naming the files that conflicted and how you resolved each. Push to the same branch (a plain git push) only once I approve, then complete the item. If a pull request based on that branch now conflicts too, handle it the same way in the same run.`,
   "The first run (no watch_events) only sets up the clone and lists the issues already open in its summary; fix those only when I ask.",
+  STATUS('PR #<number> awaiting review', 'pull request'),
 ].join(' ')
 
 /** How many templates the first question shows; the rest are behind "More…" (a question holds 4 choices). */

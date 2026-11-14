@@ -5,7 +5,7 @@ import { phoneText } from '../hooks/alerts'
 import {
   ago, choiceFromAnswer, choiceOptions, clip, diffAlerts, EMPTY, findGoal, nextRunText, parseSchedule, parseSuggestion, scheduleLabel, spark,
   statusText, suggestByKeywords, offersWatch, watchSetupPrompt, toCard, cleanTitle, fallbackTitle, splitGoalArgs, runCost, planModeBlocked, soundsEventDriven, isQuiet, allowRules, allowRulesPrompt, describe, describeGoalChanges, modelName, newGoalModelText, readModelAnswer } from '../hooks/model'
-import { TEMPLATES } from '../hooks/templates'
+import { TEMPLATES, CI_FIX, ISSUE_FIX } from '../hooks/templates'
 import { goal, NOW, proposal } from './fixtures'
 
 const card = (over: Parameters<typeof goal>[0]) => toCard({ ...goal(over), open_item_count: over.open_items?.length ?? 0 })
@@ -292,4 +292,18 @@ test('toCard carries the goal status a run set, and none from an older server', 
   expect(card({}).statusNote).toBeNull()
   const g = { ...goal({}), open_item_count: 0, status_note: { text: '2 PRs awaiting review', at: NOW, stale: true, untrusted: 'mail' } }
   expect(toCard(g).statusNote).toEqual({ text: '2 PRs awaiting review', stale: true, untrusted: 'mail' })
+})
+
+test('only the two GitHub fixer templates say what their status means, with a github_pr check', () => {
+  for (const t of TEMPLATES) {
+    const has = /status_check/.test(t.instructions)
+    expect(has).toBe(t.name === 'Issue Fixer' || t.name === 'CI Watch And Fix')
+  }
+  expect(ISSUE_FIX).toContain('"PR #<number> awaiting review"')
+  expect(CI_FIX).toContain('"fix PR #<number> open"')
+  for (const text of [ISSUE_FIX, CI_FIX]) {
+    expect(text).toContain('kind github_pr')
+    expect(text).toContain('holds_while ["OPEN"]')
+    expect(text).toContain('"clean"')
+  }
 })
