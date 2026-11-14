@@ -1,4 +1,4 @@
-// Quarterdeck MCP server 0.24.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.25.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 // Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
 const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
@@ -7179,7 +7179,16 @@ function runMigrations(db2) {
     // 1: runs once; when its run ends with nothing open it is done (status 'retired')
     ["one_off", "INTEGER NOT NULL DEFAULT 0"],
     // The model its runs use (an alias or a full id); null: the model of the session that starts the run
-    ["model", "TEXT"]
+    ["model", "TEXT"],
+    // A short status a run sets through end_run, shown in the goal's one-line summary until a later run changes it
+    ["status_note", "TEXT"],
+    ["status_note_at", "TEXT"],
+    // What the run that set it had read (mail, a web page, watch events): the pane marks such a status
+    ["status_note_untrusted", "TEXT"],
+    // A cheap check a run attached to its status (JSON StatusCheck), when, and its failures in a row
+    ["status_check", "TEXT"],
+    ["status_check_at", "TEXT"],
+    ["status_check_failures", "INTEGER NOT NULL DEFAULT 0"]
   ];
   for (const [col, def] of addedGoalColumns) {
     try {
@@ -7341,7 +7350,7 @@ var SCHEMA_VERSION;
 var init_migrate = __esm({
   "../core/src/migrate.ts"() {
     "use strict";
-    SCHEMA_VERSION = 6;
+    SCHEMA_VERSION = 7;
   }
 });
 
@@ -7593,7 +7602,13 @@ function deserializeGoal(r) {
     health_triggers_run: r.health_triggers_run === void 0 ? true : Boolean(r.health_triggers_run),
     last_health_at: r.last_health_at ?? null,
     one_off: Boolean(r.one_off),
-    model: r.model ?? null
+    model: r.model ?? null,
+    status_note: r.status_note ?? null,
+    status_note_at: r.status_note_at ?? null,
+    status_note_untrusted: r.status_note_untrusted ?? null,
+    status_check: r.status_check ? JSON.parse(r.status_check) : null,
+    status_check_at: r.status_check_at ?? null,
+    status_check_failures: r.status_check_failures ?? 0
   };
 }
 function createGoal(db2, plan, goal, interval) {
@@ -7642,6 +7657,7 @@ function updateGoal(db2, planId, fields) {
   const serialized = { ...fields };
   if (fields.autonomy) serialized.autonomy = JSON.stringify(fields.autonomy);
   if (fields.tool_map) serialized.tool_map = JSON.stringify(fields.tool_map);
+  if ("status_check" in fields) serialized.status_check = fields.status_check ? JSON.stringify(fields.status_check) : null;
   if ("health_triggers_run" in fields) serialized.health_triggers_run = fields.health_triggers_run ? 1 : 0;
   if ("one_off" in fields) serialized.one_off = fields.one_off ? 1 : 0;
   if (fields.limits) serialized.limits = JSON.stringify({ ...current2.limits, ...fields.limits });
@@ -8023,6 +8039,128 @@ var init_gates = __esm({
     OUTPUT_TAIL_CHARS = 4096;
     GateError = class extends Error {
     };
+  }
+});
+
+// ../core/src/status-check.ts
+import { execFile } from "node:child_process";
+function validateStatusCheck(input) {
+  if (!input || typeof input !== "object") throw new GoalError("status_check must be an object.");
+  const c = input;
+  const kind = c.kind;
+  if (typeof kind !== "string" || !Object.prototype.hasOwnProperty.call(STATUS_CHECK_VALUES, kind)) {
+    throw new GoalError(`status_check.kind must be one of: ${Object.keys(STATUS_CHECK_VALUES).join(", ")}.`);
+  }
+  const values = STATUS_CHECK_VALUES[kind];
+  if (typeof c.repo !== "string" || !REPO_RE.test(c.repo) || c.repo.split("/").some((p) => p === "." || p === "..")) {
+    throw new GoalError("status_check.repo must be owner/name.");
+  }
+  if (typeof c.number !== "number" || !Number.isSafeInteger(c.number) || c.number <= 0) {
+    throw new GoalError("status_check.number must be a positive integer.");
+  }
+  if (!Array.isArray(c.holds_while) || c.holds_while.length === 0) {
+    throw new GoalError("status_check.holds_while must list at least one value.");
+  }
+  for (const v of c.holds_while) {
+    if (typeof v !== "string" || !values.includes(v)) throw new GoalError(`status_check.holds_while values must be among: ${values.join(", ")}.`);
+  }
+  const otherwiseIn = c.otherwise ?? {};
+  if (typeof otherwiseIn !== "object" || Array.isArray(otherwiseIn)) throw new GoalError("status_check.otherwise must map values to statuses.");
+  const otherwise = {};
+  for (const [v, text] of Object.entries(otherwiseIn)) {
+    if (!values.includes(v)) throw new GoalError(`status_check.otherwise keys must be among: ${values.join(", ")}.`);
+    if (c.holds_while.includes(v)) throw new GoalError(`status_check value ${v} can't both hold and change the status.`);
+    if (typeof text !== "string") throw new GoalError("status_check.otherwise values must be text.");
+    const clean = cleanStatusNote(text);
+    if (!clean) throw new GoalError("status_check.otherwise texts must not be empty.");
+    otherwise[v] = clean;
+  }
+  return { kind, repo: c.repo, number: c.number, holds_while: [...new Set(c.holds_while)], otherwise };
+}
+function statusCheckCommand(check2) {
+  const sub = check2.kind === "github_pr" ? "pr" : "issue";
+  return { file: "gh", args: [sub, "view", String(check2.number), "--repo", check2.repo, "--json", "state"] };
+}
+async function evaluateStatusCheck(db2, planId, runFile = defaultRunFile) {
+  const goal = getGoal(db2, planId);
+  const check2 = goal?.status_check;
+  if (!goal || !check2 || !goal.status_note) return null;
+  const { file, args } = statusCheckCommand(check2);
+  let value;
+  try {
+    const out = JSON.parse(await runFile(file, args));
+    if (typeof out.state !== "string") throw new Error("no state in the answer");
+    value = out.state;
+  } catch (err) {
+    const now = getGoal(db2, planId);
+    if (now?.status_check && JSON.stringify(now.status_check) === JSON.stringify(check2)) {
+      updateGoal(db2, planId, { status_check_failures: (now.status_check_failures ?? 0) + 1 });
+    }
+    return { outcome: "failed", error: err.message };
+  }
+  const current2 = getGoal(db2, planId);
+  if (!current2?.status_check || JSON.stringify(current2.status_check) !== JSON.stringify(check2)) return null;
+  if (check2.holds_while.includes(value)) {
+    if (current2.status_check_failures) updateGoal(db2, planId, { status_check_failures: 0 });
+    return { outcome: "holds", value };
+  }
+  const text = check2.otherwise[value];
+  if (text) {
+    updateGoal(db2, planId, {
+      status_note: text,
+      status_note_at: (/* @__PURE__ */ new Date()).toISOString(),
+      // The text came from the run that attached the check: it keeps that run's mark
+      status_note_untrusted: current2.status_note_untrusted,
+      status_check: null,
+      status_check_at: null,
+      status_check_failures: 0
+    });
+    return { outcome: "changed", value, text };
+  }
+  if ((current2.status_check_failures ?? 0) < STATUS_CHECK_MAX_FAILURES) {
+    updateGoal(db2, planId, { status_check_failures: STATUS_CHECK_MAX_FAILURES });
+  }
+  return { outcome: "stale", value };
+}
+async function checkStatuses(db2, planIds, now = /* @__PURE__ */ new Date(), budgetMs = STATUS_CHECK_BUDGET_MS, runFile = defaultRunFile) {
+  const started = Date.now();
+  let checked = 0;
+  for (const planId of planIds) {
+    const goal = getGoal(db2, planId);
+    if (!goal?.status_check || !goal.status_note) continue;
+    if (goal.status_check_failures >= STATUS_CHECK_MAX_FAILURES) continue;
+    const last = lastChecked.get(planId);
+    if (last !== void 0 && now.getTime() - last < STATUS_CHECK_EVERY_MS) continue;
+    if (Date.now() - started >= budgetMs) return checked;
+    lastChecked.set(planId, now.getTime());
+    await evaluateStatusCheck(db2, planId, runFile).catch(() => {
+    });
+    checked++;
+  }
+  return checked;
+}
+var STATUS_CHECK_VALUES, STATUS_CHECK_EVERY_MS, STATUS_CHECK_MAX_FAILURES, STATUS_CHECK_BUDGET_MS, COMMAND_TIMEOUT_MS, REPO_RE, defaultRunFile, lastChecked;
+var init_status_check = __esm({
+  "../core/src/status-check.ts"() {
+    "use strict";
+    init_goals();
+    init_goal_engine();
+    STATUS_CHECK_VALUES = {
+      github_pr: ["OPEN", "CLOSED", "MERGED"],
+      github_issue: ["OPEN", "CLOSED"]
+    };
+    STATUS_CHECK_EVERY_MS = 5 * 6e4;
+    STATUS_CHECK_MAX_FAILURES = 3;
+    STATUS_CHECK_BUDGET_MS = 2e4;
+    COMMAND_TIMEOUT_MS = 15e3;
+    REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+    defaultRunFile = (file, args) => new Promise((resolve, reject) => {
+      execFile(file, args, { timeout: COMMAND_TIMEOUT_MS, windowsHide: true, shell: false }, (err, stdout) => {
+        if (err) reject(err);
+        else resolve(String(stdout));
+      });
+    });
+    lastChecked = /* @__PURE__ */ new Map();
   }
 });
 
@@ -8514,6 +8652,26 @@ function mustGetGoal(db2, planId) {
   if (!goal) throw new GoalError(`Plan ${planId} is not a persistent goal.`);
   return goal;
 }
+function knownCategories(db2, planId) {
+  const goal = mustGetGoal(db2, planId);
+  const rows = db2.prepare(`
+    SELECT json_extract(state, '$.action.category') category, COUNT(*) uses,
+      (SELECT json_extract(t2.state, '$.action.summary') FROM tasks t2
+        WHERE t2.plan_id = t.plan_id AND json_extract(t2.state, '$.action.category') = json_extract(t.state, '$.action.category')
+        ORDER BY t2.created_at DESC LIMIT 1) example
+    FROM tasks t WHERE plan_id = ? AND json_extract(state, '$.action.category') IS NOT NULL
+    GROUP BY category
+  `).all(planId);
+  const byName = /* @__PURE__ */ new Map();
+  for (const r of rows) byName.set(r.category, { category: r.category, mode: autonomyFor(goal, r.category), uses: r.uses, ...r.example && { example: r.example } });
+  for (const [category, mode] of Object.entries(goal.autonomy)) if (!byName.has(category)) byName.set(category, { category, mode, uses: 0 });
+  return [...byName.values()].sort((a, b) => b.uses - a.uses || a.category.localeCompare(b.category));
+}
+function similarCategories(known, category) {
+  if (known.some((k) => k.category === category)) return [];
+  const head = category.split(/[._:/-]/)[0].toLowerCase();
+  return known.filter((k) => k.category.split(/[._:/-]/)[0].toLowerCase() === head).map((k) => k.category);
+}
 function addItem(db2, planId, runId, input) {
   const goal = mustGetGoal(db2, planId);
   if (goal.status === "retired") throw new GoalError("This goal is retired.");
@@ -8555,6 +8713,7 @@ function addItem(db2, planId, runId, input) {
     throw new GoalError('"untrusted" is the tool-rule category for tools that read outside content, not an action category. Use the category of the action itself.');
   }
   const goalMode = autonomyFor(goal, input.action.category);
+  const similar = similarCategories(knownCategories(db2, planId), input.action.category);
   const untrusted = goalMode === "auto" && runId ? getRun(db2, runId)?.untrusted_source ?? void 0 : void 0;
   const mode = untrusted !== void 0 ? "propose" : goalMode;
   if (mode === "off") {
@@ -8566,7 +8725,7 @@ function addItem(db2, planId, runId, input) {
   } else {
     insertTask(db2, { ...base, status: "completed", state, result: input.result ?? `Done automatically: ${input.action.summary}` });
   }
-  return { task: getTask(db2, planId, id), existing: false, mode, ...untrusted !== void 0 && { untrusted } };
+  return { task: getTask(db2, planId, id), existing: false, mode, ...untrusted !== void 0 && { untrusted }, ...similar.length > 0 && { similar_categories: similar } };
 }
 function summarizeItem(t) {
   const action = isProposal(t) ? t.state.action : void 0;
@@ -8588,18 +8747,21 @@ function buildBrief(db2, planId, runId) {
   const previous = listRuns(db2, planId, 10, { includeSkipped: false }).find((r) => r.id !== runId && r.status !== "queued" && r.status !== "running");
   const since = previous?.started_at ?? "1970-01-01T00:00:00.000Z";
   const decisions = db2.prepare(`
-    SELECT v.task_id, v.gate, v.passed, v.output, v.created_at, t.goal, t.state
+    SELECT v.task_id, v.gate, v.passed, v.output, v.created_at, t.goal, t.state, t.notes, t.result
     FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
     WHERE v.plan_id = ? AND v.gate IN ('approval', 'override') AND v.actor = 'human' AND v.created_at > ?
     ORDER BY v.created_at
   `).all(planId, since).map((d) => {
-    const action = JSON.parse(d.state).action;
+    const state = JSON.parse(d.state);
+    const action = state.action;
+    const answered = state.asks_person && d.result?.startsWith(ANSWER_PREFIX);
     return {
       item: d.task_id,
       goal: d.goal,
       decision: d.gate === "override" ? "completed_by_human" : d.passed ? "approved" : "rejected",
       ...d.output && { feedback: d.output },
       ...action && { action },
+      ...answered && { answer: d.result.slice(ANSWER_PREFIX.length), ...d.notes && { question_notes: d.notes.length > QUESTION_NOTES_CHARS ? `${d.notes.slice(0, QUESTION_NOTES_CHARS - 1).trimEnd()}\u2026` : d.notes } },
       at: d.created_at
     };
   });
@@ -8632,9 +8794,12 @@ function buildBrief(db2, planId, runId) {
       trigger: run.trigger,
       started_at: run.started_at,
       limits: goal.limits,
+      deadline: new Date(Date.parse(run.started_at) + goal.limits.max_run_minutes * 6e4).toISOString(),
+      next_scheduled_run: nextScheduledRun(db2, planId, new Date(run.started_at)),
       untrusted: marked?.untrusted_at && marked.untrusted_source ? { since: marked.untrusted_at, source: marked.untrusted_source } : null
     } : null,
     autonomy: { default: "propose", categories: goal.autonomy },
+    known_categories: knownCategories(db2, planId),
     memory: memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned, ...m.untrusted_source && { untrusted: true } })),
     memory_omitted: active.length - memory.length,
     decisions_since_last_run: decisions,
@@ -8658,15 +8823,38 @@ function queueRun(db2, planId, trigger = "manual") {
   if (goal.status !== "active") throw new GoalError(`Goal is ${goal.status}; resume it before running.`);
   return getOpenRun(db2, planId) ?? insertRun(db2, planId, trigger, "queued");
 }
-function endRun(db2, runId, summary) {
+function isHidden(code) {
+  return code < 32 || code >= 127 && code <= 159 || code >= 8203 && code <= 8207 || code >= 8234 && code <= 8238 || code >= 8294 && code <= 8297;
+}
+function cleanStatusNote(text) {
+  const plain = [...text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")].map((c) => isHidden(c.codePointAt(0)) ? " " : c).join("").replace(/\s+/g, " ").trim();
+  const chars = [...plain];
+  return chars.length > STATUS_NOTE_MAX ? `${chars.slice(0, STATUS_NOTE_MAX - 1).join("").trimEnd()}\u2026` : plain;
+}
+function endRun(db2, runId, summary, status, statusCheck) {
   const run = getRun(db2, runId);
   if (!run) throw new GoalError(`Run ${runId} not found.`);
   if (run.status !== "running" && run.status !== "queued") throw new GoalError(`Run ${runId} already ended (${run.status}).`);
   if (!summary.trim()) throw new GoalError("A summary is required: what you did, what is waiting, what you learned.");
+  if (statusCheck !== void 0 && statusCheck !== null && (status === void 0 || !cleanStatusNote(status))) {
+    throw new GoalError("status_check needs a status to check: pass status too.");
+  }
+  const check2 = statusCheck === void 0 || statusCheck === null ? null : validateStatusCheck(statusCheck);
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const created = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND run_id = ?").get(run.plan_id, runId).n;
   const resolved = db2.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(run.plan_id, run.started_at).n;
   updateRun(db2, runId, { status: "completed", summary: summary.trim(), ended_at: now, items_created: created, items_resolved: resolved });
+  if (status !== void 0) {
+    const note = cleanStatusNote(status);
+    updateGoal(db2, run.plan_id, note ? {
+      status_note: note,
+      status_note_at: now,
+      status_note_untrusted: run.untrusted_source ?? null,
+      status_check: check2,
+      status_check_at: check2 ? now : null,
+      status_check_failures: 0
+    } : { status_note: null, status_note_at: null, status_note_untrusted: null, status_check: null, status_check_at: null, status_check_failures: 0 });
+  }
   archiveResolved(db2, run.plan_id);
   finishIfDone(db2, run.plan_id);
   return getRun(db2, runId);
@@ -8731,10 +8919,11 @@ function recordSkip(db2, planId, trigger, reason, now = /* @__PURE__ */ new Date
   const recent = db2.prepare("SELECT 1 FROM goal_runs WHERE plan_id = ? AND status = 'skipped' AND skip_reason = ? AND started_at >= ?").get(planId, reason, hourAgo);
   return recent ? null : insertRun(db2, planId, trigger, "skipped", reason);
 }
-var GoalError, MEMORY_BRIEF_CHARS;
+var GoalError, MEMORY_BRIEF_CHARS, ANSWER_PREFIX, QUESTION_NOTES_CHARS, STATUS_NOTE_MAX;
 var init_goal_engine = __esm({
   "../core/src/goal-engine.ts"() {
     "use strict";
+    init_status_check();
     init_queries();
     init_gates();
     init_goals();
@@ -8744,6 +8933,9 @@ var init_goal_engine = __esm({
     GoalError = class extends Error {
     };
     MEMORY_BRIEF_CHARS = 4e3;
+    ANSWER_PREFIX = "Your answer: ";
+    QUESTION_NOTES_CHARS = 2e3;
+    STATUS_NOTE_MAX = 40;
   }
 });
 
@@ -8754,6 +8946,9 @@ function applyGoalChanges(db2, planId, changes) {
   if (!goal || !plan) throw new GoalError(`Goal ${planId} not found.`);
   for (const [category, mode] of Object.entries(changes.autonomy ?? {})) {
     if (mode !== null && !MODES.has(mode)) throw new GoalError(`"${mode}" isn't a mode for ${category}: use off, propose or auto.`);
+  }
+  for (const [from, to] of Object.entries(changes.merge_categories ?? {})) {
+    if (!from.trim() || !to.trim() || from.trim() === to.trim()) throw new GoalError(`Can't merge "${from}" into "${to}": give two different category names.`);
   }
   const model = changes.model === void 0 ? void 0 : normalizeModel(changes.model);
   for (const id of changes.forget_memory ?? []) {
@@ -8791,6 +8986,20 @@ function applyGoalChanges(db2, planId, changes) {
         done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} \u2192 ${category}${category === UNTRUSTED_CATEGORY ? " (reads outside content)" : ""}`);
       }
       updateGoal(db2, planId, { tool_map: toolMap });
+    }
+    for (const [rawFrom, rawTo] of Object.entries(changes.merge_categories ?? {})) {
+      const from = rawFrom.trim(), to = rawTo.trim();
+      const items = db2.prepare(`UPDATE tasks SET state = json_set(state, '$.action.category', ?)
+        WHERE plan_id = ? AND json_extract(state, '$.action.category') = ?`).run(to, planId, from).changes;
+      const current2 = getGoal(db2, planId);
+      const autonomy = { ...current2.autonomy };
+      if (from in autonomy) {
+        if (!(to in autonomy)) autonomy[to] = autonomy[from];
+        delete autonomy[from];
+      }
+      const toolMap = Object.fromEntries(Object.entries(current2.tool_map).map(([pattern, c]) => [pattern, c === from ? to : c]));
+      updateGoal(db2, planId, { autonomy, tool_map: toolMap });
+      done.push(`merged ${from} into ${to} (${items} ${items === 1 ? "item" : "items"})`);
     }
     for (const m of changes.add_memory ?? []) {
       insertMemory(db2, { plan_id: planId, kind: m.kind, text: m.text, source: "human", pinned: m.pinned ?? false });
@@ -8925,7 +9134,7 @@ function goalRunPrompt(p) {
   return [
     `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
     `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries. Its watch_events, when there are any, are what is new since the last run (one line per new thing, such as an issue number): deal with those first.`,
-    "Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal's state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category's autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.",
+    "Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal's state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category's autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). Give an action a category from known_categories in the brief when one fits it, so the same action keeps one name; make up a new one only for a different kind of action. A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.",
     "When you need something only the person can give or do (a choice, details you can't find, connecting a service, allowing a site), add_item with ask_person: true and one clear question, and carry on with what you can; don't guess. Their answer arrives as memory and the item is completed.",
     "Save anything future runs should know with remember.",
     'Your summary, items and memory are read by the person who owns this goal: write to them as "you", and never guess their gender or pronouns.',
@@ -9020,6 +9229,7 @@ async function schedulerPass(db2, opts) {
   }
   await checkWatches(db2, goals.map(({ plan }) => plan.id), now);
   for (const { plan } of goals) queueForWatchEvents(db2, plan.id, now);
+  await checkStatuses(db2, goals.map(({ plan }) => plan.id), now);
   const toolWatches = opts.toolWatches ? takeDueToolWatches(db2, goals.map(({ plan }) => plan.id), now) : [];
   const withWatches = (r) => toolWatches.length ? { ...r, tool_watches: toolWatches } : r;
   const hold = getRunHold(db2, now);
@@ -9054,6 +9264,9 @@ async function schedulerPass(db2, opts) {
   }
   return withWatches({ leader: true, claimed, expired });
 }
+function clipText(text, max) {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}\u2026`;
+}
 function decideItem(db2, planId, taskId, input) {
   const task = getTask(db2, planId, taskId);
   if (!task) throw new GoalError(`Item ${taskId} not found.`);
@@ -9064,8 +9277,9 @@ function decideItem(db2, planId, taskId, input) {
     if (!answer) throw new GoalError("An answer is needed.");
     if (!asksPerson(task)) throw new GoalError(`Item ${taskId} isn't a question for you; approve or reject it instead.`);
     approveTask(db2, planId, taskId);
-    updateTask(db2, planId, taskId, { result: `Your answer: ${answer}`, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
-    insertMemory(db2, { plan_id: planId, kind: "fact", text: `You answered "${task.goal}": ${answer}`, source: "human", source_ref: taskId });
+    updateTask(db2, planId, taskId, { result: `${ANSWER_PREFIX}${answer}`, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+    const context = task.notes?.trim() ? ` (the question said: ${clipText(task.notes.trim().replace(/\s+/g, " "), ANSWER_CONTEXT_CHARS)})` : "";
+    insertMemory(db2, { plan_id: planId, kind: "fact", text: `You answered "${task.goal}": ${answer}${context}`, source: "human", source_ref: taskId });
     if (active()) queuedRun = queueRun(db2, planId);
   } else if (input.decision === "approve") {
     approveTask(db2, planId, taskId);
@@ -9083,7 +9297,7 @@ function reviveIfDone(db2, planId) {
   updateGoal(db2, planId, { status: "active" });
   return true;
 }
-var LEASE_NAME, LEASE_MS, STALE_GRACE_MS, DEFAULT_MAX_CONCURRENT, WATCH_BUDGET_MS;
+var LEASE_NAME, LEASE_MS, STALE_GRACE_MS, DEFAULT_MAX_CONCURRENT, WATCH_BUDGET_MS, ANSWER_CONTEXT_CHARS;
 var init_goal_tick = __esm({
   "../core/src/goal-tick.ts"() {
     "use strict";
@@ -9095,11 +9309,13 @@ var init_goal_tick = __esm({
     init_watches();
     init_goal_changes();
     init_migrate();
+    init_status_check();
     LEASE_NAME = "goals";
     LEASE_MS = 9e4;
     STALE_GRACE_MS = 5 * 6e4;
     DEFAULT_MAX_CONCURRENT = 3;
     WATCH_BUDGET_MS = 45e3;
+    ANSWER_CONTEXT_CHARS = 800;
   }
 });
 
@@ -9108,6 +9324,12 @@ import { createHash } from "crypto";
 function clip(text, max) {
   if (text === null || text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}\u2026`;
+}
+function statusNote(goal, runs) {
+  if (!goal.status_note) return null;
+  const last = runs.find((r) => r.status !== "queued" && r.status !== "running" && r.status !== "skipped");
+  const stale = (goal.status_check_failures ?? 0) >= STATUS_CHECK_MAX_FAILURES || !!last && (last.status === "failed" || last.status === "timed_out" || !!last.ended_at && !!goal.status_note_at && last.ended_at > goal.status_note_at);
+  return { text: goal.status_note, at: goal.status_note_at, stale, untrusted: goal.status_note_untrusted };
 }
 function getGoalItems(db2, planId) {
   const rows = db2.prepare("SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL").all(planId);
@@ -9132,7 +9354,9 @@ function itemView(t) {
 function overviewItem(t) {
   const v = itemView(t);
   const action = v.action;
-  const short = { ...v, goal: clip(v.goal, CLIP.title), notes: clip(v.notes, CLIP.notes), result: clip(v.result, CLIP.result) };
+  const notesMax = v.asks_person && v.awaiting_review ? CLIP.context : CLIP.notes;
+  const clipped = v.goal.length > CLIP.title || (v.notes?.length ?? 0) > notesMax || (action?.summary?.length ?? 0) > CLIP.title;
+  const short = { ...v, goal: clip(v.goal, CLIP.title), notes: clip(v.notes, notesMax), result: clip(v.result, CLIP.result), ...clipped && { clipped: true } };
   return action ? { ...short, action: { category: action.category, summary: clip(action.summary, CLIP.title) } } : short;
 }
 function getAutonomySuggestions(db2, planId) {
@@ -9183,6 +9407,9 @@ function describeActivity({ goal, openRun, lastRun, events, items }) {
   if (openRun?.status === "running") {
     if (openRun.waiting_tool && openRun.waiting_since) {
       const tool2 = openRun.waiting_tool;
+      if (/^quarterdeck /.test(tool2)) {
+        return { state: "running", text: `Waiting for a permission prompt that may not be showing: ${tool2}. Allow Quarterdeck's tools in this session, or cancel the run`, at: openRun.waiting_since, waiting: { tool: tool2, since: openRun.waiting_since } };
+      }
       return { state: "running", text: `Waiting for your permission: ${tool2}`, at: openRun.waiting_since, waiting: { tool: tool2, since: openRun.waiting_since } };
     }
     const goals = new Map(items.map((t) => [t.id, t.goal]));
@@ -9227,6 +9454,7 @@ function buildOverview(db2, detail = "all", standingSession = null) {
       status: goal.status,
       one_off: goal.one_off,
       model: goal.model,
+      status_note: statusNote(goal, runs),
       instructions: clip(goal.instructions, CLIP.instructions),
       autonomy: goal.autonomy,
       tool_map: goal.tool_map,
@@ -9289,6 +9517,9 @@ function buildOverview(db2, detail = "all", standingSession = null) {
         id: i.id,
         goal: clip(i.goal, CARD_TEXT),
         asks_person: i.asks_person,
+        ..."clipped" in i && i.clipped || i.goal.length > CARD_TEXT || (i.action?.summary?.length ?? 0) > CARD_TEXT ? { clipped: true } : {},
+        // A question can't be answered without its context, so a card keeps the first few's
+        ...i.asks_person && i.notes && g.needs_you.filter((q) => q.asks_person).indexOf(i) < CARD_CONTEXT ? { notes: i.notes } : {},
         action: i.action ? { category: i.action.category, summary: clip(i.action.summary, CARD_TEXT) } : null
       })),
       runs: g.runs.slice(0, 1),
@@ -9306,10 +9537,11 @@ function overviewWithEtag(db2, detail = "all", standingSession = null) {
   const body = JSON.stringify(buildOverview(db2, detail, standingSession));
   return { body, etag: `"${createHash("sha256").update(body).digest("base64url").slice(0, 27)}"` };
 }
-var RUNS, OPEN_ITEMS, HEALTH, MEMORY, CLIP, DONE, ACTIVITY_EVENTS, PROMOTE_AFTER, oneLine, str, NEEDS_YOU, CARD_TEXT;
+var RUNS, OPEN_ITEMS, HEALTH, MEMORY, CLIP, DONE, ACTIVITY_EVENTS, PROMOTE_AFTER, oneLine, str, NEEDS_YOU, CARD_TEXT, CARD_CONTEXT;
 var init_goal_overview = __esm({
   "../core/src/goal-overview.ts"() {
     "use strict";
+    init_status_check();
     init_queries();
     init_gates();
     init_goals();
@@ -9324,7 +9556,7 @@ var init_goal_overview = __esm({
     OPEN_ITEMS = 10;
     HEALTH = 20;
     MEMORY = 10;
-    CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400, watch: 300 };
+    CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400, watch: 300, context: 1e3 };
     DONE = 10;
     ACTIVITY_EVENTS = 20;
     PROMOTE_AFTER = 10;
@@ -9332,6 +9564,7 @@ var init_goal_overview = __esm({
     str = (v) => typeof v === "string" && v.trim() ? oneLine(v) : null;
     NEEDS_YOU = 5;
     CARD_TEXT = 160;
+    CARD_CONTEXT = 1;
   }
 });
 
@@ -9446,6 +9679,7 @@ var init_src = __esm({
     init_watches();
     init_guard();
     init_goal_tick();
+    init_status_check();
     init_goal_overview();
     init_todos();
     init_goal_changes();
@@ -21904,7 +22138,7 @@ var AddItemSchema = external_exports.object({
     'Stable ID of the thing this is about, e.g. "gmail:18c2f\u2026". If an item with this ref already exists it is returned instead of creating a duplicate.'
   ),
   action: external_exports.object({
-    category: external_exports.string().min(1).describe('Action category, e.g. "email.send". Its autonomy mode is in the brief.'),
+    category: external_exports.string().min(1).describe('Action category, e.g. "email.send". Reuse one from known_categories in the brief when it fits the action; invent a new one only for a different kind of action. Its autonomy mode is in the brief.'),
     summary: external_exports.string().min(1).describe('One line the human will read when approving, e.g. "Send reply confirming Thursday 2pm"'),
     params: external_exports.record(external_exports.unknown()).optional().describe("Exact details needed to carry the action out later (ids, draft id, labels)")
   }).optional().describe(
@@ -21912,7 +22146,7 @@ var AddItemSchema = external_exports.object({
   ),
   status: external_exports.enum(["pending", "active"]).optional().describe("For items without an action (default pending)"),
   ask_person: external_exports.boolean().optional().describe(
-    "true: this item asks the person for something only they can give or do (a choice, details, connecting a service, allowing a site). It waits under Needs you and alerts them; their answer arrives as memory."
+    "true: this item asks the person for something only they can give or do (a choice, details, connecting a service, allowing a site). It waits under Needs you and alerts them; their answer arrives as memory. Keep goal to the short question and put what they need to answer it (the options, what you would do and why) in notes: the Goals pane shows notes under the question."
   ),
   result: external_exports.string().optional().describe("For auto actions: what you did"),
   notes: external_exports.string().optional()
@@ -21927,7 +22161,15 @@ var ForgetSchema = external_exports.object({
 });
 var EndRunSchema = external_exports.object({
   summary: external_exports.string().min(1).describe("What you did this run, what is waiting for the human, and anything you learned"),
-  run_id: external_exports.string().optional().describe("Defaults to the run from get_goal_brief")
+  run_id: external_exports.string().optional().describe("Defaults to the run from get_goal_brief"),
+  status: external_exports.string().max(200).optional().describe(`A few words on how the goal stands now, shown in its one-line summary in the Goals pane until a later run changes it, e.g. "clean" or "2 PRs awaiting review" (plain text, cut to 40 characters). Set it when the goal's instructions say what it means; leave it out to keep the current one, or pass "" to clear it.`),
+  status_check: external_exports.object({
+    kind: external_exports.enum(["github_pr", "github_issue"]).describe("What to look at: a GitHub pull request or issue"),
+    repo: external_exports.string().describe("owner/name on GitHub"),
+    number: external_exports.number().int().positive().describe("The pull request or issue number"),
+    holds_while: external_exports.array(external_exports.string()).min(1).describe("The states for which the status still holds: OPEN, CLOSED, MERGED (MERGED only for github_pr)"),
+    otherwise: external_exports.record(external_exports.string()).optional().describe('What the status becomes for other states, e.g. {"MERGED": "PR #12 merged", "CLOSED": "PR #12 closed"}; any other state shows the status as stale')
+  }).optional().describe("Give it with status whenever the status describes something outside Quarterdeck that can change without this goal running (a PR awaiting review, an open issue): the scheduler checks it about every 5 minutes and updates the status. Setting or clearing the status later replaces or clears the check.")
 });
 var RunGoalSchema = external_exports.object({
   goal_id: external_exports.string().describe("ID of the goal to run")
@@ -21953,6 +22195,10 @@ var DecideItemSchema = external_exports.object({
   item_id: external_exports.string(),
   decision: external_exports.enum(["approve", "reject", "answer"]),
   feedback: external_exports.string().optional().describe("Required when rejecting; the answer when answering a question item")
+});
+var GetItemSchema = external_exports.object({
+  goal_id: external_exports.string(),
+  item_id: external_exports.string()
 });
 var CancelRunSchema = external_exports.object({
   goal_id: external_exports.string(),
@@ -22040,6 +22286,7 @@ var UpdateGoalSchema = external_exports.object({
   instructions: external_exports.string().optional().describe('Standing instructions; "" clears them'),
   autonomy: external_exports.record(Mode.nullable()).optional().describe("Category \u2192 off | propose | auto; null removes the category"),
   tool_map: external_exports.record(external_exports.string().nullable()).optional().describe("Tool name pattern \u2192 category; null removes the rule"),
+  merge_categories: external_exports.record(external_exports.string().trim().min(1)).optional().describe("Old action category \u2192 the category to merge it into: past items, autonomy and tool rules take the new name, so earlier approvals count toward the Switch to auto suggestion"),
   add_memory: external_exports.array(external_exports.object({ kind: external_exports.enum(["fact", "rule", "preference"]), text: external_exports.string().trim().min(1), pinned: external_exports.boolean().optional() })).optional(),
   forget_memory: external_exports.array(external_exports.string()).optional().describe("Memory ids to forget"),
   watches: external_exports.record(WatchSchema.nullable()).optional().describe("Watch name \u2192 what it checks; null removes the watch. A run starts when a watch sees something new"),
@@ -22160,7 +22407,7 @@ var insertMemory2 = (m) => insertMemory(db, m);
 var getMemory2 = (id) => getMemory(db, id);
 var updateMemory2 = (id, fields) => updateMemory(db, id, fields);
 var getRun2 = (runId) => getRun(db, runId);
-var endRun2 = (runId, summary) => endRun(db, runId, summary);
+var endRun2 = (runId, summary, status, statusCheck) => endRun(db, runId, summary, status, statusCheck);
 var queueRun2 = (planId) => queueRun(db, planId, "manual");
 var getOpenGoalRun = (planId) => getOpenRun(db, planId);
 var countItems = (planId) => db.prepare(
@@ -22873,8 +23120,10 @@ async function get_goal_brief(args) {
       "First carry out items with approved_to_execute (their action was approved), then complete them with set_status.",
       'Revise items rejected in decisions_since_last_run using the feedback: update the proposal with update_task state_patch {"action": {category, summary, params}} so the human sees the new version, then set_status completed to send it for review again \u2014 or abandon it with a reason.',
       "Look for new work; add each piece with add_item (use external_ref so it is never duplicated).",
+      "For an action, reuse a category from known_categories when one fits it; invent a new category only for a different kind of action.",
       'Respect autonomy: "auto" categories you may do and then record with add_item; "propose" categories go through add_item and wait for approval; "off" categories you must not do.',
-      "Save anything worth knowing next time with remember. Finish with end_run and a short summary."
+      "Save anything worth knowing next time with remember. Finish with end_run and a short summary.",
+      "When the status you set in end_run describes something outside Quarterdeck that can change without this goal running (a PR awaiting review, an open issue), attach a status_check so it updates by itself."
     ]
   };
 }
@@ -22902,7 +23151,10 @@ async function add_item(args) {
     },
     existing: result.existing,
     ...result.mode && { mode: result.mode },
-    message: result.existing ? "An item for this external_ref already exists; nothing was created. Update it instead if needed." : result.untrusted ? `Proposed instead of done: this run has read untrusted content (${result.untrusted}), so its auto actions need approval for the rest of the run. Do not carry it out until it shows approved_to_execute.` : result.mode === "propose" ? "Proposed:waits for the human to approve. Do not carry out the action until it shows approved_to_execute." : result.mode === "auto" ? "Recorded as done." : "Item created."
+    message: result.existing ? "An item for this external_ref already exists; nothing was created. Update it instead if needed." : result.untrusted ? `Proposed instead of done: this run has read untrusted content (${result.untrusted}), so its auto actions need approval for the rest of the run. Do not carry it out until it shows approved_to_execute.` : result.mode === "propose" ? "Proposed:waits for the human to approve. Do not carry out the action until it shows approved_to_execute." : result.mode === "auto" ? "Recorded as done." : "Item created.",
+    ...result.similar_categories && {
+      note: `"${input.action.category}" is a new category for this goal, but it already has ${result.similar_categories.map((c) => `"${c}"`).join(", ")}. If this is the same kind of action, use that name next time so approvals count together.`
+    }
   };
 }
 async function remember(args) {
@@ -22933,7 +23185,7 @@ async function end_run(args) {
   if (!runId) throw new Error("No run to end: you were not started for a run (get_goal_brief had no run_id).");
   const run = getRun2(runId);
   if (!run || run.plan_id !== planId) throw new Error(`Run ${runId} not found in this goal.`);
-  const ended = endRun2(runId, input.summary);
+  const ended = endRun2(runId, input.summary, input.status, input.status_check);
   setOpenRun(null);
   record3(planId, planId, "run_completed", { run_id: runId, summary: ended.summary, items_created: ended.items_created, items_resolved: ended.items_resolved });
   return {
@@ -23107,6 +23359,19 @@ async function decide_item(args) {
     queued_run: r.queuedRun ? { id: r.queuedRun.id, status: r.queuedRun.status } : null
   };
 }
+async function get_item(args) {
+  const input = GetItemSchema.parse(args);
+  if (!getGoal2(input.goal_id)) throw new Error(`Goal ${input.goal_id} not found.`);
+  const t = getTask2(input.goal_id, input.item_id);
+  if (!t || t.archived_at) throw new Error(`Item ${input.item_id} not found in this goal.`);
+  const action = t.state?.action;
+  return {
+    id: t.id,
+    goal: t.goal,
+    notes: t.notes,
+    action: action && typeof action.summary === "string" ? { category: action.category ?? null, summary: action.summary } : null
+  };
+}
 async function cancel_run(args) {
   const input = CancelRunSchema.parse(args);
   const run = getOpenGoalRun(input.goal_id);
@@ -23185,12 +23450,13 @@ async function set_schedule(args) {
   const input = SetScheduleSchema.parse(args);
   if (!getGoal2(input.goal_id)) throw new Error(`Goal ${input.goal_id} not found.`);
   if (input.one_off && input.schedule) throw new Error("A one-off goal has no schedule.");
+  const revived = reviveIfDone2(input.goal_id);
   const applied = applySchedule(input.goal_id, input.schedule);
   const one_off = Boolean(input.one_off && !input.schedule);
   updateGoal2(input.goal_id, { one_off });
-  record3(input.goal_id, input.goal_id, "goal_updated", { schedule: applied.schedule, one_off }, human);
+  record3(input.goal_id, input.goal_id, "goal_updated", { schedule: applied.schedule, one_off, ...revived && { revived } }, human);
   touchPlan2(input.goal_id);
-  return { goal_id: input.goal_id, ...applied, one_off };
+  return { goal_id: input.goal_id, ...applied, one_off, ...revived && { revived } };
 }
 function applySchedule(goalId, schedule) {
   setSchedule2(goalId, schedule);
@@ -23536,6 +23802,7 @@ var TOOLS = [
   ...[
     ["goals_tick", "Runs one goal scheduler pass and claims the runs that are due.", GoalsTickSchema, goals_tick],
     ["decide_item", "Records the human's approval or rejection of a goal item.", DecideItemSchema, decide_item],
+    ["get_item", "One goal item's full title, notes and action summary, which the overview clips.", GetItemSchema, get_item],
     ["cancel_run", "Cancels a goal's run in progress.", CancelRunSchema, cancel_run],
     ["set_goal_status", "Pauses or resumes a goal.", SetGoalStatusSchema, set_goal_status],
     ["delete_goal", "Deletes a goal for good, for the human (after they confirm).", DeleteGoalSchema, delete_goal],

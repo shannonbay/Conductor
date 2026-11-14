@@ -1,5 +1,5 @@
 /** A goal work item: a proposal waiting for the person, or an open item. */
-export type Item = { id: string; title: string; category: string | null; summary: string | null; /** A question or request for the person, not a proposal. */ asksPerson?: boolean }
+export type Item = { id: string; title: string; category: string | null; summary: string | null; /** A question or request for the person, not a proposal. */ asksPerson?: boolean; /** The run's context for it: a question's options, why a proposal. */ notes?: string; /** The overview cut its title, notes or summary short: get_item has the full text. */ clipped?: boolean }
 
 /** One goal run. */
 export type Run = {
@@ -62,6 +62,11 @@ export type GoalCard = {
   oneOff: boolean
   /** The model its runs use (an alias or a full id); null: the model of the session that starts each run. */
   model: string | null
+  /**
+   * A short plain-text status the goal's runs set through end_run, shown in its one-line summary.
+   * `stale`: the last run failed or ended without setting it. `untrusted`: what the run that set it had read.
+   */
+  statusNote: { text: string; stale: boolean; untrusted: string | null } | null
   instructions: string
   /** Action category → off | propose | auto (unlisted: propose). */
   autonomy: Record<string, string>
@@ -120,6 +125,8 @@ export type TodoList = { id: string; name: string; items: TodoItem[]; open: numb
 
 /** The project's to-do lists as last read. */
 export type Todos = { dir: string; lists: TodoList[] }
+/** A to-do whose Plan / Start was pressed while Claude was mid-turn: sent when the turn ends, unless Cancel is pressed first. */
+export type HeldTodo = { list: TodoList; item: TodoItem; mode: 'plan' | 'start' }
 
 /** A destructive action waiting for a second press. */
 export type Confirm =
@@ -164,18 +171,24 @@ declare module 'claude-code' {
       discussing: string | null
       /** "<listId>/<itemId>" while that to-do's edit box is open. */
       editingTodo: string | null
+      /** To-dos whose Plan / Start waits for the conversation's turn to end, oldest first. */
+      heldTodos: HeldTodo[]
       /** The action a button is doing, e.g. "approve:g1/11" or "run:g1". */
       busy: string | null
       /** The last action's error, shown at the bottom of the pane. */
       notice: string | null
-      /** Ids of the goals whose details are shown. */
+      /** Ids of the goals whose details are shown (also "item:<goalId>/<itemId>" for an item read in full). */
       expanded: string[]
+      /** Full text of clipped items the person opened, by "<goalId>/<itemId>". */
+      fullItems: Record<string, Item>
       confirm: Confirm | null
       activeRun: ActiveRun | null
       /** Runs this session's plugin started, by subagent id. */
       runs: Record<string, RunEntry>
       /** True while the quarterdeck-guard plugin isn't loaded, so no run starts. */
       guardMissing: boolean
+      /** True while plan mode refuses the runner's ticks, so no run starts until it ends. */
+      planMode: boolean
       /** The person's to-do lists for this session's project. */
       todos: Todos | null
       /** Whether phone alerts can get through, learned from the last push and from messages sent from the phone. */

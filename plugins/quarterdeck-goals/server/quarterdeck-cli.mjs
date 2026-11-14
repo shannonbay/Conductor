@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Quarterdeck MCP server 0.24.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
+// Quarterdeck MCP server 0.25.0, bundled by mcp/scripts/bundle.mjs. Edit mcp/ and core/, not this file.
 import { createRequire as __qdCreateRequire } from 'module'; const require = __qdCreateRequire(import.meta.url);
 // Older Node versions warn that node:sqlite is experimental: drop that one warning, keep every other
 const __qdEmitWarning = process.emitWarning; process.emitWarning = function (warning, ...rest) { const type = typeof rest[0] === 'string' ? rest[0] : (rest[0] && rest[0].type) || (warning && warning.name); if (type === 'ExperimentalWarning' && /sqlite/i.test(String((warning && warning.message) || warning))) return; return __qdEmitWarning.call(process, warning, ...rest) };
@@ -388,7 +388,16 @@ function runMigrations(db) {
     // 1: runs once; when its run ends with nothing open it is done (status 'retired')
     ["one_off", "INTEGER NOT NULL DEFAULT 0"],
     // The model its runs use (an alias or a full id); null: the model of the session that starts the run
-    ["model", "TEXT"]
+    ["model", "TEXT"],
+    // A short status a run sets through end_run, shown in the goal's one-line summary until a later run changes it
+    ["status_note", "TEXT"],
+    ["status_note_at", "TEXT"],
+    // What the run that set it had read (mail, a web page, watch events): the pane marks such a status
+    ["status_note_untrusted", "TEXT"],
+    // A cheap check a run attached to its status (JSON StatusCheck), when, and its failures in a row
+    ["status_check", "TEXT"],
+    ["status_check_at", "TEXT"],
+    ["status_check_failures", "INTEGER NOT NULL DEFAULT 0"]
   ];
   for (const [col, def] of addedGoalColumns) {
     try {
@@ -568,7 +577,7 @@ var init_migrate = __esm({
       "trg_goal_watches_update_revision",
       "trg_goal_watches_delete_revision"
     ];
-    SCHEMA_VERSION = 6;
+    SCHEMA_VERSION = 7;
   }
 });
 
@@ -835,7 +844,13 @@ function deserializeGoal(r) {
     health_triggers_run: r.health_triggers_run === void 0 ? true : Boolean(r.health_triggers_run),
     last_health_at: r.last_health_at ?? null,
     one_off: Boolean(r.one_off),
-    model: r.model ?? null
+    model: r.model ?? null,
+    status_note: r.status_note ?? null,
+    status_note_at: r.status_note_at ?? null,
+    status_note_untrusted: r.status_note_untrusted ?? null,
+    status_check: r.status_check ? JSON.parse(r.status_check) : null,
+    status_check_at: r.status_check_at ?? null,
+    status_check_failures: r.status_check_failures ?? 0
   };
 }
 function createGoal(db, plan, goal, interval) {
@@ -884,6 +899,7 @@ function updateGoal(db, planId, fields) {
   const serialized = { ...fields };
   if (fields.autonomy) serialized.autonomy = JSON.stringify(fields.autonomy);
   if (fields.tool_map) serialized.tool_map = JSON.stringify(fields.tool_map);
+  if ("status_check" in fields) serialized.status_check = fields.status_check ? JSON.stringify(fields.status_check) : null;
   if ("health_triggers_run" in fields) serialized.health_triggers_run = fields.health_triggers_run ? 1 : 0;
   if ("one_off" in fields) serialized.one_off = fields.one_off ? 1 : 0;
   if (fields.limits) serialized.limits = JSON.stringify({ ...current.limits, ...fields.limits });
@@ -1274,6 +1290,131 @@ var init_gates = __esm({
     OUTPUT_TAIL_CHARS = 4096;
     GateError = class extends Error {
     };
+  }
+});
+
+// ../core/src/status-check.ts
+import { execFile } from "node:child_process";
+function validateStatusCheck(input) {
+  if (!input || typeof input !== "object") throw new GoalError("status_check must be an object.");
+  const c = input;
+  const kind = c.kind;
+  if (typeof kind !== "string" || !Object.prototype.hasOwnProperty.call(STATUS_CHECK_VALUES, kind)) {
+    throw new GoalError(`status_check.kind must be one of: ${Object.keys(STATUS_CHECK_VALUES).join(", ")}.`);
+  }
+  const values = STATUS_CHECK_VALUES[kind];
+  if (typeof c.repo !== "string" || !REPO_RE.test(c.repo) || c.repo.split("/").some((p) => p === "." || p === "..")) {
+    throw new GoalError("status_check.repo must be owner/name.");
+  }
+  if (typeof c.number !== "number" || !Number.isSafeInteger(c.number) || c.number <= 0) {
+    throw new GoalError("status_check.number must be a positive integer.");
+  }
+  if (!Array.isArray(c.holds_while) || c.holds_while.length === 0) {
+    throw new GoalError("status_check.holds_while must list at least one value.");
+  }
+  for (const v of c.holds_while) {
+    if (typeof v !== "string" || !values.includes(v)) throw new GoalError(`status_check.holds_while values must be among: ${values.join(", ")}.`);
+  }
+  const otherwiseIn = c.otherwise ?? {};
+  if (typeof otherwiseIn !== "object" || Array.isArray(otherwiseIn)) throw new GoalError("status_check.otherwise must map values to statuses.");
+  const otherwise = {};
+  for (const [v, text] of Object.entries(otherwiseIn)) {
+    if (!values.includes(v)) throw new GoalError(`status_check.otherwise keys must be among: ${values.join(", ")}.`);
+    if (c.holds_while.includes(v)) throw new GoalError(`status_check value ${v} can't both hold and change the status.`);
+    if (typeof text !== "string") throw new GoalError("status_check.otherwise values must be text.");
+    const clean = cleanStatusNote(text);
+    if (!clean) throw new GoalError("status_check.otherwise texts must not be empty.");
+    otherwise[v] = clean;
+  }
+  return { kind, repo: c.repo, number: c.number, holds_while: [...new Set(c.holds_while)], otherwise };
+}
+function statusCheckCommand(check) {
+  const sub = check.kind === "github_pr" ? "pr" : "issue";
+  return { file: "gh", args: [sub, "view", String(check.number), "--repo", check.repo, "--json", "state"] };
+}
+async function evaluateStatusCheck(db, planId, runFile = defaultRunFile) {
+  const goal = getGoal(db, planId);
+  const check = goal?.status_check;
+  if (!goal || !check || !goal.status_note) return null;
+  const { file, args } = statusCheckCommand(check);
+  let value;
+  try {
+    const out = JSON.parse(await runFile(file, args));
+    if (typeof out.state !== "string") throw new Error("no state in the answer");
+    value = out.state;
+  } catch (err) {
+    const now = getGoal(db, planId);
+    if (now?.status_check && JSON.stringify(now.status_check) === JSON.stringify(check)) {
+      updateGoal(db, planId, { status_check_failures: (now.status_check_failures ?? 0) + 1 });
+    }
+    return { outcome: "failed", error: err.message };
+  }
+  const current = getGoal(db, planId);
+  if (!current?.status_check || JSON.stringify(current.status_check) !== JSON.stringify(check)) return null;
+  if (check.holds_while.includes(value)) {
+    if (current.status_check_failures) updateGoal(db, planId, { status_check_failures: 0 });
+    return { outcome: "holds", value };
+  }
+  const text = check.otherwise[value];
+  if (text) {
+    updateGoal(db, planId, {
+      status_note: text,
+      status_note_at: (/* @__PURE__ */ new Date()).toISOString(),
+      // The text came from the run that attached the check: it keeps that run's mark
+      status_note_untrusted: current.status_note_untrusted,
+      status_check: null,
+      status_check_at: null,
+      status_check_failures: 0
+    });
+    return { outcome: "changed", value, text };
+  }
+  if ((current.status_check_failures ?? 0) < STATUS_CHECK_MAX_FAILURES) {
+    updateGoal(db, planId, { status_check_failures: STATUS_CHECK_MAX_FAILURES });
+  }
+  return { outcome: "stale", value };
+}
+function resetStatusCheckTimes() {
+  lastChecked.clear();
+}
+async function checkStatuses(db, planIds, now = /* @__PURE__ */ new Date(), budgetMs = STATUS_CHECK_BUDGET_MS, runFile = defaultRunFile) {
+  const started = Date.now();
+  let checked = 0;
+  for (const planId of planIds) {
+    const goal = getGoal(db, planId);
+    if (!goal?.status_check || !goal.status_note) continue;
+    if (goal.status_check_failures >= STATUS_CHECK_MAX_FAILURES) continue;
+    const last = lastChecked.get(planId);
+    if (last !== void 0 && now.getTime() - last < STATUS_CHECK_EVERY_MS) continue;
+    if (Date.now() - started >= budgetMs) return checked;
+    lastChecked.set(planId, now.getTime());
+    await evaluateStatusCheck(db, planId, runFile).catch(() => {
+    });
+    checked++;
+  }
+  return checked;
+}
+var STATUS_CHECK_VALUES, STATUS_CHECK_EVERY_MS, STATUS_CHECK_MAX_FAILURES, STATUS_CHECK_BUDGET_MS, COMMAND_TIMEOUT_MS, REPO_RE, defaultRunFile, lastChecked;
+var init_status_check = __esm({
+  "../core/src/status-check.ts"() {
+    "use strict";
+    init_goals();
+    init_goal_engine();
+    STATUS_CHECK_VALUES = {
+      github_pr: ["OPEN", "CLOSED", "MERGED"],
+      github_issue: ["OPEN", "CLOSED"]
+    };
+    STATUS_CHECK_EVERY_MS = 5 * 6e4;
+    STATUS_CHECK_MAX_FAILURES = 3;
+    STATUS_CHECK_BUDGET_MS = 2e4;
+    COMMAND_TIMEOUT_MS = 15e3;
+    REPO_RE = /^[\w.-]+\/[\w.-]+$/;
+    defaultRunFile = (file, args) => new Promise((resolve2, reject) => {
+      execFile(file, args, { timeout: COMMAND_TIMEOUT_MS, windowsHide: true, shell: false }, (err, stdout) => {
+        if (err) reject(err);
+        else resolve2(String(stdout));
+      });
+    });
+    lastChecked = /* @__PURE__ */ new Map();
   }
 });
 
@@ -1813,6 +1954,26 @@ function mustGetGoal(db, planId) {
   if (!goal) throw new GoalError(`Plan ${planId} is not a persistent goal.`);
   return goal;
 }
+function knownCategories(db, planId) {
+  const goal = mustGetGoal(db, planId);
+  const rows = db.prepare(`
+    SELECT json_extract(state, '$.action.category') category, COUNT(*) uses,
+      (SELECT json_extract(t2.state, '$.action.summary') FROM tasks t2
+        WHERE t2.plan_id = t.plan_id AND json_extract(t2.state, '$.action.category') = json_extract(t.state, '$.action.category')
+        ORDER BY t2.created_at DESC LIMIT 1) example
+    FROM tasks t WHERE plan_id = ? AND json_extract(state, '$.action.category') IS NOT NULL
+    GROUP BY category
+  `).all(planId);
+  const byName = /* @__PURE__ */ new Map();
+  for (const r of rows) byName.set(r.category, { category: r.category, mode: autonomyFor(goal, r.category), uses: r.uses, ...r.example && { example: r.example } });
+  for (const [category, mode] of Object.entries(goal.autonomy)) if (!byName.has(category)) byName.set(category, { category, mode, uses: 0 });
+  return [...byName.values()].sort((a, b) => b.uses - a.uses || a.category.localeCompare(b.category));
+}
+function similarCategories(known, category) {
+  if (known.some((k) => k.category === category)) return [];
+  const head = category.split(/[._:/-]/)[0].toLowerCase();
+  return known.filter((k) => k.category.split(/[._:/-]/)[0].toLowerCase() === head).map((k) => k.category);
+}
 function addItem(db, planId, runId, input) {
   const goal = mustGetGoal(db, planId);
   if (goal.status === "retired") throw new GoalError("This goal is retired.");
@@ -1854,6 +2015,7 @@ function addItem(db, planId, runId, input) {
     throw new GoalError('"untrusted" is the tool-rule category for tools that read outside content, not an action category. Use the category of the action itself.');
   }
   const goalMode = autonomyFor(goal, input.action.category);
+  const similar = similarCategories(knownCategories(db, planId), input.action.category);
   const untrusted = goalMode === "auto" && runId ? getRun(db, runId)?.untrusted_source ?? void 0 : void 0;
   const mode = untrusted !== void 0 ? "propose" : goalMode;
   if (mode === "off") {
@@ -1865,7 +2027,7 @@ function addItem(db, planId, runId, input) {
   } else {
     insertTask(db, { ...base, status: "completed", state, result: input.result ?? `Done automatically: ${input.action.summary}` });
   }
-  return { task: getTask(db, planId, id), existing: false, mode, ...untrusted !== void 0 && { untrusted } };
+  return { task: getTask(db, planId, id), existing: false, mode, ...untrusted !== void 0 && { untrusted }, ...similar.length > 0 && { similar_categories: similar } };
 }
 function summarizeItem(t) {
   const action = isProposal(t) ? t.state.action : void 0;
@@ -1887,18 +2049,21 @@ function buildBrief(db, planId, runId) {
   const previous = listRuns(db, planId, 10, { includeSkipped: false }).find((r) => r.id !== runId && r.status !== "queued" && r.status !== "running");
   const since = previous?.started_at ?? "1970-01-01T00:00:00.000Z";
   const decisions = db.prepare(`
-    SELECT v.task_id, v.gate, v.passed, v.output, v.created_at, t.goal, t.state
+    SELECT v.task_id, v.gate, v.passed, v.output, v.created_at, t.goal, t.state, t.notes, t.result
     FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
     WHERE v.plan_id = ? AND v.gate IN ('approval', 'override') AND v.actor = 'human' AND v.created_at > ?
     ORDER BY v.created_at
   `).all(planId, since).map((d) => {
-    const action = JSON.parse(d.state).action;
+    const state = JSON.parse(d.state);
+    const action = state.action;
+    const answered = state.asks_person && d.result?.startsWith(ANSWER_PREFIX);
     return {
       item: d.task_id,
       goal: d.goal,
       decision: d.gate === "override" ? "completed_by_human" : d.passed ? "approved" : "rejected",
       ...d.output && { feedback: d.output },
       ...action && { action },
+      ...answered && { answer: d.result.slice(ANSWER_PREFIX.length), ...d.notes && { question_notes: d.notes.length > QUESTION_NOTES_CHARS ? `${d.notes.slice(0, QUESTION_NOTES_CHARS - 1).trimEnd()}\u2026` : d.notes } },
       at: d.created_at
     };
   });
@@ -1931,9 +2096,12 @@ function buildBrief(db, planId, runId) {
       trigger: run.trigger,
       started_at: run.started_at,
       limits: goal.limits,
+      deadline: new Date(Date.parse(run.started_at) + goal.limits.max_run_minutes * 6e4).toISOString(),
+      next_scheduled_run: nextScheduledRun(db, planId, new Date(run.started_at)),
       untrusted: marked?.untrusted_at && marked.untrusted_source ? { since: marked.untrusted_at, source: marked.untrusted_source } : null
     } : null,
     autonomy: { default: "propose", categories: goal.autonomy },
+    known_categories: knownCategories(db, planId),
     memory: memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, source: m.source, pinned: m.pinned, ...m.untrusted_source && { untrusted: true } })),
     memory_omitted: active.length - memory.length,
     decisions_since_last_run: decisions,
@@ -1964,15 +2132,38 @@ function startRun(db, runId, sessionId) {
   updateGoal(db, run.plan_id, { last_run_at: (/* @__PURE__ */ new Date()).toISOString() });
   return getRun(db, runId);
 }
-function endRun(db, runId, summary) {
+function isHidden(code) {
+  return code < 32 || code >= 127 && code <= 159 || code >= 8203 && code <= 8207 || code >= 8234 && code <= 8238 || code >= 8294 && code <= 8297;
+}
+function cleanStatusNote(text) {
+  const plain = [...text.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")].map((c) => isHidden(c.codePointAt(0)) ? " " : c).join("").replace(/\s+/g, " ").trim();
+  const chars = [...plain];
+  return chars.length > STATUS_NOTE_MAX ? `${chars.slice(0, STATUS_NOTE_MAX - 1).join("").trimEnd()}\u2026` : plain;
+}
+function endRun(db, runId, summary, status2, statusCheck) {
   const run = getRun(db, runId);
   if (!run) throw new GoalError(`Run ${runId} not found.`);
   if (run.status !== "running" && run.status !== "queued") throw new GoalError(`Run ${runId} already ended (${run.status}).`);
   if (!summary.trim()) throw new GoalError("A summary is required: what you did, what is waiting, what you learned.");
+  if (statusCheck !== void 0 && statusCheck !== null && (status2 === void 0 || !cleanStatusNote(status2))) {
+    throw new GoalError("status_check needs a status to check: pass status too.");
+  }
+  const check = statusCheck === void 0 || statusCheck === null ? null : validateStatusCheck(statusCheck);
   const now = (/* @__PURE__ */ new Date()).toISOString();
   const created = db.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND run_id = ?").get(run.plan_id, runId).n;
   const resolved = db.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?").get(run.plan_id, run.started_at).n;
   updateRun(db, runId, { status: "completed", summary: summary.trim(), ended_at: now, items_created: created, items_resolved: resolved });
+  if (status2 !== void 0) {
+    const note = cleanStatusNote(status2);
+    updateGoal(db, run.plan_id, note ? {
+      status_note: note,
+      status_note_at: now,
+      status_note_untrusted: run.untrusted_source ?? null,
+      status_check: check,
+      status_check_at: check ? now : null,
+      status_check_failures: 0
+    } : { status_note: null, status_note_at: null, status_note_untrusted: null, status_check: null, status_check_at: null, status_check_failures: 0 });
+  }
   archiveResolved(db, run.plan_id);
   finishIfDone(db, run.plan_id);
   return getRun(db, runId);
@@ -2037,10 +2228,11 @@ function recordSkip(db, planId, trigger, reason, now = /* @__PURE__ */ new Date(
   const recent = db.prepare("SELECT 1 FROM goal_runs WHERE plan_id = ? AND status = 'skipped' AND skip_reason = ? AND started_at >= ?").get(planId, reason, hourAgo);
   return recent ? null : insertRun(db, planId, trigger, "skipped", reason);
 }
-var GoalError, MEMORY_BRIEF_CHARS;
+var GoalError, MEMORY_BRIEF_CHARS, ANSWER_PREFIX, QUESTION_NOTES_CHARS, STATUS_NOTE_MAX;
 var init_goal_engine = __esm({
   "../core/src/goal-engine.ts"() {
     "use strict";
+    init_status_check();
     init_queries();
     init_gates();
     init_goals();
@@ -2050,6 +2242,9 @@ var init_goal_engine = __esm({
     GoalError = class extends Error {
     };
     MEMORY_BRIEF_CHARS = 4e3;
+    ANSWER_PREFIX = "Your answer: ";
+    QUESTION_NOTES_CHARS = 2e3;
+    STATUS_NOTE_MAX = 40;
   }
 });
 
@@ -2060,6 +2255,9 @@ function applyGoalChanges(db, planId, changes) {
   if (!goal || !plan) throw new GoalError(`Goal ${planId} not found.`);
   for (const [category, mode] of Object.entries(changes.autonomy ?? {})) {
     if (mode !== null && !MODES.has(mode)) throw new GoalError(`"${mode}" isn't a mode for ${category}: use off, propose or auto.`);
+  }
+  for (const [from, to] of Object.entries(changes.merge_categories ?? {})) {
+    if (!from.trim() || !to.trim() || from.trim() === to.trim()) throw new GoalError(`Can't merge "${from}" into "${to}": give two different category names.`);
   }
   const model = changes.model === void 0 ? void 0 : normalizeModel(changes.model);
   for (const id of changes.forget_memory ?? []) {
@@ -2097,6 +2295,20 @@ function applyGoalChanges(db, planId, changes) {
         done.push(category === null ? `tool rule ${pattern} removed` : `tool rule ${pattern} \u2192 ${category}${category === UNTRUSTED_CATEGORY ? " (reads outside content)" : ""}`);
       }
       updateGoal(db, planId, { tool_map: toolMap });
+    }
+    for (const [rawFrom, rawTo] of Object.entries(changes.merge_categories ?? {})) {
+      const from = rawFrom.trim(), to = rawTo.trim();
+      const items = db.prepare(`UPDATE tasks SET state = json_set(state, '$.action.category', ?)
+        WHERE plan_id = ? AND json_extract(state, '$.action.category') = ?`).run(to, planId, from).changes;
+      const current = getGoal(db, planId);
+      const autonomy = { ...current.autonomy };
+      if (from in autonomy) {
+        if (!(to in autonomy)) autonomy[to] = autonomy[from];
+        delete autonomy[from];
+      }
+      const toolMap = Object.fromEntries(Object.entries(current.tool_map).map(([pattern, c]) => [pattern, c === from ? to : c]));
+      updateGoal(db, planId, { autonomy, tool_map: toolMap });
+      done.push(`merged ${from} into ${to} (${items} ${items === 1 ? "item" : "items"})`);
     }
     for (const m of changes.add_memory ?? []) {
       insertMemory(db, { plan_id: planId, kind: m.kind, text: m.text, source: "human", pinned: m.pinned ?? false });
@@ -2234,7 +2446,7 @@ function goalRunPrompt(p) {
   return [
     `Run persistent goal "${p.name}" (goal ID: ${p.goalId}, run ID: ${p.runId}). Working directory: ${p.workingDir}.`,
     `You start with no memory of earlier runs: call get_goal_brief with goal_id "${p.goalId}" and run_id "${p.runId}" first. It has the objective, standing instructions, memory, human decisions since the last run, open items and recent run summaries. Its watch_events, when there are any, are what is new since the last run (one line per new thing, such as an issue number): deal with those first.`,
-    "Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal's state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category's autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.",
+    "Then: carry out approved actions first and complete those items; revise rejected ones using the feedback (update the proposal's state.action with update_task, then set_status completed to send it for review again) or abandon them; look for new work and add each piece with add_item (always with external_ref for outside things); stay within each action category's autonomy (auto: do it, then record it; propose: add_item and wait for approval; off: never). Give an action a category from known_categories in the brief when one fits it, so the same action keeps one name; make up a new one only for a different kind of action. A tool call refused by the Quarterdeck goal guard means: propose it with add_item instead.",
     "When you need something only the person can give or do (a choice, details you can't find, connecting a service, allowing a site), add_item with ask_person: true and one clear question, and carry on with what you can; don't guess. Their answer arrives as memory and the item is completed.",
     "Save anything future runs should know with remember.",
     'Your summary, items and memory are read by the person who owns this goal: write to them as "you", and never guess their gender or pronouns.',
@@ -2329,6 +2541,7 @@ async function schedulerPass(db, opts) {
   }
   await checkWatches(db, goals.map(({ plan }) => plan.id), now);
   for (const { plan } of goals) queueForWatchEvents(db, plan.id, now);
+  await checkStatuses(db, goals.map(({ plan }) => plan.id), now);
   const toolWatches = opts.toolWatches ? takeDueToolWatches(db, goals.map(({ plan }) => plan.id), now) : [];
   const withWatches = (r) => toolWatches.length ? { ...r, tool_watches: toolWatches } : r;
   const hold = getRunHold(db, now);
@@ -2363,6 +2576,9 @@ async function schedulerPass(db, opts) {
   }
   return withWatches({ leader: true, claimed, expired });
 }
+function clipText(text, max) {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}\u2026`;
+}
 function decideItem(db, planId, taskId, input) {
   const task = getTask(db, planId, taskId);
   if (!task) throw new GoalError(`Item ${taskId} not found.`);
@@ -2373,8 +2589,9 @@ function decideItem(db, planId, taskId, input) {
     if (!answer) throw new GoalError("An answer is needed.");
     if (!asksPerson(task)) throw new GoalError(`Item ${taskId} isn't a question for you; approve or reject it instead.`);
     approveTask(db, planId, taskId);
-    updateTask(db, planId, taskId, { result: `Your answer: ${answer}`, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
-    insertMemory(db, { plan_id: planId, kind: "fact", text: `You answered "${task.goal}": ${answer}`, source: "human", source_ref: taskId });
+    updateTask(db, planId, taskId, { result: `${ANSWER_PREFIX}${answer}`, updated_at: (/* @__PURE__ */ new Date()).toISOString() });
+    const context = task.notes?.trim() ? ` (the question said: ${clipText(task.notes.trim().replace(/\s+/g, " "), ANSWER_CONTEXT_CHARS)})` : "";
+    insertMemory(db, { plan_id: planId, kind: "fact", text: `You answered "${task.goal}": ${answer}${context}`, source: "human", source_ref: taskId });
     if (active()) queuedRun = queueRun(db, planId);
   } else if (input.decision === "approve") {
     approveTask(db, planId, taskId);
@@ -2392,7 +2609,7 @@ function reviveIfDone(db, planId) {
   updateGoal(db, planId, { status: "active" });
   return true;
 }
-var LEASE_NAME, LEASE_MS, STALE_GRACE_MS, DEFAULT_MAX_CONCURRENT, WATCH_BUDGET_MS;
+var LEASE_NAME, LEASE_MS, STALE_GRACE_MS, DEFAULT_MAX_CONCURRENT, WATCH_BUDGET_MS, ANSWER_CONTEXT_CHARS;
 var init_goal_tick = __esm({
   "../core/src/goal-tick.ts"() {
     "use strict";
@@ -2404,11 +2621,13 @@ var init_goal_tick = __esm({
     init_watches();
     init_goal_changes();
     init_migrate();
+    init_status_check();
     LEASE_NAME = "goals";
     LEASE_MS = 9e4;
     STALE_GRACE_MS = 5 * 6e4;
     DEFAULT_MAX_CONCURRENT = 3;
     WATCH_BUDGET_MS = 45e3;
+    ANSWER_CONTEXT_CHARS = 800;
   }
 });
 
@@ -2417,6 +2636,12 @@ import { createHash as createHash2 } from "crypto";
 function clip(text, max) {
   if (text === null || text.length <= max) return text;
   return `${text.slice(0, max - 1).trimEnd()}\u2026`;
+}
+function statusNote(goal, runs) {
+  if (!goal.status_note) return null;
+  const last = runs.find((r) => r.status !== "queued" && r.status !== "running" && r.status !== "skipped");
+  const stale = (goal.status_check_failures ?? 0) >= STATUS_CHECK_MAX_FAILURES || !!last && (last.status === "failed" || last.status === "timed_out" || !!last.ended_at && !!goal.status_note_at && last.ended_at > goal.status_note_at);
+  return { text: goal.status_note, at: goal.status_note_at, stale, untrusted: goal.status_note_untrusted };
 }
 function getGoalItems(db, planId) {
   const rows = db.prepare("SELECT * FROM tasks WHERE plan_id = ? AND archived_at IS NULL").all(planId);
@@ -2441,7 +2666,9 @@ function itemView(t) {
 function overviewItem(t) {
   const v = itemView(t);
   const action = v.action;
-  const short = { ...v, goal: clip(v.goal, CLIP.title), notes: clip(v.notes, CLIP.notes), result: clip(v.result, CLIP.result) };
+  const notesMax = v.asks_person && v.awaiting_review ? CLIP.context : CLIP.notes;
+  const clipped = v.goal.length > CLIP.title || (v.notes?.length ?? 0) > notesMax || (action?.summary?.length ?? 0) > CLIP.title;
+  const short = { ...v, goal: clip(v.goal, CLIP.title), notes: clip(v.notes, notesMax), result: clip(v.result, CLIP.result), ...clipped && { clipped: true } };
   return action ? { ...short, action: { category: action.category, summary: clip(action.summary, CLIP.title) } } : short;
 }
 function getAutonomySuggestions(db, planId) {
@@ -2492,6 +2719,9 @@ function describeActivity({ goal, openRun, lastRun, events, items }) {
   if (openRun?.status === "running") {
     if (openRun.waiting_tool && openRun.waiting_since) {
       const tool2 = openRun.waiting_tool;
+      if (/^quarterdeck /.test(tool2)) {
+        return { state: "running", text: `Waiting for a permission prompt that may not be showing: ${tool2}. Allow Quarterdeck's tools in this session, or cancel the run`, at: openRun.waiting_since, waiting: { tool: tool2, since: openRun.waiting_since } };
+      }
       return { state: "running", text: `Waiting for your permission: ${tool2}`, at: openRun.waiting_since, waiting: { tool: tool2, since: openRun.waiting_since } };
     }
     const goals = new Map(items.map((t) => [t.id, t.goal]));
@@ -2536,6 +2766,7 @@ function buildOverview(db, detail = "all", standingSession = null) {
       status: goal.status,
       one_off: goal.one_off,
       model: goal.model,
+      status_note: statusNote(goal, runs),
       instructions: clip(goal.instructions, CLIP.instructions),
       autonomy: goal.autonomy,
       tool_map: goal.tool_map,
@@ -2598,6 +2829,9 @@ function buildOverview(db, detail = "all", standingSession = null) {
         id: i.id,
         goal: clip(i.goal, CARD_TEXT),
         asks_person: i.asks_person,
+        ..."clipped" in i && i.clipped || i.goal.length > CARD_TEXT || (i.action?.summary?.length ?? 0) > CARD_TEXT ? { clipped: true } : {},
+        // A question can't be answered without its context, so a card keeps the first few's
+        ...i.asks_person && i.notes && g.needs_you.filter((q) => q.asks_person).indexOf(i) < CARD_CONTEXT ? { notes: i.notes } : {},
         action: i.action ? { category: i.action.category, summary: clip(i.action.summary, CARD_TEXT) } : null
       })),
       runs: g.runs.slice(0, 1),
@@ -2615,10 +2849,11 @@ function overviewWithEtag(db, detail = "all", standingSession = null) {
   const body = JSON.stringify(buildOverview(db, detail, standingSession));
   return { body, etag: `"${createHash2("sha256").update(body).digest("base64url").slice(0, 27)}"` };
 }
-var RUNS, OPEN_ITEMS, HEALTH, MEMORY, CLIP, DONE, ACTIVITY_EVENTS, PROMOTE_AFTER, oneLine, str, NEEDS_YOU, CARD_TEXT;
+var RUNS, OPEN_ITEMS, HEALTH, MEMORY, CLIP, DONE, ACTIVITY_EVENTS, PROMOTE_AFTER, oneLine, str, NEEDS_YOU, CARD_TEXT, CARD_CONTEXT;
 var init_goal_overview = __esm({
   "../core/src/goal-overview.ts"() {
     "use strict";
+    init_status_check();
     init_queries();
     init_gates();
     init_goals();
@@ -2633,7 +2868,7 @@ var init_goal_overview = __esm({
     OPEN_ITEMS = 10;
     HEALTH = 20;
     MEMORY = 10;
-    CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400, watch: 300 };
+    CLIP = { summary: 300, memory: 240, title: 200, notes: 200, result: 200, activity: 240, instructions: 1500, objective: 400, watch: 300, context: 1e3 };
     DONE = 10;
     ACTIVITY_EVENTS = 20;
     PROMOTE_AFTER = 10;
@@ -2641,6 +2876,7 @@ var init_goal_overview = __esm({
     str = (v) => typeof v === "string" && v.trim() ? oneLine(v) : null;
     NEEDS_YOU = 5;
     CARD_TEXT = 160;
+    CARD_CONTEXT = 1;
   }
 });
 
@@ -2730,6 +2966,8 @@ var init_todos = __esm({
 // ../core/src/index.ts
 var src_exports = {};
 __export(src_exports, {
+  ANSWER_CONTEXT_CHARS: () => ANSWER_CONTEXT_CHARS,
+  ANSWER_PREFIX: () => ANSWER_PREFIX,
   BUILTIN_UNTRUSTED: () => BUILTIN_UNTRUSTED,
   DEFAULT_GOAL_LIMITS: () => DEFAULT_GOAL_LIMITS,
   DEFAULT_HOLD_MS: () => DEFAULT_HOLD_MS,
@@ -2752,6 +2990,11 @@ __export(src_exports, {
   REVISION_TRIGGERS: () => REVISION_TRIGGERS,
   SCHEMA_VERSION: () => SCHEMA_VERSION,
   STALE_GRACE_MS: () => STALE_GRACE_MS,
+  STATUS_CHECK_BUDGET_MS: () => STATUS_CHECK_BUDGET_MS,
+  STATUS_CHECK_EVERY_MS: () => STATUS_CHECK_EVERY_MS,
+  STATUS_CHECK_MAX_FAILURES: () => STATUS_CHECK_MAX_FAILURES,
+  STATUS_CHECK_VALUES: () => STATUS_CHECK_VALUES,
+  STATUS_NOTE_MAX: () => STATUS_NOTE_MAX,
   Statement: () => Statement,
   UNTRUSTED_CATEGORY: () => UNTRUSTED_CATEGORY,
   WATCH_BRIEF_LINES: () => WATCH_BRIEF_LINES,
@@ -2781,8 +3024,10 @@ __export(src_exports, {
   checkCommandWatch: () => checkCommandWatch,
   checkCompletion: () => checkCompletion,
   checkHealth: () => checkHealth,
+  checkStatuses: () => checkStatuses,
   checkWatches: () => checkWatches,
   claimRun: () => claimRun,
+  cleanStatusNote: () => cleanStatusNote,
   clearAllData: () => clearAllData,
   clearRunHold: () => clearRunHold,
   compareTaskIds: () => compareTaskIds,
@@ -2796,6 +3041,7 @@ __export(src_exports, {
   decideItem: () => decideItem,
   decideTick: () => decideTick,
   defaultDbPath: () => defaultDbPath,
+  defaultRunFile: () => defaultRunFile,
   deleteGoal: () => deleteGoal,
   deleteMemory: () => deleteMemory,
   deleteTaskTree: () => deleteTaskTree,
@@ -2807,6 +3053,7 @@ __export(src_exports, {
   enableEventTrigger: () => enableEventTrigger,
   endRun: () => endRun,
   envVar: () => envVar,
+  evaluateStatusCheck: () => evaluateStatusCheck,
   expireStaleRuns: () => expireStaleRuns,
   failRun: () => failRun,
   finishIfDone: () => finishIfDone,
@@ -2846,6 +3093,7 @@ __export(src_exports, {
   isProposal: () => isProposal,
   isUsageLimit: () => isUsageLimit,
   itemView: () => itemView,
+  knownCategories: () => knownCategories,
   leaseHolder: () => leaseHolder,
   listGoals: () => listGoals,
   listHealth: () => listHealth,
@@ -2884,6 +3132,7 @@ __export(src_exports, {
   reportRunEnd: () => reportRunEnd,
   reportRunProgress: () => reportRunProgress,
   reportToolWatch: () => reportToolWatch,
+  resetStatusCheckTimes: () => resetStatusCheckTimes,
   reviveIfDone: () => reviveIfDone,
   runChecks: () => runChecks,
   runHealthCheck: () => runHealthCheck,
@@ -2896,8 +3145,11 @@ __export(src_exports, {
   setSchedule: () => setSchedule,
   setTodo: () => setTodo,
   setWatch: () => setWatch,
+  similarCategories: () => similarCategories,
   standingAllowRules: () => standingAllowRules,
   startRun: () => startRun,
+  statusCheckCommand: () => statusCheckCommand,
+  statusNote: () => statusNote,
   takeDueToolWatches: () => takeDueToolWatches,
   takeLease: () => takeLease,
   takeWatchEvents: () => takeWatchEvents,
@@ -2911,6 +3163,7 @@ __export(src_exports, {
   updateRun: () => updateRun,
   updateTask: () => updateTask,
   usableAsAllowRule: () => usableAsAllowRule,
+  validateStatusCheck: () => validateStatusCheck,
   verifyEventSecret: () => verifyEventSecret,
   watchDue: () => watchDue,
   watchFailing: () => watchFailing,
@@ -2943,6 +3196,7 @@ var init_src = __esm({
     init_watches();
     init_guard();
     init_goal_tick();
+    init_status_check();
     init_goal_overview();
     init_todos();
     init_goal_changes();

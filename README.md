@@ -36,6 +36,10 @@ Quarterdeck's own repo is looked after by two goals made from the ready-made *Wo
 
 The run took 2 minutes. The PR says it was opened by a Quarterdeck goal, and the CI goal now watches main for that merge, ready to propose a fix if anything breaks.
 
+Here's another one on video, from a to-do in the pane to the feature working live (80 seconds, with sound and captions). This time the Issue Fixer stopped to ask which of two designs to build before writing any code ([issue #17](https://github.com/shannonbay/Quarterdeck/issues/17), [PR #18](https://github.com/shannonbay/Quarterdeck/pull/18)):
+
+[![Quarterdeck: from a to-do to a working feature (video)](https://img.youtube.com/vi/okKu9MnWZ5Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=okKu9MnWZ5Y)
+
 ## How it differs
 
 - **From Claude Code's scheduled tasks (`/schedule`):** scheduled tasks run in Anthropic's cloud, so they keep going with your laptop closed. They suit clear-cut work, like reviewing every PR. A Quarterdeck goal is for ongoing jobs where you want a say: it proposes and waits for you, keeps memory and items between runs, and asks when it's unsure. Its guard holds a run to what you've allowed, outside the model, rather than only asking in the prompt.
