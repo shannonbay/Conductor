@@ -667,6 +667,31 @@ test('a goal with nothing for you is one line; one that needs you keeps its card
   }
 })
 
+test("Add… beside an allow rule opens /permissions, or says what to type when there's none", async ($, on) => {
+  const { toasts } = engine(on)
+  const ran: string[] = []
+  let has = true
+  on('command.list', () => ({ value: has ? [{ name: 'permissions', description: 'Manage allow & deny tool permission rules', source: 'builtin' }] : [] }) as never)
+  on('command.run', { command: 'permissions' }, () => {
+    ran.push('permissions')
+    return { text: '' } as never
+  })
+  fakeQuarterdeck(on, [goal({ id: 'g1', name: 'Inbox', autonomy: { shell: 'auto' }, tool_map: { Bash: 'shell' } })])
+  await $.session.start(START)
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'toggle-g1' })
+  await ui.press({ key: 'allow-toggle-g1' })
+  await ui.press({ key: 'allow-add-g1/Bash' })
+  expect(ran).toEqual(['permissions'])
+  expect(toasts.at(-1)).toContain('Bash')
+
+  has = false
+  await ui.press({ key: 'allow-add-g1/Bash' })
+  expect(ran).toEqual(['permissions'])
+  expect(toasts.at(-1)).toBe('Type /permissions and add this allow rule: Bash')
+  await ui.unmount()
+})
+
 test("an expanded goal lists its Claude Code allow rules when opened, and Claude is asked to add them", async ($, on) => {
   const { prompts } = engine(on)
   fakeQuarterdeck(on, [

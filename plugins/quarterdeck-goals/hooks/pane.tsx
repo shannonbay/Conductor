@@ -812,12 +812,41 @@ function allowSection($: Engine, e: E, view: View, g: GoalCard) {
     <Box key={`allow-${g.id}`} flexDirection="column">
       <Button key={`allow-toggle-${g.id}`} plain label={`${isOpen ? '▾' : '▸'} Claude Code allow rules (${rules.length})`} onPress={() => void toggleExpanded($, key)} />
       {isOpen && <Text key={`allow-why-${g.id}`} dimColor>  For the tools this goal may use without asking. Without them Claude Code asks before each call, unless it is in auto mode. They apply to all of Claude Code, not only goal runs.</Text>}
-      {isOpen && rules.map((r) => <Text key={`allow-rule-${g.id}/${r}`}>{`  ${r}`}</Text>)}
+      {isOpen && rules.map((r) => (
+        <Box key={`allow-rule-${g.id}/${r}`}>
+          <Text>{`  ${r}`}</Text>
+          <Text> </Text>
+          {action($, e, { key: `allow-add-${g.id}/${r}`, label: 'Add…', onPress: () => void addRule($, r) })}
+        </Box>
+      ))}
       {isOpen && skipped.length > 0 && <Text key={`allow-skipped-${g.id}`} dimColor>  Claude Code can't take these tool rules as allow rules: {skipped.join(', ')}</Text>}
       {isOpen && rules.length > 0 && action($, e, { key: `allow-ask-${g.id}`, label: view.doing === `allow:${g.id}` ? '  Asking…' : '  Ask Claude to add them', onPress: () => void askToAllow($, g, rules) })}
     </Box>
   )
 }
+
+/**
+ * Add…: opens Claude Code's own /permissions, where the person adds the rule
+ * shown beside the button. The mod never writes settings or answers allow
+ * itself. With no /permissions, or when it fails, a toast says what to type.
+ */
+async function addRule($: Engine, rule: string): Promise<void> {
+  const fallback = `Type /permissions and add this allow rule: ${rule}`
+  try {
+    const commands = await $.command.list()
+    if (!commands.some((c) => c.name === PERMISSIONS_COMMAND)) {
+      $.ui.toast(fallback)
+      return
+    }
+    await $.command.run({ command: PERMISSIONS_COMMAND })
+    $.ui.toast(`Add this allow rule in /permissions: ${rule}`)
+  } catch {
+    $.ui.toast(fallback)
+  }
+}
+
+/** Claude Code's built-in permissions editor. */
+const PERMISSIONS_COMMAND = 'permissions'
 
 /** Asks Claude, in the conversation, to add the allow rules: it shows the change and waits for the person's yes. */
 async function askToAllow($: Engine, g: GoalCard, rules: string[]): Promise<boolean> {
