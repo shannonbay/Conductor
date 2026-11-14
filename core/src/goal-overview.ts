@@ -3,6 +3,7 @@
  * (the quarterdeck-goals pane) needs, in one call. Served by the web app's
  * GET /api/goals/overview and the MCP tool goals_overview.
  */
+import { STATUS_CHECK_MAX_FAILURES } from './status-check.js'
 import { createHash } from 'crypto'
 import type { Database } from './sqlite.js'
 import { compareTaskIds, deserializeTask, getEvents } from './queries.js'
@@ -44,8 +45,9 @@ function clip(text: string | null, max: number): string | null {
 export function statusNote(goal: Goal, runs: GoalRun[]): { text: string; at: string | null; stale: boolean; untrusted: string | null } | null {
   if (!goal.status_note) return null
   const last = runs.find((r) => r.status !== 'queued' && r.status !== 'running' && r.status !== 'skipped')
-  const stale = !!last && (last.status === 'failed' || last.status === 'timed_out'
-    || (!!last.ended_at && !!goal.status_note_at && last.ended_at > goal.status_note_at))
+  const stale = (goal.status_check_failures ?? 0) >= STATUS_CHECK_MAX_FAILURES
+    || (!!last && (last.status === 'failed' || last.status === 'timed_out'
+    || (!!last.ended_at && !!goal.status_note_at && last.ended_at > goal.status_note_at)))
   return { text: goal.status_note, at: goal.status_note_at, stale, untrusted: goal.status_note_untrusted }
 }
 

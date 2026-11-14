@@ -152,6 +152,12 @@ export interface Goal {
   status_note_at: string | null
   /** The untrusted content that run had read before setting it, if any. */
   status_note_untrusted: string | null
+  /** A check the status's run attached: the scheduler evaluates it between runs (see status-check.ts). */
+  status_check: import('./status-check.js').StatusCheck | null
+  /** When that check was attached. */
+  status_check_at: string | null
+  /** Failed checks in a row; at STATUS_CHECK_MAX_FAILURES the status shows as stale. */
+  status_check_failures: number
 }
 
 export type NewGoal = Pick<Goal, 'plan_id' | 'objective'> & Partial<Omit<Goal, 'plan_id' | 'objective' | 'limits'>> & { limits?: Partial<GoalLimits> }

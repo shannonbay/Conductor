@@ -32,6 +32,9 @@ function deserializeGoal(r: Row): Goal {
     status_note: (r.status_note as string | null | undefined) ?? null,
     status_note_at: (r.status_note_at as string | null | undefined) ?? null,
     status_note_untrusted: (r.status_note_untrusted as string | null | undefined) ?? null,
+    status_check: r.status_check ? JSON.parse(r.status_check as string) : null,
+    status_check_at: (r.status_check_at as string | null | undefined) ?? null,
+    status_check_failures: (r.status_check_failures as number | undefined) ?? 0,
   } as Goal
 }
 
@@ -102,6 +105,7 @@ export function updateGoal(
   const serialized: Row = { ...fields }
   if (fields.autonomy) serialized.autonomy = JSON.stringify(fields.autonomy)
   if (fields.tool_map) serialized.tool_map = JSON.stringify(fields.tool_map)
+  if ('status_check' in fields) serialized.status_check = fields.status_check ? JSON.stringify(fields.status_check) : null
   if ('health_triggers_run' in fields) serialized.health_triggers_run = fields.health_triggers_run ? 1 : 0
   if ('one_off' in fields) serialized.one_off = fields.one_off ? 1 : 0
   if (fields.limits) serialized.limits = JSON.stringify({ ...current.limits, ...fields.limits })
