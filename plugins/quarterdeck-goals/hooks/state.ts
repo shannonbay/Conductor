@@ -30,6 +30,15 @@ const guardMissing = atom({ plugin: 'quarterdeck-goals', key: 'guardMissing' } a
 const planMode = atom({ plugin: 'quarterdeck-goals', key: 'planMode' } as const, false)
 const todos = atom({ plugin: 'quarterdeck-goals', key: 'todos' } as const, null)
 const phone = atom({ plugin: 'quarterdeck-goals', key: 'phone' } as const, 'unknown')
+const spinnerFrame = atom({ plugin: 'quarterdeck-goals', key: 'spinnerFrame' } as const, 0)
+
+export async function getSpinnerFrame($: Engine): Promise<number> {
+  return read($, spinnerFrame)
+}
+/** The next frame (wrapping well before the number gets large). */
+export async function advanceSpinner($: Engine): Promise<void> {
+  await update($, spinnerFrame, (n) => (n + 1) % 1000)
+}
 
 export async function getPhone($: Engine): Promise<PhoneState> {
   return read($, phone)

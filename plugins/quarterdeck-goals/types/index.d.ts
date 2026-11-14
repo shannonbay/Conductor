@@ -1,5 +1,5 @@
 /** A goal work item: a proposal waiting for the person, or an open item. */
-export type Item = { id: string; title: string; category: string | null; summary: string | null; /** A question or request for the person, not a proposal. */ asksPerson?: boolean }
+export type Item = { id: string; title: string; category: string | null; summary: string | null; /** A question or request for the person, not a proposal. */ asksPerson?: boolean; /** The run's context for it: a question's options, why a proposal. */ notes?: string }
 
 /** One goal run. */
 export type Run = {
@@ -182,6 +182,8 @@ declare module 'claude-code' {
       todos: Todos | null
       /** Whether phone alerts can get through, learned from the last push and from messages sent from the phone. */
       phone: PhoneState
+      /** The spinner's frame on a working goal's title; moves on only while a run works. */
+      spinnerFrame: number
     }
   }
 }

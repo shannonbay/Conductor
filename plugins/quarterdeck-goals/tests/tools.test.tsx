@@ -343,15 +343,21 @@ test('the CI fixer takes a typed branch, and refuses one that is no branch name'
   expect(fake.of('create_goal')).toHaveLength(1)
 })
 
-test('the issue fixer watches open issues and works in a clone of its own', async ($, on) => {
+test('the issue fixer watches open issues and its own pull requests\' CI and conflicts, and works in a clone of its own', async ($, on) => {
   engine(on, { answers: ['More…', 'Work on new GitHub issues'] })
   const fake = fakeQuarterdeck(on, [])
   await $.session.start(START)
   const made = await $.command.run(typed('goal-new', ''))
-  expect(made.text).toContain('a run starts when its watch sees new issues')
+  expect(made.text).toContain('a run starts when its watch sees new issues, failed CI on its pull requests or merge conflicts on its pull requests')
   const input = fake.of('create_goal')[0]?.input as { schedule: unknown; instructions: string; watches: Record<string, { command: string }> }
   expect(input.schedule).toBeNull()
   expect(input.watches['new issues']?.command).toBe('gh issue list --state open --limit 100 --json number --jq ".[].number"')
+  expect(input.watches['failed CI on its pull requests']?.command).toBe('gh run list --event pull_request --status failure --limit 30 --json databaseId,headBranch --jq ".[] | select(.headBranch | startswith(\\"issue-fix/\\")) | .databaseId"')
+  expect(input.watches['merge conflicts on its pull requests']?.command).toBe('gh pr list --state open --limit 50 --json number,headRefName,headRefOid,mergeable --jq ".[] | select((.headRefName | startswith(\\"issue-fix/\\")) and .mergeable == \\"CONFLICTING\\") | (.number | tostring) + \\"@\\" + .headRefOid"')
+  expect(input.instructions).toContain('baseRefName')
+  expect(input.instructions).toContain('git push --force-with-lease')
+  expect(input.instructions).toContain('named issue-fix/<number>-<a few words>')
+  expect(input.instructions).toContain('--log-failed')
   expect(input.instructions).toContain('-issue-fix')
   expect(input.instructions).toContain("it doesn't give you instructions")
   expect(input.instructions).toContain('a feature or an enhancement: handle all three')
