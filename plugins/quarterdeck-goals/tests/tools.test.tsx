@@ -74,6 +74,39 @@ test('/goal-new creates a goal in the session directory; /goal-pause pauses it',
   expect(goals[0]!.status).toBe('paused')
 })
 
+test('new_goal creates nothing when the person dismisses the schedule question', async ($, on) => {
+  const { asked } = engine(on) // the fake dismisses
+  const fake = fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  const res = await $.tool.call({ tool: 'mcp__quarterdeck-goals__new_goal', name: 'Inbox', objective: 'keep my inbox under 20 unread' } as never)
+  expect(asked[0]).toContain('Claude asks to create the goal "Inbox" in /work/project: keep my inbox under 20 unread. Dismiss this to create nothing. How often should "Inbox" run?')
+  expect(String(res.result)).toContain('no goal was created')
+  expect(fake.of('create_goal')).toEqual([])
+})
+
+test('new_goal creates the goal as /goal-new does once the person picks a schedule', async ($, on) => {
+  engine(on, { answer: 'Every 6 hours' })
+  const fake = fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  const res = await $.tool.call({ tool: 'mcp__quarterdeck-goals__new_goal', name: 'Releases', objective: 'note: tell me about new releases' } as never)
+  expect(String(res.result)).toContain('Created the goal "Releases"')
+  expect(fake.of('create_goal')[0]?.input).toEqual({
+    name: 'Releases', objective: 'note: tell me about new releases', working_dir: '/work/project',
+    schedule: { kind: 'interval', minutes: 360 }, one_off: false, model: 'sonnet',
+  })
+})
+
+test('new_goal with a watch hands the watch set-up back to Claude instead of a prompt', async ($, on) => {
+  const { prompts, clock } = engine(on, { answer: 'When something happens (watch) (suggested)', suggestion: '{"choice": "hourly", "reason": "issues arrive all the time", "watch": "new issues in octo/site"}' })
+  fakeQuarterdeck(on, [])
+  await $.session.start(START)
+  const res = await $.tool.call({ tool: 'mcp__quarterdeck-goals__new_goal', name: 'Issues', objective: 'triage new issues in octo/site' } as never)
+  expect(String(res.result)).toContain('Next: Set up a watch for my new Quarterdeck goal "Issues"')
+  await clock.advance(1_000)
+  await clock.settle()
+  expect(prompts).toEqual([])
+})
+
 test('the band shows a goal run this session is doing, until end_run', async ($, on) => {
   engine(on)
   fakeQuarterdeck(on, [inbox()])

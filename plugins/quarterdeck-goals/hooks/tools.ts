@@ -10,7 +10,7 @@ import { addTodo, answerItem, approve, createGoal, fetchOverview, editTodo, fetc
 import { ago, clip, describe, NEW_GOAL_MODEL, newGoalModelText, describeGoalChanges, fallbackTitle, findGoal, noMatch, parseSchedule, SCHEDULE_USAGE, scheduleLabel, soundsEventDriven, splitGoalArgs, WATCH_FALLBACK, watchSetupPrompt, summarize, type GoalChanges, toCard } from './model'
 import { kick } from './runner'
 import { sendToChat } from './chat'
-import { askSchedule, readSchedule, suggestSchedule } from './schedule'
+import { pickSchedule, readSchedule, suggestSchedule } from './schedule'
 import { describeTodos, findTodo } from './todos'
 import { act, refresh, refreshTodos } from './sync'
 import { phoneHint, readLastAlert, readLastPoll, readTrace } from './alerts'
@@ -46,6 +46,18 @@ export const TOOLS = [
     name: 'answer_item',
     description: "Answers a question a Quarterdeck goal's run asked the person (an item marked as a question), with the person's own words. Only when they've given the answer.",
     inputSchema: { type: 'object', properties: { goal: GOAL, item_id: ITEM, answer: { type: 'string', description: "The person's answer." } }, required: ['goal', 'item_id', 'answer'] },
+  },
+  {
+    name: 'new_goal',
+    description: "Creates a Quarterdeck goal (a standing objective a scheduled agent works on) in this project's directory, as /goal-new does: a small model suggests how often it runs and which model its runs use, and the person picks the schedule; dismissing that question creates nothing. Every action category starts at propose, so its runs ask before acting. Use it when the person asks for a goal; then add standing instructions, tool rules or a watch with update_goal (which asks them again).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        objective: { type: 'string', description: 'What the goal keeps true, in their words, e.g. keep my inbox under 20 unread' },
+        name: { type: 'string', description: 'A short name, 2-5 words; left out, one is suggested' },
+      },
+      required: ['objective'],
+    },
   },
   {
     name: 'run_goal',
@@ -196,6 +208,14 @@ export async function runTool($: Engine, name: ToolName, input: Record<string, u
     const poll = lastPoll ? `\nLast background poll: ${at(lastPoll)}.` : '\nNo background poll recorded.'
     const checks = traced.length ? `\nAlert checks (oldest first):\n${traced.map((l) => `- ${l}`).join('\n')}` : ''
     return { text: summarize(s.goals, now) + alert + poll + checks, isError: false }
+  }
+
+  if (name === 'new_goal') {
+    const objective = String(input.objective ?? '').trim()
+    if (!objective) return fail('An objective is needed.')
+    const given = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : null
+    const made = await createNewGoal($, given, objective, true)
+    return made.created ? { text: made.text, isError: false } : fail(made.text)
   }
 
   const found = await resolveGoal($, input.goal)
@@ -388,33 +408,47 @@ const WATCH_PROMPT_DELAY_MS = 500
 export async function newGoal($: Engine, args: string): Promise<string> {
   const { name: given, objective } = splitGoalArgs(args)
   if (!objective) return newFromTemplate($)
+  return (await createNewGoal($, given, objective, false)).text
+}
+
+/**
+ * /goal-new <objective> and the new_goal tool. For Claude (`byClaude`), the
+ * schedule question says Claude asked and is the person's yes: dismissing it
+ * creates nothing. The watch set-up comes back in the answer rather than as a prompt.
+ */
+async function createNewGoal($: Engine, given: string | null, objective: string, byClaude: boolean): Promise<{ created: boolean; text: string }> {
   const cwd = await $.session.root()
   const suggestion = await suggestSchedule($, given, objective)
   const name = given ?? suggestion.title ?? fallbackTitle(objective)
-  const choice = await askSchedule($, name, suggestion, true)
+  const intro = byClaude ? `Claude asks to create the goal "${name}" in ${cwd}: ${objective}. Dismiss this to create nothing. ` : ''
+  const choice = await pickSchedule($, name, suggestion, { offerWatch: true, cancelable: byClaude, intro })
+  if (!choice) return { created: false, text: 'The person dismissed the question; no goal was created.' }
   const model = suggestion.model ?? NEW_GOAL_MODEL
-  let created
   try {
-    created = await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff, model })
+    await createGoal($, { name, objective, working_dir: cwd, schedule: choice.schedule, one_off: choice.oneOff, model })
   } catch (err) {
-    return `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}`
+    return { created: false, text: `Couldn't create the goal: ${err instanceof Error ? err.message : String(err)}` }
   }
   await kick($) // a new interval or a one-off has a run due now
   await refresh($)
+  const done = (text: string) => ({ created: true, text })
   const where = `in ${cwd}`
   const runsOn = newGoalModelText(model, suggestion.model && suggestion.modelReason)
   if (choice.key === 'watch') {
+    const setUp = watchSetupPrompt(name, suggestion.watch ?? WATCH_FALLBACK)
+    const created = `Created the goal "${name}" ${where}, running daily as a backstop; the first run starts within a minute.`
+    if (byClaude) return done(`${created}${runsOn} The person chose to start it when something happens. Next: ${setUp}`)
     // Writing and testing the watch is Claude's job (the person confirms it in update_goal). A command can't
     // submit a prompt while it runs, so it goes once the command has answered.
-    $.clock.after(WATCH_PROMPT_DELAY_MS, () => void sendToChat($, watchSetupPrompt(name, suggestion.watch ?? WATCH_FALLBACK), `set up a watch for the goal "${name}"`)
+    $.clock.after(WATCH_PROMPT_DELAY_MS, () => void sendToChat($, setUp, `set up a watch for the goal "${name}"`)
       .catch(() => $.ui.toast(`Ask Claude to add a watch to "${name}".`)))
-    return `Created the goal "${name}" ${where}, running daily as a backstop; the first run starts within a minute. Claude sets up its watch next: you confirm the command before it is set.${runsOn}${await phoneHint($)}`
+    return done(`${created} Claude sets up its watch next: you confirm the command before it is set.${runsOn}${await phoneHint($)}`)
   }
-  if (choice.oneOff) return `Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${runsOn}${await phoneHint($)}`
+  if (choice.oneOff) return done(`Created the one-off goal "${name}" ${where}. It runs now and moves to Done when it finishes.${runsOn}${await phoneHint($)}`)
   // A goal about things happening can also start when they do, not only on its timer
   const watch = soundsEventDriven(objective) ? ` To start a run as soon as something happens, not only on a timer, ask Claude to add a watch to "${name}".` : ''
-  if (!choice.schedule) return `Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${runsOn}${watch}${await phoneHint($)}`
-  return `Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${runsOn}${watch}${await phoneHint($)}`
+  if (!choice.schedule) return done(`Created the goal "${name}" ${where}. It runs when you start it (/goal-run); give it a schedule any time with /goal-schedule.${runsOn}${watch}${await phoneHint($)}`)
+  return done(`Created the goal "${name}" ${where}, running ${scheduleLabel(choice.schedule)}; the first run starts within a minute.${runsOn}${watch}${await phoneHint($)}`)
 }
 
 /** Sets the schedule through the pane's action wrapper and says what happens next. */

@@ -72,15 +72,26 @@ export async function readSchedule($: Engine, text: string): Promise<ReadSchedul
  * With `offerWatch` (a new goal), a watch is offered first when the suggestion names one.
  */
 export async function askSchedule($: Engine, goalName: string, suggestion: Suggestion, offerWatch = false): Promise<ScheduleChoice> {
-  const watch = offerWatch && offersWatch(suggestion)
+  return (await pickSchedule($, goalName, suggestion, { offerWatch }))!
+}
+
+/**
+ * askSchedule's question. With `cancelable` (a goal Claude asked to create), a
+ * dismissed question creates nothing: null. `intro` goes before the question.
+ */
+export async function pickSchedule(
+  $: Engine, goalName: string, suggestion: Suggestion, opts: { offerWatch?: boolean; cancelable?: boolean; intro?: string } = {},
+): Promise<ScheduleChoice | null> {
+  const watch = Boolean(opts.offerWatch) && offersWatch(suggestion)
   const suggested = SCHEDULE_CHOICES.find((c) => c.key === (watch ? 'watch' : suggestion.choice))!
-  const read = await ask($, goalName, suggestion, null, watch)
+  const read = await ask($, goalName, suggestion, null, watch, opts.intro)
+  if (!read && opts.cancelable) return null
   if (read && 'error' in read) $.ui.toast(`Couldn't read "${read.answer}", so it runs ${suggested.label.toLowerCase()}. ${read.error} Change it with Reschedule.`)
   return read && 'choice' in read ? read.choice : suggested
 }
 
 /** The question itself; null when it was dismissed or the answer isn't a schedule. */
-async function ask($: Engine, goalName: string, suggestion: Suggestion, current: Schedule | null, watch = false): Promise<{ choice: ScheduleChoice } | { error: string; answer: string } | null> {
+async function ask($: Engine, goalName: string, suggestion: Suggestion, current: Schedule | null, watch = false, intro = ''): Promise<{ choice: ScheduleChoice } | { error: string; answer: string } | null> {
   const suggested = SCHEDULE_CHOICES.find((c) => c.key === suggestion.choice)!
   const now = current ? `Now: ${scheduleLabel(current)}. ` : ''
   const what = suggestion.watch && suggestion.watch !== WATCH_FALLBACK ? ` (${suggestion.watch})` : ''
@@ -90,7 +101,7 @@ async function ask($: Engine, goalName: string, suggestion: Suggestion, current:
   let answer: string | null = null
   try {
     answer = await $.ui.ask(
-      `${now}How often should "${goalName}" run? ${why} Or type your own: 12h, 30d, weekly, cron 0 9 * * 1-5, or off.`,
+      `${intro}${now}How often should "${goalName}" run? ${why} Or type your own: 12h, 30d, weekly, cron 0 9 * * 1-5, or off.`,
       choiceOptions(suggestion.choice, watch),
     )
   } catch {
