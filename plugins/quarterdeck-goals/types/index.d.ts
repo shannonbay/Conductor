@@ -176,6 +176,8 @@ declare module 'claude-code' {
       runs: Record<string, RunEntry>
       /** True while the quarterdeck-guard plugin isn't loaded, so no run starts. */
       guardMissing: boolean
+      /** True while plan mode refuses the runner's ticks, so no run starts until it ends. */
+      planMode: boolean
       /** The person's to-do lists for this session's project. */
       todos: Todos | null
       /** Whether phone alerts can get through, learned from the last push and from messages sent from the phone. */
