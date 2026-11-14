@@ -11,7 +11,7 @@ import type { Database } from './sqlite.js'
 import { getTask, updateTask } from './queries.js'
 import { approveTask, isProposal, rejectTask, asksPerson } from './gates.js'
 import { getGoal, getOpenRun, getRun, listGoals, updateGoal, updateRun, insertRun, insertMemory } from './goals.js'
-import { archiveResolved, decideTick, failRun, nextIntervalRun, queueRun, recordSkip, GoalError } from './goal-engine.js'
+import { archiveResolved, decideTick, failRun, nextIntervalRun, queueRun, recordSkip, GoalError, ANSWER_PREFIX } from './goal-engine.js'
 import { healthDue, runHealthCheck } from './health.js'
 import { checkCommandWatch, countUnqueuedWatchEvents, listWatches, markWatchEventsQueued, takeDueToolWatches, watchDue, type ToolWatchCall } from './watches.js'
 import type { GoalRun, Task } from './types.js'
@@ -271,6 +271,13 @@ export async function schedulerPass(db: Database, opts: PassOptions): Promise<Pa
 
 // ── Human decisions ───────────────────────────────────────────────────────────
 
+/** How much of a question's notes its answer's memory keeps. */
+export const ANSWER_CONTEXT_CHARS = 800
+
+function clipText(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1).trimEnd()}…`
+}
+
 /**
  * A human approves or rejects an item waiting for review. Approving a goal
  * proposal queues a run to carry it out (when the goal is active); rejecting
@@ -290,8 +297,10 @@ export function decideItem(
     if (!answer) throw new GoalError('An answer is needed.')
     if (!asksPerson(task)) throw new GoalError(`Item ${taskId} isn't a question for you; approve or reject it instead.`)
     approveTask(db, planId, taskId)
-    updateTask(db, planId, taskId, { result: `Your answer: ${answer}`, updated_at: new Date().toISOString() })
-    insertMemory(db, { plan_id: planId, kind: 'fact', text: `You answered "${task.goal}": ${answer}`, source: 'human', source_ref: taskId })
+    updateTask(db, planId, taskId, { result: `${ANSWER_PREFIX}${answer}`, updated_at: new Date().toISOString() })
+    // With the question's context (its options, often): an answer like "c" means nothing without it
+    const context = task.notes?.trim() ? ` (the question said: ${clipText(task.notes.trim().replace(/\s+/g, ' '), ANSWER_CONTEXT_CHARS)})` : ''
+    insertMemory(db, { plan_id: planId, kind: 'fact', text: `You answered "${task.goal}": ${answer}${context}`, source: 'human', source_ref: taskId })
     if (active()) queuedRun = queueRun(db, planId)
   } else if (input.decision === 'approve') {
     approveTask(db, planId, taskId)
