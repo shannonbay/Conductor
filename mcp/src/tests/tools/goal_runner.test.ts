@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
+  goals_tick, goals_overview, decide_item, get_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
   create_goal, delete_memory, trust_memory, set_schedule, update_goal, report_run_end, watch_report,
 } from '../../tools/goal_runner.js'
 import { add_item, get_goal_brief, end_run, run_goal } from '../../tools/goals.js'
@@ -77,6 +77,21 @@ describe('run_scope', () => {
     expect(getOpenPlan()).toBe(mine)
     expect(getOpenRun()).toBeNull()
     expect(getRun(run.run_id)).toMatchObject({ status: 'completed', items_created: 1 })
+  })
+})
+
+describe('get_item', () => {
+  it("answers an item's full title, notes and action summary, which the overview clips", async () => {
+    const id = makeGoal()
+    const run = await claim(id)
+    const long = 'Should I archive '.repeat(30) + 'everything?'
+    await withScope({ planId: id, runId: run.run_id }, async () => {
+      await add_item({ goal: long, notes: 'n'.repeat(1500), action: { category: 'email.send', summary: 's'.repeat(400) } })
+      await end_run({ summary: 'Proposed.' })
+    })
+    const r = await get_item({ goal_id: id, item_id: '1' })
+    expect(r).toMatchObject({ id: '1', goal: long, notes: 'n'.repeat(1500), action: { category: 'email.send', summary: 's'.repeat(400) } })
+    await expect(get_item({ goal_id: id, item_id: '99' })).rejects.toThrow(/not found/)
   })
 })
 

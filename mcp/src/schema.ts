@@ -135,6 +135,11 @@ export const DecideItemSchema = z.object({
   feedback: z.string().optional().describe('Required when rejecting; the answer when answering a question item'),
 })
 
+export const GetItemSchema = z.object({
+  goal_id: z.string(),
+  item_id: z.string(),
+})
+
 export const CancelRunSchema = z.object({
   goal_id: z.string(),
   reason: z.string().optional(),
