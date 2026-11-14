@@ -34,7 +34,7 @@ export type OverviewGoal = {
   memory: { id: string; kind: string; text: string; pinned: boolean; untrusted?: string | null }[]
   suggestions: { category: string; approved_in_a_row: number }[]
   /** Missing from a server older than watches. */
-  watches?: { name: string; every_minutes: number; runs: string; last_fired_at: string | null; failing: boolean; error: string | null }[]
+  watches?: { name: string; every_minutes: number; fires?: 'new' | 'change'; runs: string; last_fired_at: string | null; failing: boolean; error: string | null }[]
   watch_count?: number
   watch_failing?: boolean
 }
@@ -75,7 +75,7 @@ export function toCard(g: OverviewGoal): GoalCard {
     trend: g.health.map((check) => check.value).filter((v): v is number => v !== null).reverse(),
     memory: g.memory.map((m) => ({ id: m.id, kind: m.kind, text: m.text, pinned: m.pinned, ...(m.untrusted && { untrusted: m.untrusted }) })),
     suggestions: g.suggestions.map((s) => ({ category: s.category, approvedInARow: s.approved_in_a_row })),
-    watches: (g.watches ?? []).map((w) => ({ name: w.name, everyMinutes: w.every_minutes, runs: w.runs, lastFiredAt: w.last_fired_at, failing: w.failing, error: w.error })),
+    watches: (g.watches ?? []).map((w) => ({ name: w.name, everyMinutes: w.every_minutes, onChange: w.fires === 'change', runs: w.runs, lastFiredAt: w.last_fired_at, failing: w.failing, error: w.error })),
     watchCount: g.watch_count ?? g.watches?.length ?? 0,
     watchFailing: g.watch_failing ?? (g.watches ?? []).some((w) => w.failing),
   }
@@ -232,7 +232,7 @@ export function describe(g: GoalCard, now: number): string {
     `Schedule: ${g.oneOff ? 'one-off' : scheduleLabel(g.schedule)}`,
     `Model: ${goalModelLabel(g.model)}`,
     g.watches.length > 0
-      ? `Watches (a run starts when one sees a new line):\n${g.watches.map((w) => `- ${w.name}: every ${w.everyMinutes} min, runs ${w.runs}${w.failing ? ` [failing: ${w.error ?? 'no message'}]` : ''}${w.lastFiredAt ? `, last saw something new ${ago(w.lastFiredAt, now)}` : ''}`).join('\n')}`
+      ? `Watches (a run starts when one sees a new line):\n${g.watches.map((w) => `- ${w.name}: every ${w.everyMinutes} min${w.onChange ? ' (on change)' : ''}, runs ${w.runs}${w.failing ? ` [failing: ${w.error ?? 'no message'}]` : ''}${w.lastFiredAt ? `, last saw something new ${ago(w.lastFiredAt, now)}` : ''}`).join('\n')}`
       : null,
     `Autonomy (unlisted categories: propose): ${Object.entries(g.autonomy).map(([c, m]) => `${c}=${m}`).join(', ') || 'none set'}`,
     Object.keys(g.toolMap).length ? `Tool rules: ${Object.entries(g.toolMap).map(([p, c]) => `${p} → ${c}`).join(', ')}` : null,
@@ -600,7 +600,7 @@ export type GoalChanges = {
 }
 
 /** A watch as update_goal takes it: a command to run, or a tool to call with its input. */
-export type WatchChange = { command?: string; tool?: string; input?: Record<string, unknown>; match?: string; every_minutes?: number }
+export type WatchChange = { command?: string; tool?: string; input?: Record<string, unknown>; match?: string; every_minutes?: number; fires?: 'new' | 'change' }
 
 /** How often a watch checks when it isn't said (the server's default). */
 export const WATCH_DEFAULT_MINUTES = 5
@@ -635,8 +635,8 @@ export function describeGoalChanges(g: GoalCard, c: GoalChanges): string[] {
   for (const [name, w] of Object.entries(c.watches ?? {})) {
     const had = g.watches.some((x) => x.name === name.trim())
     if (w === null) lines.push(`Watch removed: ${name}`)
-    else if (w.tool) lines.push(`${had ? 'Watch changed' : 'New watch'} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this tool is called without asking you, and a run starts when its answer has something it hasn't before: ${w.tool} ${JSON.stringify(w.input ?? {})}${w.match ? ` (read with ${w.match})` : ''}`)
-    else lines.push(`${had ? 'Watch changed' : 'New watch'} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this command runs on your computer, and a run starts when it prints a line it hasn't before: ${w.command ?? ''}`)
+    else if (w.tool) lines.push(`${had ? 'Watch changed' : 'New watch'} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this tool is called without asking you, and a run starts when ${w.fires === 'change' ? 'its answer changes' : "its answer has something it hasn't before"}: ${w.tool} ${JSON.stringify(w.input ?? {})}${w.match ? ` (read with ${w.match})` : ''}`)
+    else lines.push(`${had ? 'Watch changed' : 'New watch'} "${name.trim()}": every ${w.every_minutes ?? WATCH_DEFAULT_MINUTES} min this command runs on your computer, and a run starts when ${w.fires === 'change' ? 'its output changes' : "it prints a line it hasn't before"}: ${w.command ?? ''}`)
   }
   if (c.model !== undefined && (c.model || null) !== g.model) lines.push(`Model: ${goalModelLabel(g.model)} → ${goalModelLabel(c.model || null)}`)
   if (c.status && c.status !== g.status) lines.push(c.status === 'paused' ? 'Pause the goal' : 'Resume the goal')

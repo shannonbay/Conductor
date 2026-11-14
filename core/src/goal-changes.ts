@@ -118,8 +118,8 @@ export function applyGoalChanges(db: Database, planId: string, changes: GoalChan
       }
       const before = watches.find((w) => w.name === name.trim())
       const after = setWatch(db, planId, name, spec) // throws on a watch with no command
-      if (before && describeWatch(before) === describeWatch(after) && before.every_minutes === after.every_minutes) continue
-      done.push(`watch "${after.name}" ${before ? 'changed' : 'added'}: every ${after.every_minutes} min, ${after.kind === 'tool' ? 'calls' : 'runs'} ${describeWatch(after)}`)
+      if (before && describeWatch(before) === describeWatch(after) && before.every_minutes === after.every_minutes && before.fires === after.fires) continue
+      done.push(`watch "${after.name}" ${before ? 'changed' : 'added'}: every ${after.every_minutes} min, ${after.kind === 'tool' ? 'calls' : 'runs'} ${describeWatch(after)}${after.fires === 'change' ? ', starts a run when its output changes' : ''}`)
     }
     if (model !== undefined && model !== goal.model) {
       updateGoal(db, planId, { model })

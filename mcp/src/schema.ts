@@ -198,6 +198,7 @@ const WatchSchema = z.object({
   input: z.record(z.unknown()).optional().describe("The tool's arguments"),
   match: z.string().optional().describe('A regular expression over the tool\'s answer; each match (its first group) is one line. Left out: every "id" in a JSON answer'),
   every_minutes: z.number().int().min(1).optional().describe('How often to check (default 5)'),
+  fires: z.enum(['new', 'change']).optional().describe("'new' (default): a line never seen before starts a run. 'change': for a state (a working tree, a health URL): a run starts when the output differs from the last check, with the lines that weren't in it ((none) when it became empty)"),
 }).refine((v) => (v.command === undefined) !== (v.tool === undefined), { message: 'A watch has a command or a tool, one of them.' })
 
 export const CreateGoalSchema = z.object({

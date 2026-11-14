@@ -106,6 +106,48 @@ describe('recordWatchLines', () => {
   })
 })
 
+describe("a watch that fires on 'change'", () => {
+  it('fires each time the output changes, even back to a state seen before', () => {
+    const w = setWatch(db, 'g1', 'tree', { command: 'echo 1', fires: 'change' })
+    expect(w.fires).toBe('change')
+    expect(recordWatchLines(db, w.id, { lines: ['abc123'] }).baseline).toBe(true)
+    expect(recordWatchLines(db, w.id, { lines: ['abc123-dirty'] }).fresh).toEqual(['abc123-dirty'])
+    expect(recordWatchLines(db, w.id, { lines: ['abc123-dirty'] }).fresh).toEqual([])
+    expect(recordWatchLines(db, w.id, { lines: ['abc123'] }).fresh).toEqual(['abc123'])
+    expect(recordWatchLines(db, w.id, { lines: ['abc123-dirty'] }).fresh).toEqual(['abc123-dirty'])
+    expect(listWatchEvents(db, 'g1').map((e) => e.line)).toEqual(['abc123-dirty', 'abc123', 'abc123-dirty'])
+    expect(getWatch(db, w.id)!.seen).toEqual(['abc123-dirty'])
+  })
+
+  it("a 'new' watch fires on the same sequence only for the line it never saw", () => {
+    const w = setWatch(db, 'g1', 'tree', { command: 'echo 1' })
+    expect(w.fires).toBe('new')
+    for (const l of ['abc123', 'abc123-dirty', 'abc123', 'abc123-dirty']) recordWatchLines(db, w.id, { lines: [l] })
+    expect(listWatchEvents(db, 'g1').map((e) => e.line)).toEqual(['abc123-dirty'])
+  })
+
+  it('the same lines in another order are no change; becoming empty is one (none) event', () => {
+    const w = setWatch(db, 'g1', 'tree', { command: 'echo 1', fires: 'change' })
+    recordWatchLines(db, w.id, { lines: ['M a.ts', 'M b.ts'] })
+    expect(recordWatchLines(db, w.id, { lines: ['M b.ts', 'M a.ts'] }).fresh).toEqual([])
+    // A line went away: a change, but no line in it is new
+    expect(recordWatchLines(db, w.id, { lines: ['M a.ts'] }).fresh).toEqual([])
+    expect(recordWatchLines(db, w.id, { lines: [] }).fresh).toEqual(['(none)'])
+    expect(recordWatchLines(db, w.id, { lines: [] }).fresh).toEqual([])
+    expect(recordWatchLines(db, w.id, { lines: ['M a.ts'] }).fresh).toEqual(['M a.ts'])
+  })
+
+  it('changing the mode starts the watch over', () => {
+    const w = setWatch(db, 'g1', 'tree', { command: 'echo 1' })
+    recordWatchLines(db, w.id, { lines: ['a'] })
+    recordWatchLines(db, w.id, { lines: ['b'] })
+    const changed = setWatch(db, 'g1', 'tree', { command: 'echo 1', fires: 'change' })
+    expect(changed).toMatchObject({ fires: 'change', seen: [], baseline_at: null })
+    expect(listWatchEvents(db, 'g1').filter((e) => e.run_id === null)).toEqual([])
+    expect(() => setWatch(db, 'g1', 'tree', { command: 'echo 1', fires: 'often' as never })).toThrow(/new.*change/)
+  })
+})
+
 describe('toLines', () => {
   it('trims, drops blanks and repeats, clips long lines and stops at the cap', () => {
     expect(toLines(' 12 \r\n\n7\n12\n')).toEqual(['12', '7'])
@@ -360,7 +402,7 @@ describe('the overview and deleting', () => {
     for (let i = 0; i < 3; i++) recordWatchLines(db, w.id, { error: 'gh: not logged in' })
     const [full] = buildOverview(db, 'all').goals
     expect(full).toMatchObject({ watch_count: 1, watch_failing: true })
-    expect(full!.watches).toEqual([{ name: 'x', kind: 'command', every_minutes: 15, runs: 'echo 1', last_fired_at: null, failing: true, error: 'gh: not logged in' }])
+    expect(full!.watches).toEqual([{ name: 'x', kind: 'command', every_minutes: 15, fires: 'new', runs: 'echo 1', last_fired_at: null, failing: true, error: 'gh: not logged in' }])
     const [card] = buildOverview(db, []).goals
     expect(card).toMatchObject({ watch_count: 1, watch_failing: true, watches: [] })
   })

@@ -7,6 +7,11 @@
  * whose brief lists them. The first check that works only records what is
  * there, and a check that fails changes nothing, so an outage never looks
  * like "everything is new".
+ *
+ * A watch with fires 'change' watches a state instead (a working tree, a
+ * health URL): when its output differs from the last check's, each line that
+ * wasn't in the last check is an event, and output that becomes empty is one
+ * "(none)" event. The same lines in another order are no change.
  */
 import type { Database } from './sqlite.js'
 import { runVerifyCommand } from './gates.js'
@@ -33,6 +38,8 @@ export const WATCH_DEFAULT_MINUTES = 5
 export const WATCH_DEFAULT_MATCH = String.raw`"id"\s*:\s*"([^"]+)"`
 /** A tool watch handed out for checking and never reported is handed out again after this long. */
 export const WATCH_REPORT_GRACE_MS = 2 * 60_000
+/** The event a 'change' watch records when its output becomes empty. */
+export const WATCH_NONE_LINE = '(none)'
 /** Events a run has taken are kept this long. */
 const EVENT_RETENTION_MS = 30 * 86_400_000
 
@@ -65,6 +72,8 @@ export function setWatch(db: Database, planId: string, name: string, spec: Watch
   if (!label) throw new Error('A watch needs a name.')
   const every = spec.every_minutes ?? WATCH_DEFAULT_MINUTES
   if (!Number.isInteger(every) || every < WATCH_MIN_MINUTES) throw new Error(`The watch "${label}" must check every ${WATCH_MIN_MINUTES} minute or more.`)
+  const fires = spec.fires ?? 'new'
+  if (fires !== 'new' && fires !== 'change') throw new Error(`The watch "${label}" fires on "new" or "change", not ${JSON.stringify(fires)}.`)
 
   // What it checks: a command, or a tool with its input and how to read the answer
   const what: Check = { kind: 'command', command: null, tool: null, tool_input: '{}', match: null }
@@ -96,19 +105,19 @@ export function setWatch(db: Database, planId: string, name: string, spec: Watch
   const existing = listWatches(db, planId).find((w) => w.name === label)
   if (!existing) {
     const id = newId('wch')
-    db.prepare('INSERT INTO goal_watches (id, plan_id, name, kind, command, tool, tool_input, match, every_minutes, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(id, planId, label, what.kind, what.command, what.tool, what.tool_input, what.match, every, new Date().toISOString())
+    db.prepare('INSERT INTO goal_watches (id, plan_id, name, kind, command, tool, tool_input, match, every_minutes, fires, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(id, planId, label, what.kind, what.command, what.tool, what.tool_input, what.match, every, fires, new Date().toISOString())
     return getWatch(db, id)!
   }
   const same = existing.kind === what.kind && existing.command === what.command && existing.tool === what.tool
-    && JSON.stringify(existing.tool_input) === what.tool_input && existing.match === what.match
+    && JSON.stringify(existing.tool_input) === what.tool_input && existing.match === what.match && existing.fires === fires
   if (same) {
     db.prepare('UPDATE goal_watches SET every_minutes = ? WHERE id = ?').run(every, existing.id)
   } else {
     db.prepare(`
-      UPDATE goal_watches SET kind = ?, command = ?, tool = ?, tool_input = ?, match = ?, every_minutes = ?, seen = '[]', baseline_at = NULL,
+      UPDATE goal_watches SET kind = ?, command = ?, tool = ?, tool_input = ?, match = ?, every_minutes = ?, fires = ?, seen = '[]', baseline_at = NULL,
         last_checked_at = NULL, asked_at = NULL, last_error = NULL, fail_count = 0 WHERE id = ?
-    `).run(what.kind, what.command, what.tool, what.tool_input, what.match, every, existing.id)
+    `).run(what.kind, what.command, what.tool, what.tool_input, what.match, every, fires, existing.id)
     db.prepare('DELETE FROM goal_watch_events WHERE watch_id = ? AND run_id IS NULL').run(existing.id)
   }
   return getWatch(db, existing.id)!
@@ -180,9 +189,18 @@ export function recordWatchLines(db: Database, watchId: string, result: { lines:
 
   const known = new Set(watch.seen)
   const baseline = watch.baseline_at === null
-  const fresh = baseline ? [] : result.lines.filter((l) => !known.has(l))
   const current = new Set(result.lines)
-  const seen = [...result.lines, ...watch.seen.filter((l) => !current.has(l))].slice(0, WATCH_SEEN_MAX)
+  let fresh: string[]
+  let seen: string[]
+  if (watch.fires === 'change') {
+    // Only the last check counts: the same set of lines (in any order) is no change
+    const changed = current.size !== known.size || result.lines.some((l) => !known.has(l))
+    fresh = baseline || !changed ? [] : result.lines.length ? result.lines.filter((l) => !known.has(l)) : [WATCH_NONE_LINE]
+    seen = result.lines.slice(0, WATCH_SEEN_MAX)
+  } else {
+    fresh = baseline ? [] : result.lines.filter((l) => !known.has(l))
+    seen = [...result.lines, ...watch.seen.filter((l) => !current.has(l))].slice(0, WATCH_SEEN_MAX)
+  }
 
   db.transaction(() => {
     const insert = db.prepare('INSERT INTO goal_watch_events (id, watch_id, plan_id, line, created_at) VALUES (?, ?, ?, ?, ?)')
