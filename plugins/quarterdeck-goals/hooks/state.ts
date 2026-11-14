@@ -6,7 +6,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { ActiveRun, Confirm, HeldTodo, PhoneState, RunEntry, Snapshot, Todos } from '../types'
+import type { ActiveRun, Confirm, HeldTodo, Item, PhoneState, RunEntry, Snapshot, Todos } from '../types'
 import { EMPTY } from './model'
 
 type Engine = EngineInterface
@@ -24,6 +24,8 @@ const heldTodos = atom({ plugin: 'quarterdeck-goals', key: 'heldTodos' } as cons
 const busy = atom({ plugin: 'quarterdeck-goals', key: 'busy' } as const, null)
 const notice = atom({ plugin: 'quarterdeck-goals', key: 'notice' } as const, null)
 const expanded = atom({ plugin: 'quarterdeck-goals', key: 'expanded' } as const, [])
+/** Full text of clipped items the person opened, by "<goalId>/<itemId>". */
+const fullItems = atom({ plugin: 'quarterdeck-goals', key: 'fullItems' } as const, {})
 const confirm = atom({ plugin: 'quarterdeck-goals', key: 'confirm' } as const, null)
 const activeRun = atom({ plugin: 'quarterdeck-goals', key: 'activeRun' } as const, null)
 const runs = atom({ plugin: 'quarterdeck-goals', key: 'runs' } as const, {})
@@ -83,6 +85,13 @@ export async function getExpanded($: Engine): Promise<string[]> {
 }
 export async function toggleExpanded($: Engine, goalId: string): Promise<void> {
   await update($, expanded, (ids) => (ids.includes(goalId) ? ids.filter((id) => id !== goalId) : [...ids, goalId]))
+}
+
+export async function getFullItems($: Engine): Promise<Record<string, Item>> {
+  return read($, fullItems)
+}
+export async function setFullItem($: Engine, key: string, item: Item): Promise<void> {
+  await update($, fullItems, (all) => ({ ...all, [key]: item }))
 }
 
 export async function getConfirm($: Engine): Promise<Confirm | null> {

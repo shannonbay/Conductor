@@ -6,7 +6,7 @@
  */
 import type { EngineInterface } from 'claude-code'
 
-import type { Schedule, TodoList, Update } from '../types'
+import type { Item, Schedule, TodoList, Update } from '../types'
 import type { GoalChanges, OverviewGoal } from './model'
 import { SERVER_PREFIXES } from './names'
 
@@ -121,6 +121,12 @@ export async function deleteGoal($: Engine, goalId: string): Promise<void> {
 /** The person's answer to a question a run asked. */
 export async function answerItem($: Engine, goalId: string, itemId: string, text: string): Promise<void> {
   await call($, 'decide_item', { goal_id: goalId, item_id: itemId, decision: 'answer', feedback: text })
+}
+
+/** One item's full text, for a row the overview clipped. */
+export async function getItem($: Engine, goalId: string, itemId: string): Promise<Item> {
+  const t = await call<{ id: string; goal: string; notes?: string | null; action?: { category?: string | null; summary?: string } | null }>($, 'get_item', { goal_id: goalId, item_id: itemId })
+  return { id: t.id, title: t.goal, category: t.action?.category ?? null, summary: t.action?.summary ?? null, ...(t.notes && { notes: t.notes }) }
 }
 
 export async function approve($: Engine, goalId: string, itemId: string): Promise<void> {

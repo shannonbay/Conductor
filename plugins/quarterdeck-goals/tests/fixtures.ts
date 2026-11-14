@@ -29,7 +29,7 @@ export const BAND = {
 
 export const SURFACES = ['terminal', 'desktop'] as const
 
-type Item = { id: string; goal: string; action?: { category: string; summary: string } | null; asks_person?: boolean; notes?: string }
+type Item = { id: string; goal: string; action?: { category: string; summary: string } | null; asks_person?: boolean; notes?: string; clipped?: boolean }
 type FakeGoal = {
   id: string
   name: string
@@ -84,7 +84,7 @@ export type Call = { tool: string; input: Record<string, unknown> }
 
 const TOOLS = [
   'goals_overview', 'decide_item', 'run_goal', 'cancel_run', 'set_goal_status', 'delete_memory', 'trust_memory', 'create_goal',
-  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set', 'update_goal', 'delete_goal', 'watch_report',
+  'goals_tick', 'attach_agent', 'fail_run', 'guard_check', 'set_schedule', 'todo_list', 'todo_add', 'todo_set', 'update_goal', 'delete_goal', 'watch_report', 'get_item',
 ] as const
 
 /**
@@ -93,7 +93,7 @@ const TOOLS = [
  */
 type FakeTodoList = { id: string; name: string; items: { id: string; text: string; status: string; depth: number; notes: string | null }[] }
 
-export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string }; outdated?: boolean; standing?: boolean; update?: { installed: string; latest: string }; prefix?: string; /** Tool watches the next pass hands out, once. A report with text for watch `w-<goal id>` queues that goal's run. */ toolWatches?: { watch_id: string; goal_id: string; name: string; tool: string; input: Record<string, unknown> }[] } = {}) {
+export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolean; errors?: Record<string, string>; todos?: FakeTodoList[]; hold?: { until: string; reason: string }; outdated?: boolean; standing?: boolean; update?: { installed: string; latest: string }; prefix?: string; /** Tool watches the next pass hands out, once. A report with text for watch `w-<goal id>` queues that goal's run. */ toolWatches?: { watch_id: string; goal_id: string; name: string; tool: string; input: Record<string, unknown> }[]; /** get_item's full text for clipped items, by item id. */ full?: Record<string, Item> } = {}) {
   const prefix = opts.prefix ?? 'mcp__quarterdeck__'
   const lists: FakeTodoList[] = opts.todos ?? []
   const listView = () => lists.map((l) => {
@@ -127,6 +127,10 @@ export function fakeQuarterdeck(on: On, goals: FakeGoal[], opts: { fail?: boolea
           if (at >= 0) goals.splice(at, 1)
           version++
           return ok({ deleted: input.goal_id }) as never
+        }
+        case 'get_item': {
+          const full = opts.full?.[String(input.item_id)] ?? g!.needs_you.find((t) => t.id === input.item_id)
+          return ok({ id: full!.id, goal: full!.goal, notes: full!.notes ?? null, action: full!.action ?? null }) as never
         }
         case 'decide_item':
           g!.needs_you = g!.needs_you.filter((t) => t.id !== input.item_id)

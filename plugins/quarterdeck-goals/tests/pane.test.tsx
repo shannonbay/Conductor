@@ -717,3 +717,38 @@ test("an expanded goal lists its Claude Code allow rules when opened, and Claude
   expect(prompts.at(-1)).toContain('wait for my yes')
   await ui.unmount()
 })
+
+test('a clipped question or proposal opens to its full text, fetched once with get_item', async ($, on) => {
+  engine(on)
+  const long = `Which approach should I build? ${'more detail '.repeat(30)}`
+  const fake = fakeQuarterdeck(on, [
+    goal({
+      id: 'g1',
+      name: 'Inbox',
+      needs_you: [
+        { ...question('7', 'Which approach…', 'Options: a…'), clipped: true },
+        { ...proposal('11', 'Reply to Alice'), clipped: true },
+        proposal('12', 'Short one'),
+      ],
+    }),
+  ], { full: { '7': question('7', long, 'Options: a) all of it, b) part of it'), '11': { ...proposal('11', 'Reply to Alice about Thursday at 2pm'), notes: 'She asked twice' } } })
+  await $.session.start(START)
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'read-g1/7' }))?.props.label).toBe('▸ ? Which approach…')
+  expect(await ui.find({ key: 'read-g1/12' })).toBeUndefined() // not clipped: no marker
+  await ui.press({ key: 'read-g1/7' })
+  expect(fake.of('get_item').map((c) => c.input)).toEqual([{ goal_id: 'g1', item_id: '7' }])
+  expect((await ui.find({ key: 'read-g1/7' }))?.props.label).toBe(`▾ ? ${long}`)
+  expect((await ui.find({ type: 'Text', text: /all of it/ }))?.text).toContain('b) part of it')
+
+  await ui.press({ key: 'read-g1/7' }) // closes again, back to the clipped text
+  expect((await ui.find({ key: 'read-g1/7' }))?.props.label).toBe('▸ ? Which approach…')
+  await ui.press({ key: 'read-g1/7' }) // reopens without fetching again
+  expect(fake.of('get_item')).toHaveLength(1)
+
+  await ui.press({ key: 'read-g1/11' })
+  expect((await ui.find({ key: 'read-g1/11' }))?.props.label).toBe('▾ ● Reply to Alice about Thursday at 2pm')
+  expect((await ui.find({ type: 'Text', text: /She asked twice/ }))?.text).toContain('She asked twice')
+  await ui.unmount()
+})

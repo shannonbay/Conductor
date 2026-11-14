@@ -11,13 +11,13 @@
 import type { EngineInterface, RenderChildren, RenderInput } from 'claude-code'
 
 import type { Confirm, GoalCard, TodoItem, Todos, Update } from '../types'
-import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, NOT_LOADED, reject, runNow, setGoalStatus, trustMemory, updateGoal } from './api'
+import { answerItem, approve, baseUrl, deleteGoal, deleteMemory, getItem, NOT_LOADED, reject, runNow, setGoalStatus, trustMemory, updateGoal } from './api'
 import { cancelRun } from './runner'
 import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, isWorking, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, planModeBlocked, readModelAnswer, runCost, runsText, runTokens, spark, SPINNER_FRAMES, SPINNER_MS, updatePrompt } from './model'
 import { connectRemote, markActive } from './alerts'
 import { sendToChat } from './chat'
-import { advanceSpinner, getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getHeldTodos, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getPlanMode, getRejecting, getRuns, getSnapshot, getSpinnerFrame, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
+import { advanceSpinner, getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getHeldTodos, getConfirm, getExpanded, getFullItems, getGuardMissing, getNotice, getPhone, getPlanMode, getRejecting, getRuns, getSnapshot, getSpinnerFrame, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setFullItem, setRejecting, toggleExpanded } from './state'
 import { addFromPane, askFromPane, cancelHeldTodo, editFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING, PLAN_MODE_ON } from './runner'
 import { act, refresh } from './sync'
@@ -47,6 +47,8 @@ type View = {
   standing: boolean
   /** The spinner's frame, for a goal whose run is working. */
   frame: number
+  /** Full text of clipped items the person opened, by "<goalId>/<itemId>". */
+  full: Record<string, GoalCard['needsYou'][number]>
 }
 
 /**
@@ -191,6 +193,7 @@ export async function renderPane($: Engine, e: E) {
     mine: Object.values(await getRuns($)).map((r) => r.goalId),
     standing: s.standing === true,
     frame: await getSpinnerFrame($),
+    full: await getFullItems($),
   }
   if (current.some(isWorking)) spinOn($)
 
@@ -406,6 +409,24 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
   const { Box, Text, Button, Input } = parts($, e)
   const key = `${g.id}/${item.id}`
   const isFirst = view.first === key
+  // A row the overview clipped opens to its full text, fetched once
+  const readKey = `item:${key}`
+  const reading = item.clipped === true && view.shown.includes(readKey)
+  const shownItem = reading ? { ...item, ...view.full[key] } : item
+  const titleLine = (mark: string) => {
+    if (!item.clipped) return <Text color="yellow">{mark} {item.title}</Text>
+    const label = `${reading ? '▾' : '▸'} ${mark} ${shownItem.title}`
+    const toggle = async () => {
+      await toggleExpanded($, readKey)
+      if (!reading && !view.full[key]) await act($, `read:${key}`, 'read it in full', async () => setFullItem($, key, await getItem($, g.id, item.id)))
+      else await refresh($)
+    }
+    return (
+      <Button key={`read-${key}`} plain label={label} onPress={() => void toggle()}>
+        <Text color="yellow">{label}</Text>
+      </Button>
+    )
+  }
   const sendBack = (text: string) => {
     if (!text.trim()) return
     void act($, `reject:${key}`, 'reject', () => reject($, g.id, item.id, text.trim())).then((ok) => {
@@ -423,8 +444,8 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
   if (item.asksPerson) {
     return (
       <Box key={key} flexDirection="column" marginTop={1}>
-        <Text color="yellow">? {item.title}</Text>
-        {item.notes && <Text dimColor>  {item.notes}</Text>}
+        {titleLine('?')}
+        {shownItem.notes && <Text dimColor>  {shownItem.notes}</Text>}
         {view.open === key && Input ? (
           <Box flexDirection="column">
             <Input key={`answer-${key}`} label="Your answer (saved to the goal's memory)" submitLabel="Send" autoFocus onSubmit={reply} />
@@ -443,15 +464,15 @@ function proposalRow($: Engine, e: E, view: View, g: GoalCard, item: GoalCard['n
 
   return (
     <Box key={key} flexDirection="column" marginTop={1}>
-      <Text color="yellow">● {item.title}</Text>
-      {(item.category || item.summary) && (
+      {titleLine('●')}
+      {(shownItem.category || shownItem.summary) && (
         <Text dimColor>
           {'  '}
-          {item.category ? `${item.category}: ` : ''}
-          {item.summary ?? ''}
+          {shownItem.category ? `${shownItem.category}: ` : ''}
+          {shownItem.summary ?? ''}
         </Text>
       )}
-      {item.notes && <Text dimColor>  {item.notes}</Text>}
+      {shownItem.notes && <Text dimColor>  {shownItem.notes}</Text>}
       {view.open === key && Input ? (
         <Box flexDirection="column">
           <Input key={`feedback-${key}`} label="What should change? (saved to the goal's memory)" submitLabel="Send back" autoFocus onSubmit={sendBack} />

@@ -1,5 +1,5 @@
 /** A goal work item: a proposal waiting for the person, or an open item. */
-export type Item = { id: string; title: string; category: string | null; summary: string | null; /** A question or request for the person, not a proposal. */ asksPerson?: boolean; /** The run's context for it: a question's options, why a proposal. */ notes?: string }
+export type Item = { id: string; title: string; category: string | null; summary: string | null; /** A question or request for the person, not a proposal. */ asksPerson?: boolean; /** The run's context for it: a question's options, why a proposal. */ notes?: string; /** The overview cut its title, notes or summary short: get_item has the full text. */ clipped?: boolean }
 
 /** One goal run. */
 export type Run = {
@@ -177,8 +177,10 @@ declare module 'claude-code' {
       busy: string | null
       /** The last action's error, shown at the bottom of the pane. */
       notice: string | null
-      /** Ids of the goals whose details are shown. */
+      /** Ids of the goals whose details are shown (also "item:<goalId>/<itemId>" for an item read in full). */
       expanded: string[]
+      /** Full text of clipped items the person opened, by "<goalId>/<itemId>". */
+      fullItems: Record<string, Item>
       confirm: Confirm | null
       activeRun: ActiveRun | null
       /** Runs this session's plugin started, by subagent id. */
