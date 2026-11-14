@@ -278,12 +278,14 @@ export const register: Register = (on) => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // A run's calls: Quarterdeck calls carry the run, the report stays with
-  // Quarterdeck, and every other tool goes through the goal's guard first.
+  // A run's calls: Quarterdeck calls carry the run, the handback goes on (its report
+  // is kept out of the chat on arrival), and every other tool goes through the goal's guard first.
   on('tool.call', async ($, e, next) => {
     const runId = await runIdFor($, e.agentId)
     if (!runId) return next(e)
-    if ((e.tool as string) === 'SubagentHandback') return { result: { success: true, message: 'Report saved by Quarterdeck (end_run).' } } as never
+    // The handback runs as usual, so Claude Code counts the report delivered and stops
+    // asking the agent for it; session.receive below keeps it out of the person's chat
+    if ((e.tool as string) === 'SubagentHandback') return next(e)
     // A call that already carries its run goes on untouched: auto mode reviews a call
     // before this hook, and refuses one whose input changes after its review
     const scoped = (e as { run_scope?: unknown }).run_scope === runId
