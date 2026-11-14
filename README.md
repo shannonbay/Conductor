@@ -38,7 +38,7 @@ The run took 2 minutes. The PR says it was opened by a Quarterdeck goal, and the
 
 Here's another one on video, from a to-do in the pane to the feature working live (80 seconds, with sound and captions). This time the Issue Fixer stopped to ask which of two designs to build before writing any code ([issue #17](https://github.com/shannonbay/Quarterdeck/issues/17), [PR #18](https://github.com/shannonbay/Quarterdeck/pull/18)):
 
-https://github.com/user-attachments/assets/cc89f55c-3945-4b86-918e-98a960c7bc2d
+[![Quarterdeck: from a to-do to a working feature (video)](https://img.youtube.com/vi/okKu9MnWZ5Y/maxresdefault.jpg)](https://www.youtube.com/watch?v=okKu9MnWZ5Y)
 
 ## How it differs
 
