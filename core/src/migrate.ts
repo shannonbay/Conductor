@@ -36,7 +36,7 @@ export const REVISION_TRIGGERS = [
  * a session still running older code then sees it is outdated (`schemaOutdated`)
  * and leaves scheduling to the newer one.
  */
-export const SCHEMA_VERSION = 6
+export const SCHEMA_VERSION = 7
 
 /** The schema version recorded in the database (0 before versions existed). */
 export function dbSchemaVersion(db: Database): number {
@@ -327,6 +327,10 @@ export function runMigrations(db: Database): void {
     ['status_note_at', 'TEXT'],
     // What the run that set it had read (mail, a web page, watch events): the pane marks such a status
     ['status_note_untrusted', 'TEXT'],
+    // A cheap check a run attached to its status (JSON StatusCheck), when, and its failures in a row
+    ['status_check', 'TEXT'],
+    ['status_check_at', 'TEXT'],
+    ['status_check_failures', 'INTEGER NOT NULL DEFAULT 0'],
   ]
   for (const [col, def] of addedGoalColumns) {
     try { db.exec(`ALTER TABLE goals ADD COLUMN ${col} ${def}`) } catch { /* already exists */ }

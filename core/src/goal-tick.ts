@@ -17,6 +17,7 @@ import { checkCommandWatch, countUnqueuedWatchEvents, listWatches, markWatchEven
 import type { GoalRun, Task } from './types.js'
 import { getRunHold, type RunHold } from './goal-changes.js'
 import { schemaOutdated } from './migrate.js'
+import { checkStatuses } from './status-check.js'
 
 const LEASE_NAME = 'goals'
 /** A holder that misses this long (several 30 s ticks) loses the lease to the next session that asks. */
@@ -228,6 +229,8 @@ export async function schedulerPass(db: Database, opts: PassOptions): Promise<Pa
   // Then watches: something new queues a run, which also starts in this pass
   await checkWatches(db, goals.map(({ plan }) => plan.id), now)
   for (const { plan } of goals) queueForWatchEvents(db, plan.id, now)
+  // Then status checks: a status that no longer holds changes (or shows stale) without a run
+  await checkStatuses(db, goals.map(({ plan }) => plan.id), now)
   // Tool watches are the caller's to check: only a Claude Code session can reach a connector
   const toolWatches = opts.toolWatches ? takeDueToolWatches(db, goals.map(({ plan }) => plan.id), now) : []
   const withWatches = (r: PassResult): PassResult => (toolWatches.length ? { ...r, tool_watches: toolWatches } : r)

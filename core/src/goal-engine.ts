@@ -2,6 +2,7 @@
  * Persistent goals — behaviour: work items, the run brief, run lifecycle,
  * retention, and the scheduler's decisions. Storage lives in goals.ts.
  */
+import { validateStatusCheck } from './status-check.js'
 import type { Database } from './sqlite.js'
 import { getPlan, getTask, insertTask, nextChildId, compareTaskIds, deserializeTask } from './queries.js'
 import { isProposal } from './gates.js'
@@ -366,12 +367,18 @@ export function cleanStatusNote(text: string): string {
 /**
  * Finishes a run with the agent's summary, counts its items, and archives old resolved items.
  * `status`, when given, becomes the goal's status (an empty one clears it); left out, the goal keeps the one it has.
+ * `statusCheck`, given with a non-empty status, attaches a check the scheduler evaluates between runs.
+ * Setting or clearing the status replaces or clears any earlier check.
  */
-export function endRun(db: Database, runId: string, summary: string, status?: string): GoalRun {
+export function endRun(db: Database, runId: string, summary: string, status?: string, statusCheck?: unknown): GoalRun {
   const run = getRun(db, runId)
   if (!run) throw new GoalError(`Run ${runId} not found.`)
   if (run.status !== 'running' && run.status !== 'queued') throw new GoalError(`Run ${runId} already ended (${run.status}).`)
   if (!summary.trim()) throw new GoalError('A summary is required: what you did, what is waiting, what you learned.')
+  if (statusCheck !== undefined && statusCheck !== null && (status === undefined || !cleanStatusNote(status))) {
+    throw new GoalError('status_check needs a status to check: pass status too.')
+  }
+  const check = statusCheck === undefined || statusCheck === null ? null : validateStatusCheck(statusCheck)
   const now = new Date().toISOString()
   const created = (db.prepare('SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND run_id = ?').get(run.plan_id, runId) as { n: number }).n
   const resolved = (db.prepare("SELECT COUNT(*) n FROM tasks WHERE plan_id = ? AND status IN ('completed', 'abandoned') AND updated_at >= ?")
@@ -380,8 +387,9 @@ export function endRun(db: Database, runId: string, summary: string, status?: st
   if (status !== undefined) {
     const note = cleanStatusNote(status)
     updateGoal(db, run.plan_id, note
-      ? { status_note: note, status_note_at: now, status_note_untrusted: run.untrusted_source ?? null }
-      : { status_note: null, status_note_at: null, status_note_untrusted: null })
+      ? { status_note: note, status_note_at: now, status_note_untrusted: run.untrusted_source ?? null,
+          status_check: check, status_check_at: check ? now : null, status_check_failures: 0 }
+      : { status_note: null, status_note_at: null, status_note_untrusted: null, status_check: null, status_check_at: null, status_check_failures: 0 })
   }
   archiveResolved(db, run.plan_id)
   finishIfDone(db, run.plan_id)
