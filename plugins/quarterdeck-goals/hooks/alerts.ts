@@ -6,7 +6,7 @@
  * Remote Control is connected (it skips the push while the person is at the
  * terminal or has mobile push off). A push the plugin sends itself is
  * reported as sent but never arrives (Claude Code 2.1.319), so by default the
- * alert is relayed: when the person hasn't typed for IDLE_MS, and the plugin's
+ * alert is relayed: when the person hasn't typed or used the Goals pane for IDLE_MS, and the plugin's
  * own push doesn't answer that they're at the terminal (`user_present`), the
  * plugin submits a short prompt and Claude sends the push. From the phone, the person
  * answers in the session ("approve it"); Claude approves with approve_item,
@@ -23,7 +23,7 @@ type Engine = EngineInterface
 
 const NOTIFY_GAP_MS = 60_000
 const PUSH_MAX = 200 // mobile systems cut longer pushes
-const IDLE_MS = 5 * 60_000 // relay only when the person hasn't typed for this long
+const IDLE_MS = 5 * 60_000 // relay only when the person hasn't typed, sent a message or used the Goals pane for this long
 const ACTIVE_KEY = 'lastActive'
 
 // Null until the first read, so what was already waiting at load stays quiet.
@@ -48,7 +48,7 @@ export async function readLastAlert($: Engine): Promise<AlertRecord | null> {
   }
 }
 
-/** The person typed or sent a message (terminal or phone): no relay for a while. */
+/** The person typed, sent a message (terminal or phone) or used the Goals pane: no relay for a while. */
 export async function markActive($: Engine, at: number): Promise<void> {
   try {
     await $.store.set(ACTIVE_KEY, at)
@@ -263,7 +263,7 @@ async function relayToPhone($: Engine, message: string, now: number): Promise<st
   // when alerts can't reach the phone at all
   const blocked = await whyNotRelay($, message)
   if (blocked) return blocked
-  if (!(await isIdle($, now))) return "not relayed (you typed in the last 5 minutes)"
+  if (!(await isIdle($, now))) return "not relayed (you were active in the last 5 minutes)"
   try {
     await $.prompt.submit({ text: relayPrompt(message) })
     return 'relayed to Claude to push'
