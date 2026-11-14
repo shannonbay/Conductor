@@ -94,7 +94,9 @@ function overviewItem(t: Task) {
   const action = v.action as { category: string; summary: string } | null
   // A question's notes are its context (the options, what the run would do): it can't be answered without them
   const notesMax = v.asks_person && v.awaiting_review ? CLIP.context : CLIP.notes
-  const short = { ...v, goal: clip(v.goal, CLIP.title)!, notes: clip(v.notes, notesMax), result: clip(v.result, CLIP.result) }
+  // `clipped`: the pane offers to show the full text (get_item) when any of it was cut
+  const clipped = v.goal.length > CLIP.title || (v.notes?.length ?? 0) > notesMax || (action?.summary?.length ?? 0) > CLIP.title
+  const short = { ...v, goal: clip(v.goal, CLIP.title)!, notes: clip(v.notes, notesMax), result: clip(v.result, CLIP.result), ...(clipped && { clipped: true }) }
   return action ? { ...short, action: { category: action.category, summary: clip(action.summary, CLIP.title)! } } : short
 }
 
@@ -302,6 +304,7 @@ export function buildOverview(db: Database, detail: OverviewDetail = 'all', stan
         // On a card, each waiting item carries only what its row shows
         needs_you: g.needs_you.slice(0, NEEDS_YOU).map((i) => ({
           id: i.id, goal: clip(i.goal, CARD_TEXT)!, asks_person: i.asks_person,
+          ...(('clipped' in i && i.clipped) || i.goal.length > CARD_TEXT || ((i.action as { summary?: string } | null)?.summary?.length ?? 0) > CARD_TEXT ? { clipped: true } : {}),
           // A question can't be answered without its context, so a card keeps the first few's
           ...(i.asks_person && i.notes && g.needs_you.filter((q) => q.asks_person).indexOf(i) < CARD_CONTEXT ? { notes: i.notes } : {}),
           action: i.action ? { category: (i.action as { category: string }).category, summary: clip((i.action as { summary: string }).summary, CARD_TEXT)! } : null,

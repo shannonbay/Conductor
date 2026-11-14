@@ -26,7 +26,7 @@ import {
   RunGoalSchema,
   GoalsTickSchema,
   GoalsOverviewSchema,
-  DecideItemSchema,
+  DecideItemSchema, GetItemSchema,
   CancelRunSchema,
   SetGoalStatusSchema,
   AttachAgentSchema,
@@ -62,7 +62,7 @@ import { get_history } from './tools/get_history.js'
 import { verify_task } from './tools/verify_task.js'
 import { list_goals, get_goal_brief, add_item, remember, forget, end_run, run_goal } from './tools/goals.js'
 import {
-  goals_tick, goals_overview, decide_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
+  goals_tick, goals_overview, decide_item, get_item, cancel_run, set_goal_status, attach_agent, fail_run, guard_check,
   create_goal, delete_memory, trust_memory, set_schedule, update_goal, report_run_end, delete_goal, watch_report, run_progress,
 } from './tools/goal_runner.js'
 import { todo_list, todo_add, todo_set } from './tools/todos.js'
@@ -226,6 +226,7 @@ const TOOLS = [
   ...([
     ['goals_tick', 'Runs one goal scheduler pass and claims the runs that are due.', GoalsTickSchema, goals_tick],
     ['decide_item', "Records the human's approval or rejection of a goal item.", DecideItemSchema, decide_item],
+    ['get_item', "One goal item's full title, notes and action summary, which the overview clips.", GetItemSchema, get_item],
     ['cancel_run', "Cancels a goal's run in progress.", CancelRunSchema, cancel_run],
     ['set_goal_status', 'Pauses or resumes a goal.', SetGoalStatusSchema, set_goal_status],
     ['delete_goal', 'Deletes a goal for good, for the human (after they confirm).', DeleteGoalSchema, delete_goal],

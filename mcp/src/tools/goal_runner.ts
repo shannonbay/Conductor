@@ -8,12 +8,12 @@ import {
   schedulerPass, releaseLease, overviewWithEtag, decideItem, failRun, attachAgent, guardToolCallForRun,
   getGoal, getRun, getOpenGoalRun, updateGoal, touchPlan, createGoal, getMemory, deleteMemory, updateMemory,
   setSchedule, getSchedule, nextScheduledRun, queueRun, applyGoalChanges, reportRunEnd, reportRunProgress, deleteGoal,
-  listWatches, checkCommandWatch, getWatch, reportToolWatch, queueForWatchEvents, reviveIfDone,
+  listWatches, checkCommandWatch, getTask, getWatch, reportToolWatch, queueForWatchEvents, reviveIfDone,
 } from '../db.js'
 import {
   GoalsTickSchema, GoalsOverviewSchema, DecideItemSchema, CancelRunSchema, SetGoalStatusSchema, AttachAgentSchema,
   FailRunSchema, GuardCheckSchema, CreateGoalSchema, DeleteMemorySchema, TrustMemorySchema, SetScheduleSchema, UpdateGoalSchema, ReportRunEndSchema, DeleteGoalSchema, WatchReportSchema,
-  RunProgressSchema,
+  RunProgressSchema, GetItemSchema,
 } from '../schema.js'
 import { normalizeModel, type GoalChanges } from '@quarterdeck/core'
 import { existsSync } from 'fs'
@@ -68,6 +68,25 @@ export async function decide_item(args: unknown) {
   return {
     item: { id: r.task.id, status: r.task.status, approved_at: r.task.approved_at },
     queued_run: r.queuedRun ? { id: r.queuedRun.id, status: r.queuedRun.status } : null,
+  }
+}
+
+/**
+ * One goal item's full text (its title, notes and proposed action's summary),
+ * which the overview clips: the pane fetches it when the person expands a
+ * long question or proposal. The action's params stay on the goal page.
+ */
+export async function get_item(args: unknown) {
+  const input = GetItemSchema.parse(args)
+  if (!getGoal(input.goal_id)) throw new Error(`Goal ${input.goal_id} not found.`)
+  const t = getTask(input.goal_id, input.item_id)
+  if (!t || t.archived_at) throw new Error(`Item ${input.item_id} not found in this goal.`)
+  const action = (t.state as { action?: { category?: string; summary?: string } } | null)?.action
+  return {
+    id: t.id,
+    goal: t.goal,
+    notes: t.notes,
+    action: action && typeof action.summary === 'string' ? { category: action.category ?? null, summary: action.summary } : null,
   }
 }
 
