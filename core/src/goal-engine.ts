@@ -189,6 +189,11 @@ function summarizeItem(t: Task): ItemSummary {
   }
 }
 
+/** How an answered question's result starts (decideItem). */
+export const ANSWER_PREFIX = 'Your answer: '
+/** How much of an answered question's notes the next brief carries. */
+const QUESTION_NOTES_CHARS = 2000
+
 export interface GoalBrief {
   goal: { id: string; name: string; objective: string; instructions: string; status: Goal['status'] }
   run: {
@@ -208,6 +213,8 @@ export interface GoalBrief {
   memory_omitted: number
   decisions_since_last_run: {
     item: string; goal: string; decision: 'approved' | 'rejected' | 'completed_by_human'; feedback?: string; action?: ProposedAction; at: string
+    /** A question the person answered: their answer, and the question's notes (its options) so the answer makes sense. */
+    answer?: string; question_notes?: string
   }[]
   open_items: ItemSummary[]
   recent_runs: { at: string; summary: string }[]
@@ -230,19 +237,23 @@ export function buildBrief(db: Database, planId: string, runId?: string): GoalBr
 
   // Human decisions since the last run: approvals, rejections, overrides
   const decisions = (db.prepare(`
-    SELECT v.task_id, v.gate, v.passed, v.output, v.created_at, t.goal, t.state
+    SELECT v.task_id, v.gate, v.passed, v.output, v.created_at, t.goal, t.state, t.notes, t.result
     FROM verifications v JOIN tasks t ON t.plan_id = v.plan_id AND t.id = v.task_id
     WHERE v.plan_id = ? AND v.gate IN ('approval', 'override') AND v.actor = 'human' AND v.created_at > ?
     ORDER BY v.created_at
-  `).all(planId, since) as { task_id: string; gate: string; passed: number; output: string | null; created_at: string; goal: string; state: string }[])
+  `).all(planId, since) as { task_id: string; gate: string; passed: number; output: string | null; created_at: string; goal: string; state: string; notes: string | null; result: string | null }[])
     .map((d) => {
-      const action = (JSON.parse(d.state) as { action?: ProposedAction }).action
+      const state = JSON.parse(d.state) as { action?: ProposedAction; asks_person?: boolean }
+      const action = state.action
+      // An answered question carries its answer and its notes: "c" means nothing without the options
+      const answered = state.asks_person && d.result?.startsWith(ANSWER_PREFIX)
       return {
         item: d.task_id,
         goal: d.goal,
         decision: d.gate === 'override' ? 'completed_by_human' as const : d.passed ? 'approved' as const : 'rejected' as const,
         ...(d.output && { feedback: d.output }),
         ...(action && { action }),
+        ...(answered && { answer: d.result!.slice(ANSWER_PREFIX.length), ...(d.notes && { question_notes: d.notes.length > QUESTION_NOTES_CHARS ? `${d.notes.slice(0, QUESTION_NOTES_CHARS - 1).trimEnd()}…` : d.notes }) }),
         at: d.created_at,
       }
     })

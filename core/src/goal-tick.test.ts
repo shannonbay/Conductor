@@ -5,6 +5,7 @@ import {
   takeLease, releaseLease, leaseHolder, claimRun, schedulerPass, expireStaleRuns, decideItem, attachAgent, guardToolCallForRun,
   buildOverview, overviewWithEtag, LEASE_MS, insertRun, endRun, updateTask, reviveIfDone, insertMemory,
   SCHEMA_VERSION, dbSchemaVersion, schemaOutdated, runMigrations, setSchedule, cronNext,
+  buildBrief,
 } from './index.js'
 
 let db: Database
@@ -143,6 +144,16 @@ describe('decideItem', () => {
     expect(r.task).toMatchObject({ status: 'completed', result: 'Your answer: Seek and LinkedIn' })
     expect(r.queuedRun).not.toBeNull()
     expect(listMemory(db, 'g1').map((m) => m.text)).toContain('You answered "Which job sites should I search?": Seek and LinkedIn')
+  })
+
+  it("an answer keeps the question's options: in the next brief and in memory", () => {
+    const notes = 'Options: (a) build 1-3, (b) only 1-2, (c) 1-3 plus merging categories.'
+    const q = addItem(db, 'g1', null, { goal: 'Build it this way?', ask_person: true, notes }).task
+    const { queuedRun } = decideItem(db, 'g1', q.id, { decision: 'answer', feedback: 'c' })
+    expect(buildBrief(db, 'g1', queuedRun!.id).decisions_since_last_run).toEqual([
+      expect.objectContaining({ item: q.id, answer: 'c', question_notes: notes }),
+    ])
+    expect(listMemory(db, 'g1').map((m) => m.text)).toContain(`You answered "Build it this way?": c (the question said: ${notes})`)
   })
 
   it('a request marked done completes and queues a run; a proposal cannot be answered', () => {
