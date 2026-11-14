@@ -120,6 +120,8 @@ export type TodoList = { id: string; name: string; items: TodoItem[]; open: numb
 
 /** The project's to-do lists as last read. */
 export type Todos = { dir: string; lists: TodoList[] }
+/** A to-do whose Plan / Start was pressed while Claude was mid-turn: sent when the turn ends, unless Cancel is pressed first. */
+export type HeldTodo = { list: TodoList; item: TodoItem; mode: 'plan' | 'start' }
 
 /** A destructive action waiting for a second press. */
 export type Confirm =
@@ -164,6 +166,8 @@ declare module 'claude-code' {
       discussing: string | null
       /** "<listId>/<itemId>" while that to-do's edit box is open. */
       editingTodo: string | null
+      /** To-dos whose Plan / Start waits for the conversation's turn to end, oldest first. */
+      heldTodos: HeldTodo[]
       /** The action a button is doing, e.g. "approve:g1/11" or "run:g1". */
       busy: string | null
       /** The last action's error, shown at the bottom of the pane. */
