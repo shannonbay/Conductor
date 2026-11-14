@@ -279,3 +279,9 @@ test('a goal about something arriving is offered a watch first, its timer next',
   expect(watchSetupPrompt('Issues', 'new issues in octo/site')).toContain('(new issues in octo/site)')
   expect(watchSetupPrompt('Issues', 'what the objective describes')).not.toContain('(what the objective')
 })
+
+test('toCard carries the goal status a run set, and none from an older server', () => {
+  expect(card({}).statusNote).toBeNull()
+  const g = { ...goal({}), open_item_count: 0, status_note: { text: '2 PRs awaiting review', at: NOW, stale: true, untrusted: 'mail' } }
+  expect(toCard(g).statusNote).toEqual({ text: '2 PRs awaiting review', stale: true, untrusted: 'mail' })
+})

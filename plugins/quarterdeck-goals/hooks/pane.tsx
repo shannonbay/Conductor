@@ -270,12 +270,20 @@ function quietLine($: Engine, e: E, view: View, g: GoalCard, index: number, gap:
     nextRunText(g, view.now),
     g.openItemCount > 0 ? ` · ${g.openItemCount} open` : '',
   ].join('')
-  // The name keeps its room; the facts take what is left of the line ("1: ▸ " comes first)
+  // The status a run set comes right after the name, in the pane's own colours: a run gives
+  // only the words. Dimmed when stale; ⚠ when the run that set it had read outside content.
+  const note = g.statusNote
+  const noteText = note ? ` [${note.text}]` : ''
+  const noteWidth = note ? [...noteText].length + (note.untrusted ? 2 : 0) : 0
+  // The name keeps its room; the status and then the facts take what is left of the line ("1: ▸ " comes first)
   const room = view.columns - 5 - [...g.name].length
+  const showNote = note !== null && room >= noteWidth
+  const factsRoom = room - (showNote ? noteWidth : 0)
   return (
     <Box key={g.id} marginBottom={gap}>
       <Button key={`toggle-${g.id}`} plain label={`▸ ${g.name}`} hotkey={index < 9 ? String(index + 1) : undefined} onPress={() => void toggleExpanded($, g.id).then(() => refresh($))} />
-      {room >= 8 && <Text dimColor>{clip(facts, room)}</Text>}
+      {showNote && <Text key={`note-${g.id}`} dimColor={note.stale}>{note.untrusted ? <Text color="yellow"> ⚠</Text> : null}{noteText}</Text>}
+      {factsRoom >= 8 && <Text dimColor>{clip(facts, factsRoom)}</Text>}
     </Box>
   )
 }

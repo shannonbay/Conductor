@@ -15,6 +15,8 @@ export type OverviewGoal = {
   one_off?: boolean
   /** Missing from a server older than per-goal models. */
   model?: string | null
+  /** A short status a run set through end_run; missing from a server older than goal statuses. */
+  status_note?: { text: string; at: string | null; stale: boolean; untrusted: string | null } | null
   instructions?: string
   autonomy?: Record<string, string>
   tool_map?: Record<string, string>
@@ -65,6 +67,7 @@ export function toCard(g: OverviewGoal): GoalCard {
     schedule: g.schedule ?? null,
     oneOff: g.one_off ?? false,
     model: g.model ?? null,
+    statusNote: g.status_note ? { text: g.status_note.text, stale: g.status_note.stale, untrusted: g.status_note.untrusted ?? null } : null,
     instructions: g.instructions ?? '',
     autonomy: g.autonomy ?? {},
     toolMap: g.tool_map ?? {},

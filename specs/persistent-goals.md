@@ -236,7 +236,7 @@ New tools. Existing task tools (`create_task`, `update_task`, `set_status`, `ver
 | `add_item` | Create a work item: `goal`, `external_ref`, optional gates and `action` (a proposal). If an item with that `external_ref` exists, returns it instead (`{ existing: true }`), including archived ones. Respects `max_items_per_run`. Rejects actions in `off` categories; forces `requires_approval` for `propose` categories. |
 | `remember` | Add a memory (`kind`, `text`, optional `source_ref`). |
 | `forget` | Deactivate a memory the agent created. |
-| `end_run` | Finish the run with a `summary`. Required; a run that ends without it is marked failed with an empty summary. |
+| `end_run` | Finish the run with a `summary`. Required; a run that ends without it is marked failed with an empty summary. An optional `status` (a few words, e.g. `2 PRs awaiting review`) becomes the goal's status: kept on the `goals` row (`status_note`, `status_note_at`, `status_note_untrusted`), cut to 40 characters of plain text, and left as it is by a run that doesn't pass one (`""` clears it). The pane shows it as `[status]` after a quiet goal's name, in its own colours (a run can't colour it), dimmed when stale (the last run failed or ended without setting it), with a yellow ⚠ when the run that set it had read untrusted content. |
 | `run_goal` | Ask Quarterdeck to start a run now (for chaining from an interactive session). |
 
 Changes to existing tools:
