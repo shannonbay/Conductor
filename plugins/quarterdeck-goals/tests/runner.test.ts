@@ -195,6 +195,28 @@ test('a run whose agent ends while plan mode refuses fail_run is finished at the
   expect(fake.of('goals_tick').at(-1)?.input.tracked_run_ids).toEqual([])
 })
 
+test('a run that plan mode stopped fails saying so, not "ended without calling end_run"', async ($, on) => {
+  const { clock, finish } = engine(on)
+  settle = () => clock.settle()
+  const errors: Record<string, string> = {}
+  const fake = fakeQuarterdeck(on, [queued()], { errors })
+  await $.session.start(START)
+  await settle()
+  errors.fail_run = `fail_run ${PLAN_MODE_REFUSAL}`
+  errors.goals_tick = `goals_tick ${PLAN_MODE_REFUSAL}`
+  finish('agent-1')
+  await clock.advance(30_000)
+  await clock.settle()
+  expect(fake.ended).toEqual({})
+  delete errors.fail_run
+  delete errors.goals_tick
+  await clock.advance(30_000)
+  await clock.settle()
+  // (the refused attempt during plan mode is recorded too; the one that counts is the last)
+  expect(fake.ended).toEqual({ r1: 'failed' })
+  expect(fake.of('fail_run').at(-1)?.input).toEqual({ run_id: 'r1', status: 'failed', reason: 'Plan mode stopped this run before it finished' })
+})
+
 test('while plan mode refuses the tick the pane says so instead of "Offline", and it clears when plan mode ends', async ($, on) => {
   const { clock } = engine(on)
   settle = () => clock.settle()

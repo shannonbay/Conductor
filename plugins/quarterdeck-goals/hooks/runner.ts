@@ -11,7 +11,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { RunEntry } from '../types'
 import { attachAgent, cancelRunRecord, failRun, releaseLease, reportWatch, resultText, tick, type ClaimedRun, type ToolWatch } from './api'
-import { addRun, getNotice, getRuns, getSnapshot, removeRun, setGuardMissing, setNotice, setPlanMode } from './state'
+import { addRun, getNotice, getPlanMode, getRuns, getSnapshot, removeRun, setGuardMissing, setNotice, setPlanMode } from './state'
 import { planModeBlocked } from './model'
 import { serverToolNames } from './names'
 
@@ -205,6 +205,9 @@ async function start($: Engine, run: ClaimedRun): Promise<void> {
  * a turn and wait on background work, so only its status counts, not a turn
  * ending. Returns whether any run ended.
  */
+/** Why a run failed when plan mode stopped its agent before end_run. */
+export const PLAN_MODE_STOPPED = 'Plan mode stopped this run before it finished'
+
 export async function reconcile($: Engine): Promise<boolean> {
   const runs = await getRuns($)
   const ids = Object.keys(runs)
@@ -230,7 +233,10 @@ export async function reconcile($: Engine): Promise<boolean> {
       // `changed` is false when the agent called end_run: the run finished normally.
       // A refused call (plan mode) keeps the run here, so the next pass finishes it
       // instead of leaving it open until its time limit
-      if (!await failRun($, run.runId, 'failed', 'The agent ended without calling end_run').then(() => true, () => false)) continue
+      // Plan mode is still marked on during the first pass after it ends, so a run it
+      // stopped says so instead of reading like the agent broke
+      const why = await getPlanMode($) ? PLAN_MODE_STOPPED : 'The agent ended without calling end_run'
+      if (!await failRun($, run.runId, 'failed', why).then(() => true, () => false)) continue
     } else {
       continue
     }
