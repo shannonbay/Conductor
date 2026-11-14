@@ -14,7 +14,7 @@ import { reconcile, registerRunnerAgent, RUNNER_AGENT, startRunner, stopRunner }
 import { getActiveRun, getRuns, getSnapshot, PANE, setActiveRun } from './state'
 import { refresh, startPolling, stopPolling } from './sync'
 import { goalCommand, newGoal, registerCommands, registerTools, runTool, scheduleCommand, type ToolName } from './tools'
-import { todoCommand } from './todos'
+import { todoCommand, turnEnded, turnStarted } from './todos'
 import { serverToolNames } from './names'
 
 type Engine = EngineInterface
@@ -123,10 +123,19 @@ export const register: Register = (on, options) => {
 
   on('agent.offer', { agent: RUNNER_AGENT }, () => ({ isOffered: false }))
 
+  // The conversation mid-turn: a to-do's Plan / Start waits here (with Cancel) until it ends
+  on('turn.start', async ($, e, next) => {
+    if (!e.agentId) turnStarted()
+    return next(e)
+  }).catch(passOn)
+
   // A run's agent ending its work: finish the run now instead of at the next tick
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
-    if (!e.agentId) void safeStart($, false) // any turn of the conversation starts a reloaded plugin
+    if (!e.agentId) {
+      void safeStart($, false) // any turn of the conversation starts a reloaded plugin
+      void turnEnded($) // and sends a to-do held while it ran
+    }
     if (e.agentId && (await getRuns($))[e.agentId]) {
       $.clock.after(2_000, () => {
         void reconcile($).then((ended) => {

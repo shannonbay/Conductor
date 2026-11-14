@@ -17,8 +17,8 @@ import { chooseSchedule, rescheduleGoal } from './schedule'
 import { ago, allowRules, allowRulesPrompt, clip, discussPrompt, goalModelLabel, holdUntilText, isFailed, isQuiet, isWorking, lastRun, MODEL_CHOICES, modelName, nextRunText, permissionWhere, planModeBlocked, readModelAnswer, runCost, runsText, runTokens, spark, SPINNER_FRAMES, SPINNER_MS, updatePrompt } from './model'
 import { connectRemote } from './alerts'
 import { sendToChat } from './chat'
-import { advanceSpinner, getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getPlanMode, getRejecting, getRuns, getSnapshot, getSpinnerFrame, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
-import { addFromPane, askFromPane, editFromPane, toggleTodo, workFromPane } from './todos'
+import { advanceSpinner, getAddingTo, getAskingAbout, getBusy, getDiscussing, getEditingTodo, getHeldTodos, getConfirm, getExpanded, getGuardMissing, getNotice, getPhone, getPlanMode, getRejecting, getRuns, getSnapshot, getSpinnerFrame, getTodos, setAddingTo, setAskingAbout, setConfirm, setDiscussing, setEditingTodo, setRejecting, toggleExpanded } from './state'
+import { addFromPane, askFromPane, cancelHeldTodo, editFromPane, toggleTodo, workFromPane } from './todos'
 import { GUARD_MISSING, PLAN_MODE_ON } from './runner'
 import { act, refresh } from './sync'
 
@@ -97,6 +97,8 @@ export async function renderPane($: Engine, e: E) {
   const addingTo = await getAddingTo($)
   const askingAbout = await getAskingAbout($)
   const editing = await getEditingTodo($)
+  // Plan / Start pressed mid-turn: "<listId>/<itemId>" -> the mode it waits to send
+  const held = new Map((await getHeldTodos($)).map((h) => [`${h.list.id}/${h.item.id}`, h.mode]))
   const phone = await getPhone($)
 
   // Not read yet (a new session, or just after /clear): that is not a failed connection
@@ -189,7 +191,7 @@ export async function renderPane($: Engine, e: E) {
         // next section, none above a goal you opened, so its title stays where you pressed it
         ? quietLine($, e, view, g, i, oneLine[i + 1] || opened[i + 1] ? 0 : 1)
         : goalCard($, e, view, g, i)))}
-      {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo, askingAbout, editing)}
+      {todos && todos.lists.length > 0 && todoSection($, e, view, todos, addingTo, askingAbout, editing, held)}
       {done.length > 0 && doneSection($, e, view, done)}
       {message && <Text color="red">{message}</Text>}
       <Box>
@@ -633,7 +635,7 @@ function doneSection($: Engine, e: E, view: View, done: GoalCard[]) {
  * which goes back on the list when pressed. Ask… opens a box for the person's
  * question; Enter on an empty box asks for Claude's opinion.
  */
-function todoSection($: Engine, e: E, view: View, todos: Todos, addingTo: string | null, askingAbout: string | null, editing: string | null) {
+function todoSection($: Engine, e: E, view: View, todos: Todos, addingTo: string | null, askingAbout: string | null, editing: string | null, held: Map<string, 'plan' | 'start'>) {
   const { Box, Text, Button, Input } = $.ui.resolve(e)
   return (
     <Box key="todos" flexDirection="column" marginBottom={1}>
@@ -700,10 +702,12 @@ function todoSection($: Engine, e: E, view: View, todos: Todos, addingTo: string
                         <Text>{indent}    </Text>
                         {action($, e, { key: `todo-ask-${list.id}/${item.id}`, label: 'Ask…', onPress: () => void setAskingAbout($, `${list.id}/${item.id}`) })}
                         <Text> </Text>
-                        <Button key={`todo-plan-${list.id}/${item.id}`} label={view.doing === `todo-plan:${list.id}/${item.id}` ? 'Sending…' : 'Plan'} onPress={() => void workFromPane($, list, item, 'plan')} />
+                        <Button key={`todo-plan-${list.id}/${item.id}`} label={view.doing === `todo-plan:${list.id}/${item.id}` || held.get(`${list.id}/${item.id}`) === 'plan' ? 'Sending…' : 'Plan'} onPress={() => void workFromPane($, list, item, 'plan')} />
                         <Text> </Text>
-                        {action($, e, { key: `todo-start-${list.id}/${item.id}`, label: view.doing === `todo-start:${list.id}/${item.id}` ? 'Sending…' : 'Start', onPress: () => void workFromPane($, list, item, 'start') })}
+                        {action($, e, { key: `todo-start-${list.id}/${item.id}`, label: view.doing === `todo-start:${list.id}/${item.id}` || held.get(`${list.id}/${item.id}`) === 'start' ? 'Sending…' : 'Start', onPress: () => void workFromPane($, list, item, 'start') })}
                         <Text> </Text>
+                        {held.has(`${list.id}/${item.id}`) && action($, e, { key: `todo-cancel-${list.id}/${item.id}`, label: 'Cancel', onPress: () => void cancelHeldTodo($, list, item) })}
+                        {held.has(`${list.id}/${item.id}`) && <Text> </Text>}
                         {action($, e, { key: `todo-edit-${list.id}/${item.id}`, label: 'Edit', onPress: () => void setEditingTodo($, `${list.id}/${item.id}`) })}
                       </Box>
                       )}
